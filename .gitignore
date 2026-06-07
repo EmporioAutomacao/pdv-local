@@ -1,0 +1,22 @@
+# .NET / Avalonia
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# IDE
+.vscode/
+.idea/
+
+# Logs / local
+*.log
+.env
+.secrets/
+artifacts/
+
+# Local codex skill discovery cache/links
+.codex/
+
+# Claude Code memory (machine-specific)
+.claude/

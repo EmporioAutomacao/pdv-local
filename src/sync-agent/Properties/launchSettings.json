@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "SyncAgent": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

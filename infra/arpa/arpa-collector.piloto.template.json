@@ -1,0 +1,22 @@
+{
+  "ArpaCollector": {
+    "Enabled": true,
+    "ConnectionString": "Host=<arpa-host>;Port=5432;Database=<arpa-db>;Username=<read-only-user>",
+    "PasswordEnvironmentVariable": "",
+    "PasswordFile": "",
+    "PasswordProtectedFile": ".secrets/arpa/anapolis-runtime-password.dpapi",
+    "BatchSize": 100,
+    "Entities": [
+      {
+        "Name": "produtos",
+        "EntityType": "produto",
+        "Query": "SELECT entity_key, occurred_at_utc, payload_json, trace_id FROM sync_export.produtos WHERE occurred_at_utc > @watermark_utc ORDER BY occurred_at_utc, entity_key LIMIT @limit"
+      },
+      {
+        "Name": "clientes",
+        "EntityType": "cliente",
+        "Query": "SELECT entity_key, occurred_at_utc, payload_json, trace_id FROM sync_export.clientes WHERE occurred_at_utc > @watermark_utc ORDER BY occurred_at_utc, entity_key LIMIT @limit"
+      }
+    ]
+  }
+}

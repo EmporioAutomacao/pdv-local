@@ -1,0 +1,301 @@
+<Window x:Class="PdvLocal.App.CashSessionSalesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Vendas do Caixa"
+        Width="680"
+        Height="560"
+        MinWidth="540"
+        MinHeight="440"
+        Background="#F8FAFC"
+        WindowStartupLocation="CenterOwner"
+        Loaded="Window_Loaded">
+    <Window.Resources>
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="#374151" />
+            <Setter Property="BorderBrush" Value="#D1D5DB" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DangerButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#DC2626" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#DC2626" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#64748B" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+        <Style x:Key="FieldInputStyle" TargetType="TextBox">
+            <Setter Property="BorderBrush" Value="#D1D5DB" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Cabeçalho -->
+        <Border Grid.Row="0"
+                Background="White"
+                BorderBrush="#E2E8F0"
+                BorderThickness="0,0,0,1"
+                Padding="18,14">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="RefreshSalesButton"
+                            Content="Atualizar"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="RefreshSalesButton_Click" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Vendas do Caixa"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="#0F172A" />
+                    <TextBlock x:Name="SessionInfoText"
+                               Foreground="#64748B"
+                               FontSize="13"
+                               Margin="0,3,0,0" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Grid de vendas -->
+        <DataGrid Grid.Row="1"
+                  x:Name="SalesGrid"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  CanUserReorderColumns="False"
+                  CanUserResizeRows="False"
+                  SelectionMode="Single"
+                  GridLinesVisibility="Horizontal"
+                  HorizontalGridLinesBrush="#F1F5F9"
+                  RowBackground="White"
+                  AlternatingRowBackground="#FAFAFA"
+                  BorderThickness="0"
+                  HeadersVisibility="Column"
+                  FontSize="13"
+                  SelectionChanged="SalesGrid_SelectionChanged">
+            <DataGrid.ColumnHeaderStyle>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="Background" Value="#F8FAFC" />
+                    <Setter Property="Foreground" Value="#64748B" />
+                    <Setter Property="FontSize" Value="11" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                    <Setter Property="Padding" Value="10,8" />
+                    <Setter Property="BorderBrush" Value="#E2E8F0" />
+                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                </Style>
+            </DataGrid.ColumnHeaderStyle>
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell">
+                    <Setter Property="Padding" Value="10,7" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="#EFF6FF" />
+                            <Setter Property="Foreground" Value="#1E40AF" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.CellStyle>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsCancelled}" Value="True">
+                            <Setter Property="Foreground" Value="#94A3B8" />
+                            <Setter Property="FontStyle" Value="Italic" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Número"
+                                    Binding="{Binding SaleNumber}"
+                                    Width="150"
+                                    FontFamily="Consolas"
+                                    FontSize="12" />
+                <DataGridTextColumn Header="Hora"
+                                    Binding="{Binding TimeText}"
+                                    Width="55" />
+                <DataGridTextColumn Header="Itens"
+                                    Binding="{Binding ItemCount}"
+                                    Width="50">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="HorizontalAlignment" Value="Right" />
+                            <Setter Property="Padding" Value="10,7" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Total"
+                                    Binding="{Binding TotalText}"
+                                    Width="90">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="HorizontalAlignment" Value="Right" />
+                            <Setter Property="Padding" Value="10,7" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Pagamentos"
+                                    Binding="{Binding PaymentMethods}"
+                                    Width="*" />
+                <DataGridTemplateColumn Header="Status" Width="100">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding SyncLabel}"
+                                       Foreground="{Binding SyncColor}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       Padding="10,7" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- Painel de cancelamento (oculto por padrão) -->
+        <Border Grid.Row="2"
+                x:Name="CancellationPanel"
+                Background="#FFF7ED"
+                BorderBrush="#F59E0B"
+                BorderThickness="0,2,0,0"
+                Padding="18,14"
+                Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="CancelTitleText"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Foreground="#92400E"
+                           Margin="0,0,0,10" />
+
+                <StackPanel Orientation="Horizontal">
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="LOGIN SUPERVISOR" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBox x:Name="CancelSupervisorTextBox"
+                                 Style="{StaticResource FieldInputStyle}"
+                                 Width="160"
+                                 KeyDown="CancelSupervisorTextBox_KeyDown" />
+                    </StackPanel>
+
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="MOTIVO" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBox x:Name="CancelReasonTextBox"
+                                 Style="{StaticResource FieldInputStyle}"
+                                 Width="220"
+                                 KeyDown="CancelReasonTextBox_KeyDown" />
+                    </StackPanel>
+
+                    <StackPanel VerticalAlignment="Bottom" Margin="0,0,8,0">
+                        <Button Content="Confirmar cancelamento"
+                                Style="{StaticResource DangerButtonStyle}"
+                                Click="ConfirmCancelButton_Click" />
+                    </StackPanel>
+
+                    <StackPanel VerticalAlignment="Bottom">
+                        <Button Content="Descartar"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Click="DiscardCancelButton_Click" />
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock x:Name="CancelErrorText"
+                           Foreground="#B91C1C"
+                           FontSize="12"
+                           Margin="0,8,0,0"
+                           Visibility="Collapsed"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <!-- Rodapé com totais -->
+        <Border Grid.Row="3"
+                Background="#F1F5F9"
+                BorderBrush="#E2E8F0"
+                BorderThickness="0,1,0,0"
+                Padding="18,10">
+            <DockPanel LastChildFill="True">
+                <TextBlock x:Name="SummaryCountText"
+                           DockPanel.Dock="Left"
+                           Foreground="#64748B"
+                           FontSize="13"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="SummaryTotalText"
+                           DockPanel.Dock="Right"
+                           FontSize="15"
+                           FontWeight="Bold"
+                           Foreground="#0F172A"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="LoadingText"
+                           Text="Carregando..."
+                           Foreground="#64748B"
+                           FontSize="13"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Visibility="Visible" />
+            </DockPanel>
+        </Border>
+
+        <!-- Botão fechar -->
+        <Border Grid.Row="4"
+                Background="White"
+                BorderBrush="#E2E8F0"
+                BorderThickness="0,1,0,0"
+                Padding="18,12">
+            <Button Content="Fechar"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Right"
+                    Click="CloseButton_Click"
+                    IsCancel="True" />
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,269 @@
+# Coletor Arpa - Preparacao do Piloto
+
+Data: 30/05/2026
+
+## Objetivo
+
+Preparar a primeira coleta real read-only do Arpa para o SyncAgent, iniciando
+por `produto` e `cliente`.
+
+## Decisao
+
+O SyncAgent nao deve consultar diretamente tabelas internas do Arpa. Para o
+piloto, o Arpa deve expor views read-only no schema `sync_export`:
+
+```text
+sync_export.produtos
+sync_export.clientes
+```
+
+Isso isola o SyncAgent do schema interno do Arpa e permite ajustar mapeamentos
+no lado Arpa sem mudar o agente.
+
+Regra de seguranca:
+
+```text
+docs/arpa-readonly-security-policy.md
+```
+
+O SyncAgent nunca grava no banco Arpa. O usuario runtime deve ser estritamente
+read-only.
+
+## Contrato das views
+
+Cada view deve retornar:
+
+```text
+entity_key text
+occurred_at_utc timestamptz
+payload_json text
+trace_id text opcional
+```
+
+Regras:
+
+- `entity_key` deve ser estavel por entidade;
+- `occurred_at_utc` deve representar criacao/alteracao em UTC;
+- `payload_json` deve ser JSON valido;
+- a query precisa ser ordenavel por `occurred_at_utc`;
+- o usuario do SyncAgent deve ter somente permissao de leitura.
+
+Contrato estrutural:
+
+```text
+infra/arpa/sync-export-views-contract.sql
+```
+
+Fixture local para desenvolvimento:
+
+```text
+infra/arpa/sync-export-dev-fixture.sql
+```
+
+Template de configuracao do collector:
+
+```text
+infra/arpa/arpa-collector.piloto.template.json
+```
+
+## Preflight
+
+Antes de habilitar o coletor, validar as views com:
+
+```powershell
+.\infra\windows\test-arpa-export-preflight.ps1 `
+  -PostgresHost "<arpa-host>" `
+  -DatabaseName "<arpa-db>" `
+  -DatabaseUser "<read-only-user>"
+```
+
+O script le a senha da variavel de ambiente
+`ARPA_SYNC_READONLY_PASSWORD`. Evite passar senha na linha de comando.
+
+Em desenvolvimento local com o Postgres em Docker:
+
+```powershell
+$env:ARPA_SYNC_READONLY_PASSWORD = "pdv_sync"
+.\infra\windows\test-arpa-export-preflight.ps1 `
+  -DockerContainer "pdv-local-postgres" `
+  -PostgresHost "localhost" `
+  -DatabaseName "pdv_sync" `
+  -DatabaseUser "pdv_sync"
+```
+
+O script valida:
+
+- existencia das views;
+- colunas obrigatorias;
+- consulta de uma amostra por view.
+
+Nao usar usuario administrador do Arpa no SyncAgent.
+
+Validar tambem permissoes read-only:
+
+```powershell
+$env:ARPA_SYNC_READONLY_PASSWORD = "<senha-read-only>"
+.\infra\windows\test-arpa-readonly-permissions.ps1 `
+  -PostgresHost "<arpa-host>" `
+  -DatabaseName "<arpa-db>" `
+  -DatabaseUser "<read-only-user>"
+```
+
+## Geracao assistida das views
+
+Existe uma integracao legada no ERP que ja usa candidatos de tabela/coluna do
+Arpa. Para acelerar o piloto, o script abaixo inspeciona
+`information_schema.columns` e gera um SQL candidato para as views
+`sync_export.produtos` e `sync_export.clientes`.
+
+O script nao aplica nada automaticamente.
+
+```powershell
+$env:ARPA_SYNC_READONLY_PASSWORD = "<senha-read-only>"
+.\infra\windows\new-arpa-sync-export-views-candidate.ps1 `
+  -PostgresHost "<arpa-host>" `
+  -DatabaseName "<arpa-db>" `
+  -DatabaseUser "<read-only-user>" `
+  -OutputFile ".\infra\arpa\sync-export-views.generated.sql"
+```
+
+Tabelas candidatas:
+
+- produto: `public.produtos` ou `public.produto`;
+- cliente: `public.clientes` ou `public.cliente`.
+
+O arquivo gerado deve ser revisado antes de aplicar em homologacao.
+
+Observacao sobre watermark:
+
+- coluna de alteracao real, como `updated_at_utc` ou `data_alteracao`, permite
+  coleta incremental continua;
+- coluna de cadastro, como `datacad`, serve para carga inicial e novos
+  cadastros, mas pode nao capturar alteracoes posteriores;
+- ausencia de coluna temporal confiavel exige decisao antes de habilitar sync
+  continuo.
+- a view deve converter status/ativo do Arpa para booleano canonico. No Arpa
+  legado de produtos, `ativo=0` representa produto ativo.
+
+Quando nao for possivel dar acesso direto ao ambiente, gerar primeiro um
+diagnostico do schema:
+
+```powershell
+$env:ARPA_SYNC_READONLY_PASSWORD = "<senha-read-only>"
+.\infra\windows\export-arpa-schema-diagnostics.ps1 `
+  -PostgresHost "<arpa-host>" `
+  -DatabaseName "<arpa-db>" `
+  -DatabaseUser "<read-only-user>" `
+  -OutputFile ".\artifacts\arpa-schema-diagnostics.json"
+```
+
+O JSON gerado nao contem dados de clientes/produtos nem senha. Ele contem
+apenas nomes de tabelas, colunas e candidatos detectados para o mapeamento.
+
+Com o diagnostico em maos, gere o SQL candidato:
+
+```powershell
+.\infra\windows\new-arpa-sync-export-views-from-diagnostics.ps1 `
+  -DiagnosticsFile ".\artifacts\arpa-schema-diagnostics.json" `
+  -OutputFile ".\infra\arpa\sync-export-views.generated.sql"
+```
+
+Se alguma entidade nao tiver coluna temporal confiavel, o script bloqueia. Para
+gerar uma versao apenas para carga inicial controlada:
+
+```powershell
+.\infra\windows\new-arpa-sync-export-views-from-diagnostics.ps1 `
+  -DiagnosticsFile ".\artifacts\arpa-schema-diagnostics.json" `
+  -OutputFile ".\infra\arpa\sync-export-views.initial-load.sql" `
+  -AllowInitialLoadOnly
+```
+
+Nao usar o modo `-AllowInitialLoadOnly` como sincronizacao continua sem decisao
+tecnica sobre watermark.
+
+## Habilitacao controlada
+
+Conexao escolhida para o primeiro piloto real:
+
+```text
+docs/arpa-piloto-anapolis.md
+```
+
+Decisao de watermark para produtos:
+
+```text
+docs/arpa-produtos-watermark-decision.md
+```
+
+1. Usar a conexao Anapolis (`id=1`).
+2. Revisar o SQL de carga inicial em `infra/arpa/sync-export-views-anapolis.initial-load.sql`.
+3. Aplicar views `sync_export.produtos` e `sync_export.clientes` no Arpa escolhido.
+5. Criar usuario read-only para o SyncAgent, se ainda nao existir.
+6. Executar preflight de permissao read-only.
+7. Executar preflight das views.
+8. Copiar o template para configuracao local segura.
+9. Habilitar apenas `produto` e `cliente`.
+10. Manter `ErpDispatcher:Enabled=false` no primeiro ciclo, se a validacao for somente de coleta local.
+11. Conferir outbox local.
+12. Habilitar dispatcher para enviar ao ERP de homologacao.
+13. Executar smoke test com ERP.
+14. Verificar status central e reconciliacao.
+
+Aplicacao das views, somente apos escolher a conexao:
+
+```powershell
+$env:ARPA_SYNC_READONLY_PASSWORD = "<senha-read-only>"
+.\infra\windows\apply-arpa-sync-export-views.ps1 `
+  -SqlFile ".\infra\arpa\sync-export-views.initial-load.sql" `
+  -PostgresHost "<arpa-host>" `
+  -DatabaseName "<arpa-db>" `
+  -ExpectedDatabaseName "<arpa-db>" `
+  -DatabaseUser "<read-only-or-ddl-user>" `
+  -ConfirmApply
+```
+
+Mesmo depois de aplicar, o collector so deve ser habilitado apos o preflight.
+
+## Evidencias esperadas
+
+- preflight Arpa OK;
+- `pending_outbox_events` aumenta apos primeira coleta local;
+- dispatcher envia eventos e pendencias voltam a `0`;
+- ERP registra eventos recebidos;
+- `last_reconciliation_matched=true`;
+- `dead_letter_events=0`.
+
+## Validacao local com fixture
+
+Validado em 30/05/2026 usando:
+
+```text
+infra/arpa/sync-export-dev-fixture.sql
+ERP local: http://127.0.0.1:8000
+instance_id: piloto-win-01
+tenant_id: piloto-homologacao
+```
+
+Resultado:
+
+- preflight das views `sync_export.produtos` e `sync_export.clientes`: OK;
+- collector leu 1 `produto` e 1 `cliente`;
+- normalizadores geraram payload canonico;
+- dispatcher enviou 1 lote ao ERP;
+- ERP recebeu 2 eventos nas ultimas 24h;
+- eventos locais ficaram `accepted`;
+- `pending_outbox_events=0`;
+- `dead_letter_events=0`;
+- status central ERP: `connectivity=online`;
+- reconciliacao remota: `matched=true`.
+
+## NO-GO
+
+Nao habilitar envio real se:
+
+- views nao existirem;
+- `payload_json` nao for JSON valido;
+- `occurred_at_utc` estiver em horario local sem timezone;
+- usuario do SyncAgent tiver permissao de escrita no Arpa;
+- houver dados sensiveis desnecessarios no payload;
+- normalizadores gerarem dead-letter em massa.

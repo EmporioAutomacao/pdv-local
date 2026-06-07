@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg17
+    container_name: pdv-local-postgres
+    environment:
+      POSTGRES_DB: pdv_sync
+      POSTGRES_USER: pdv_sync
+      POSTGRES_PASSWORD: pdv_sync
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
+    ports:
+      - "55432:5432"
+    volumes:
+      - pdv-sync-postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdv_sync -d pdv_sync"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pdv-sync-postgres-data:
