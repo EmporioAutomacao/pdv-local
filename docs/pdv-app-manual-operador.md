@@ -166,7 +166,7 @@ abre a janela de consulta de vendas da sessão atual. A janela exibe:
 
 | Coluna | Conteúdo |
 |--------|----------|
-| Número | Código único da venda (`PDV-yyyyMMddHHmmss`) |
+| Número | Código único da venda (`PDV-yyyyMMddHHmmssfff`) |
 | Hora | Horário de finalização (fuso local) |
 | Itens | Quantidade de linhas de produto |
 | Total | Valor total da venda |
@@ -175,11 +175,13 @@ abre a janela de consulta de vendas da sessão atual. A janela exibe:
 
 O status de sincronização exibe:
 
-| Status | Significado |
-|--------|-------------|
-| Sincronizado | Enviado ao ERP com sucesso |
-| Pendente | Aguardando próxima janela de sync |
-| Erro | Falha na sincronização — verificar SyncAgent |
+| Status | Cor | Significado |
+|--------|-----|-------------|
+| Sincronizado | Verde | Aceito pelo ERP com sucesso |
+| Enviado | Azul | Transmitido ao ERP, aguardando confirmação |
+| Pendente | Âmbar | Aguardando próxima janela de sincronização |
+| Rejeitado | Vermelho | Falha na sincronização — verificar SyncAgent |
+| Cancelado | Cinza | Venda cancelada (aparece em itálico na lista) |
 
 O rodapé da janela mostra o total de vendas finalizadas e a soma dos valores da sessão (excluindo canceladas). Vendas canceladas aparecem em itálico cinza.
 
@@ -226,6 +228,18 @@ O sistema valida que o supervisor está ativo e tem papel supervisor/admin. A ve
 
 ---
 
+## Ajuda rápida
+
+Pressione **F1** em qualquer momento para abrir a janela de ajuda integrada. Ela exibe em uma única tela:
+
+- **Atalhos globais** — teclas de função disponíveis em qualquer campo
+- **Atalhos por campo** — Enter, Delete e setas em cada área da tela
+- **Sinais visuais** — significado das cores e indicadores de status
+
+A janela de ajuda não interrompe a venda em andamento.
+
+---
+
 ## Monitoramento do sistema
 
 O **banner** no topo da tela indica o estado da conexão:
@@ -261,6 +275,7 @@ Para ver detalhes técnicos (heartbeat, banco, erros), clique em
 | `Enter` | Valor recebido | Adicionar pagamento |
 | `Delete` | Pagamento selecionado | Remover pagamento (requer autorização) |
 | `Enter` | Login supervisor | Autorizar supervisor |
+| `F1` | Qualquer tela | Abrir ajuda (atalhos e referência rápida) |
 | `F2` | Qualquer tela | Nova venda |
 | `F8` | Qualquer tela (caixa aberto) | Abrir consulta de vendas do caixa |
 | `F9` | Qualquer tela (após 1ª venda) | Reimprimir último comprovante |
@@ -281,3 +296,5 @@ Para ver detalhes técnicos (heartbeat, banco, erros), clique em
   informe o valor, Enter.
 - **Tudo pelo teclado**: do login ao fechamento de caixa, nenhuma ação obriga o uso
   do mouse.
+- **Dúvida rápida?** Pressione **F1** — a janela de ajuda com todos os atalhos e
+  sinais visuais abre sem interromper a venda em andamento.

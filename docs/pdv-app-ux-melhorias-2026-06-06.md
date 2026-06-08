@@ -1,13 +1,14 @@
 # PDV App — Análise de melhorias de UX e velocidade de venda
 
-Data da análise: 2026-06-06
+Data da análise: 2026-06-06 · **Implementação concluída: 2026-06-06**
 
 ## Contexto
 
 Análise do layout e do processo de venda do PDV App (WPF) com foco em
 identificar friction points que tornam o fluxo de caixa mais lento que o
 necessário. A base analisada é o `MainWindow.xaml` e `MainWindow.xaml.cs`
-na revisão atual da branch `main`.
+na revisão atual da branch `main`. Todos os 12 pontos identificados foram
+implementados na mesma sprint.
 
 ---
 
@@ -221,20 +222,20 @@ destaque. Quando o desconto está ativo, o operador pode não perceber.
 
 ## Tabela de prioridades
 
-| # | Melhoria | Impacto | Esforço | Fase sugerida |
-|---|----------|---------|---------|---------------|
-| P1 | Enter para adicionar pagamento e autorizar supervisor | Alto | Baixo | Próxima sprint |
-| P2 | Auto-preencher "Valor recebido" com restante | Alto | Baixo | Próxima sprint |
-| P3 | Foco em `QuantityTextBox` após selecionar produto | Alto | Baixo | Próxima sprint |
-| P4 | Atalhos de teclado F2/F12/Esc | Alto | Baixo | Próxima sprint |
-| P5 | Grid de busca com altura dinâmica | Médio | Baixo | Próxima sprint |
-| P6 | Scroll automático no carrinho | Médio | Baixo | Próxima sprint |
-| P7 | Indicador de venda em andamento no cabeçalho | Médio | Baixo | Próxima sprint |
-| P11 | Grid de pagamentos com altura dinâmica | Baixo | Baixo | Próxima sprint |
-| P12 | Destaque visual no campo de desconto ativo | Baixo | Baixo | Próxima sprint |
-| P8 | Colapsar painel técnico na coluna direita | Alto | Médio | Sprint seguinte |
-| P9 | Mover cards de monitoramento para fora da coluna de venda | Médio | Médio | Sprint seguinte |
-| P10 | Autorização de supervisor com escopo de sessão | Alto | Médio | Sprint seguinte |
+| # | Melhoria | Impacto | Esforço | Status |
+|---|----------|---------|---------|--------|
+| P1 | Enter para adicionar pagamento e autorizar supervisor | Alto | Baixo | ✓ Implementado |
+| P2 | Auto-preencher "Valor recebido" com restante | Alto | Baixo | ✓ Implementado |
+| P3 | Foco em `QuantityTextBox` após selecionar produto | Alto | Baixo | ✓ Implementado |
+| P4 | Atalhos de teclado F2/F12/Esc | Alto | Baixo | ✓ Implementado |
+| P5 | Grid de busca com altura dinâmica | Médio | Baixo | ✓ Implementado |
+| P6 | Scroll automático no carrinho | Médio | Baixo | ✓ Implementado |
+| P7 | Indicador de venda em andamento no cabeçalho | Médio | Baixo | ✓ Implementado |
+| P11 | Grid de pagamentos com altura dinâmica | Baixo | Baixo | ✓ Implementado |
+| P12 | Destaque visual no campo de desconto ativo | Baixo | Baixo | ✓ Implementado |
+| P8 | Colapsar painel técnico na coluna direita | Alto | Médio | ✓ Implementado |
+| P9 | Mover cards de monitoramento para fora da coluna de venda | Médio | Médio | ✓ Implementado |
+| P10 | Autorização de supervisor com escopo de sessão | Alto | Médio | ✓ Implementado |
 
 ---
 

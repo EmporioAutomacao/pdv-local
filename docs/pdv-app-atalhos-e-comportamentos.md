@@ -11,6 +11,13 @@ e as regras de negócio associadas.
 Implementados no handler `MainWindow_KeyDown` (`MainWindow.xaml.cs`).
 Disparam de qualquer campo da janela.
 
+### F1 — Ajuda
+
+- **Condição:** sempre disponível.
+- Abre `HelpWindow` via `HelpButton_Click`.
+- Exibe atalhos globais, atalhos por campo e sinais visuais em três DataGrids.
+- Comportamento idêntico ao botão **F1 Ajuda** no cabeçalho.
+
 ### F8 — Vendas do caixa
 
 - **Condição:** caixa aberto (`CashSalesButton.IsEnabled == true`).
@@ -221,8 +228,9 @@ venda enquanto o comprovante ainda está visível.
 
 | Status retornado | Texto exibido | Cor | Timer |
 |-----------------|---------------|-----|-------|
-| `synced` | "Sincronizado com o ERP." | DarkGreen | Para |
-| `sync_error` | "Erro na sincronizacao. Verifique o SyncAgent." | DarkRed | Para |
+| `accepted` | "Sincronizado com o ERP." | DarkGreen | Para |
+| `sent` | "Enviado ao ERP — aguardando confirmação." | DarkBlue | Continua |
+| `rejected` | "Erro na sincronização. Verifique o SyncAgent." | DarkRed | Para |
 | outros | *(sem alteração — continua "Aguardando...")* | — | Continua |
 
 - Timer para em `OnClosed` (descarte limpo).
@@ -382,15 +390,64 @@ SELECT
     s.completed_at_utc,
     s.total_amount,
     s.sync_status,
+    s.status,
     COUNT(DISTINCT si.sale_item_id)::int           AS item_count,
     COALESCE(STRING_AGG(DISTINCT p.payment_method, ', '), '-') AS payment_methods
 FROM pdv.sales s
 LEFT JOIN pdv.sale_items si ON si.sale_id = s.sale_id
 LEFT JOIN pdv.payments   p  ON p.sale_id  = s.sale_id
 WHERE s.cash_session_id = @cash_session_id
-GROUP BY s.sale_id, s.sale_number, s.completed_at_utc, s.total_amount, s.sync_status
+  AND s.status != 'draft'
+GROUP BY s.sale_id, s.sale_number, s.completed_at_utc, s.total_amount, s.sync_status, s.status
 ORDER BY s.completed_at_utc DESC
 ```
+
+---
+
+## HelpWindow
+
+### Abertura
+
+- Atalho: **F1** (global, qualquer campo) via `MainWindow_KeyDown`.
+- Botão **F1 Ajuda** no cabeçalho da janela principal via `HelpButton_Click`.
+- Janela modal em relação à janela principal (`ShowDialog`).
+
+### Estrutura de dados
+
+Arquivo `HelpWindow.xaml.cs` — três listas estáticas:
+
+**GlobalShortcuts** — `List<HelpRow>` com colunas Key / Condition / Action:
+
+| Key | Condition | Action |
+|-----|-----------|--------|
+| F1 | Qualquer tela | Abrir esta janela de ajuda |
+| F2 | Qualquer tela | Nova venda (exige supervisor se houver itens) |
+| F8 | Caixa aberto | Abrir consulta de vendas do caixa |
+| F9 | Após 1ª venda | Reimprimir último comprovante de venda |
+| F12 | Qualquer tela | Finalizar venda |
+| Esc | Produto selecionado | Cancelar seleção de produto e limpar campos |
+
+**FieldShortcuts** — mesmas colunas, inclui atalhos da `CashSessionSalesWindow`:
+
+| Key | Campo | Action |
+|-----|-------|--------|
+| Enter | Login supervisor (cancel.) | Avançar para campo Motivo |
+| Enter | Motivo (cancelamento) | Confirmar cancelamento de venda |
+
+**VisualCues** — `List<HelpRow>` com duas colunas (Key = elemento, Action = sinal visual); Condition vazio via sobrecarga do construtor.
+
+### `HelpRow` record
+
+```csharp
+internal sealed record HelpRow(string Key, string Condition, string Action)
+{
+    internal HelpRow(string key, string action) : this(key, string.Empty, action) { }
+}
+```
+
+### Estrutura XAML
+
+Arquivo `HelpWindow.xaml` — janela 640×560, três `DataGrid` em `ScrollViewer` vertical, sem `AutoGenerateColumns`. Headers: "ATALHOS GLOBAIS", "ATALHOS POR CAMPO", "SINAIS VISUAIS".
 
 ---
 
