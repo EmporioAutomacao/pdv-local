@@ -246,6 +246,48 @@ public sealed class PdvValidationTests
         Assert.Throws<ArgumentException>(() => PdvProductRepository.ValidateManualProduct(command));
     }
 
+    [Fact]
+    public void ValidateCompletedSale_accepts_sale_with_valid_audit_event()
+    {
+        var command = BuildSaleCommand(totalPayment: 19) with
+        {
+            AuditEvents =
+            [
+                new CompletedSaleAuditCommand("sale_discount_applied", Guid.NewGuid(), "Desconto autorizado")
+            ]
+        };
+
+        PdvValidation.ValidateCompletedSale(command);
+    }
+
+    [Fact]
+    public void ValidateCompletedSale_rejects_audit_event_with_empty_operation_type()
+    {
+        var command = BuildSaleCommand(totalPayment: 19) with
+        {
+            AuditEvents =
+            [
+                new CompletedSaleAuditCommand("", Guid.NewGuid(), "Motivo")
+            ]
+        };
+
+        Assert.Throws<ArgumentException>(() => PdvValidation.ValidateCompletedSale(command));
+    }
+
+    [Fact]
+    public void ValidateCompletedSale_rejects_audit_event_with_empty_supervisor()
+    {
+        var command = BuildSaleCommand(totalPayment: 19) with
+        {
+            AuditEvents =
+            [
+                new CompletedSaleAuditCommand("sale_discount_applied", Guid.Empty, "Motivo")
+            ]
+        };
+
+        Assert.Throws<ArgumentException>(() => PdvValidation.ValidateCompletedSale(command));
+    }
+
     private static CompletedSaleCommand BuildSaleCommand(decimal totalPayment)
     {
         return new CompletedSaleCommand(
