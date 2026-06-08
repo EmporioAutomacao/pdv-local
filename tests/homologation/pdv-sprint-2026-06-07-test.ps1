@@ -571,6 +571,62 @@ if ($salesWnd) {
     Pass 'T10_window_closed'
 } else { Fail 'T10_f8_opens' 'CashSessionSalesWindow nao abriu em 8s' }
 
+# --- T11: SUPRIMENTO DE CAIXA ---
+Log "--- T11: Suprimento de caixa ---"
+setWnd $main
+Start-Sleep -Milliseconds 500
+
+# Autorizar supervisor com motivo explicito para o suprimento
+$supFld = wEl $main 'SupervisorLoginTextBox' 3
+if ($supFld) {
+    setVal $supFld 'admin'
+    $reasFld = wEl $main 'SupervisorReasonTextBox' 3
+    if ($reasFld) { setVal $reasFld 'Suprimento teste sprint' }
+    clickEl (wEl $main 'AuthorizeSupervisorButton' 5); Start-Sleep -Seconds 1
+}
+
+$movAmtFld = wEl $main 'CashMovementAmountTextBox' 5
+if ($movAmtFld) {
+    setVal $movAmtFld '50,00'
+    $supplyBtn = wEl $main 'CashSupplyButton' 3
+    if ($supplyBtn) {
+        clickEl $supplyBtn; Start-Sleep -Seconds 2
+        $msgEl = wEl $main 'OperationMessageValue' 3
+        $msgTxt = if ($msgEl) { gEl $msgEl } else { '' }
+        # Sucesso: "Suprimento registrado com auditoria. ID: ..."
+        if ($msgTxt -like '*registrado*') { Pass 'T11_supply_ok' $msgTxt }
+        else { Fail 'T11_supply_ok' "Mensagem: '$msgTxt'" }
+    } else { Fail 'T11_supply_ok' 'CashSupplyButton nao encontrado' }
+} else { Fail 'T11_supply_ok' 'CashMovementAmountTextBox nao encontrado' }
+
+# --- T12: FECHAR CAIXA ---
+Log "--- T12: Fechar caixa ---"
+# ClosingAmountTextBox ja e preenchido automaticamente com ExpectedCashAmount apos cada operacao
+$closeCashBtn = wEl $main 'CloseCashButton' 5
+if ($closeCashBtn) {
+    clickEl $closeCashBtn; Start-Sleep -Seconds 2
+    # Apos fechar: _currentCashSession = null → CloseCashButton.IsEnabled = false
+    if (-not $closeCashBtn.Current.IsEnabled) {
+        Pass 'T12_cash_closed'
+    } else {
+        $msgEl = wEl $main 'OperationMessageValue' 3
+        $msgTxt = if ($msgEl) { gEl $msgEl } else { '' }
+        Fail 'T12_cash_closed' "CloseCashButton ainda habilitado. Msg: '$msgTxt'"
+    }
+    # SaleGateValue deve indicar caixa bloqueado
+    $gateEl = wEl $main 'SaleGateValue' 3
+    if ($gateEl) {
+        $gateTxt = gEl $gateEl
+        if ($gateTxt -like '*bloqueada*') { Pass 'T12_sale_gate_blocked' $gateTxt }
+        else { Fail 'T12_sale_gate_blocked' "SaleGate: '$gateTxt'" }
+    }
+    # OperationMessageValue deve confirmar fechamento
+    $msgEl2 = wEl $main 'OperationMessageValue' 3
+    $msgTxt2 = if ($msgEl2) { gEl $msgEl2 } else { '' }
+    if ($msgTxt2 -like '*Caixa fechado*') { Pass 'T12_close_message' $msgTxt2 }
+    else { Fail 'T12_close_message' "Mensagem: '$msgTxt2'" }
+} else { Fail 'T12_cash_closed' 'CloseCashButton nao encontrado' }
+
 # --- ENCERRAR ---
 Get-Process PdvLocal.App -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
