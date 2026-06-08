@@ -139,6 +139,7 @@ try {
     if (Test-Path -LiteralPath $pdvAppConfigPath) {
         $pdvAppConfigText = Get-Content -LiteralPath $pdvAppConfigPath -Raw
         Add-Check $checks "pdv_app_config_has_local_api" ($pdvAppConfigText -match '"LocalApiBaseUrl"\s*:\s*"http://127\.0\.0\.1:47891"') "PDV App aponta para API local do SyncAgent."
+        Add-Check $checks "pdv_app_config_has_tef" ($pdvAppConfigText -match '"Tef"') "PDV App tem secao Tef no appsettings."
     }
 }
 catch {

@@ -127,6 +127,10 @@ function Write-PdvAppConfig {
         SyncAgent = @{
             LocalApiBaseUrl = "http://127.0.0.1:47891"
         }
+        Tef = @{
+            Mode     = "Simulated"
+            Provider = "simulated"
+        }
     }
 
     $config | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
