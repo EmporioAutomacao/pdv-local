@@ -198,6 +198,16 @@ public partial class CashSessionSalesWindow : Window
         CancelErrorText.Visibility = Visibility.Visible;
     }
 
+    private void AutoSelectFirstSaleBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SalesGrid.ItemsSource is List<SaleSummaryRow> rows)
+        {
+            var first = rows.FirstOrDefault(r => r.IsCompleted);
+            if (first != null)
+                SalesGrid.SelectedItem = first;
+        }
+    }
+
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 }
 

@@ -89,6 +89,11 @@
                             Content="Atualizar"
                             Style="{StaticResource SecondaryButtonStyle}"
                             Click="RefreshSalesButton_Click" />
+                    <!-- UIAutomation test hook: selects first completed sale without mouse/keyboard -->
+                    <Button x:Name="AutoSelectFirstSaleBtn"
+                            AutomationProperties.AutomationId="AutoSelectFirstSale"
+                            Width="2" Height="2" Opacity="0" Focusable="False"
+                            Click="AutoSelectFirstSaleBtn_Click" />
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="Vendas do Caixa"
@@ -211,7 +216,7 @@
                 BorderThickness="0,2,0,0"
                 Padding="18,14"
                 Visibility="Collapsed">
-            <StackPanel>
+            <StackPanel AutomationProperties.AutomationId="CancellationPanel">
                 <TextBlock x:Name="CancelTitleText"
                            FontSize="14"
                            FontWeight="SemiBold"
@@ -236,7 +241,8 @@
                     </StackPanel>
 
                     <StackPanel VerticalAlignment="Bottom" Margin="0,0,8,0">
-                        <Button Content="Confirmar cancelamento"
+                        <Button x:Name="ConfirmCancelButton"
+                                Content="Confirmar cancelamento"
                                 Style="{StaticResource DangerButtonStyle}"
                                 Click="ConfirmCancelButton_Click" />
                     </StackPanel>
