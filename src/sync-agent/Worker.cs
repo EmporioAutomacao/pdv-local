@@ -8,6 +8,7 @@ using SyncAgent.Persistence;
 using SyncAgent.Provisioning;
 using SyncAgent.Reconciliation;
 using SyncAgent.Runtime;
+using SyncAgent.Update;
 
 namespace SyncAgent;
 
@@ -28,6 +29,7 @@ public sealed class Worker : BackgroundService
     private readonly ErpActivationClient _erpActivationClient;
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
+    private readonly SelfUpdater _selfUpdater;
 
     public Worker(
         ILogger<Worker> logger,
@@ -44,7 +46,8 @@ public sealed class Worker : BackgroundService
         PdvSalesPublisher pdvSalesPublisher,
         ErpActivationClient erpActivationClient,
         ManualSyncSignal manualSyncSignal,
-        SyncAgentRuntimeState runtimeState)
+        SyncAgentRuntimeState runtimeState,
+        SelfUpdater selfUpdater)
     {
         _logger = logger;
         _options = options;
@@ -61,6 +64,7 @@ public sealed class Worker : BackgroundService
         _erpActivationClient = erpActivationClient;
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
+        _selfUpdater = selfUpdater;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -145,6 +149,13 @@ public sealed class Worker : BackgroundService
             storeStatus,
             connectivity,
             cancellationToken);
+
+        if (heartbeatSummary.PendingUpdate is { } pendingUpdate)
+        {
+            var triggered = await _selfUpdater.ApplyIfNeededAsync(pendingUpdate, cancellationToken);
+            if (triggered)
+                return;
+        }
 
         _logger.LogInformation(
             "Sync cycle completed. Trigger={Trigger}; Instance={InstanceId}; Tenant={ErpTenantId}; AgentVersion={AgentVersion}; ERP API={ErpApiBaseUrl}; CollectorEnabled={CollectorEnabled}; Collected={Collected}; Inserted={Inserted}; PdvSalesPublisherEnabled={PdvSalesPublisherEnabled}; PdvSalesPending={PdvSalesPending}; PdvSalesPublished={PdvSalesPublished}; PdvSalesSkipped={PdvSalesSkipped}; DispatcherEnabled={DispatcherEnabled}; Dispatched={Dispatched}; Accepted={Accepted}; Rejected={Rejected}; DispatchFailed={DispatchFailed}; ReconciliationId={ReconciliationId}; ReconciliationStatus={ReconciliationStatus}; RemoteReconciliationEnabled={RemoteReconciliationEnabled}; RemoteReconciliationSucceeded={RemoteReconciliationSucceeded}; RemoteReconciliationMatched={RemoteReconciliationMatched}; PdvOperatorSnapshotEnabled={PdvOperatorSnapshotEnabled}; PdvOperatorsReceived={PdvOperatorsReceived}; PdvOperatorsImported={PdvOperatorsImported}; PdvOperatorSnapshotSucceeded={PdvOperatorSnapshotSucceeded}; PdvProductSnapshotEnabled={PdvProductSnapshotEnabled}; PdvProductsReceived={PdvProductsReceived}; PdvProductsImported={PdvProductsImported}; PdvProductSnapshotSucceeded={PdvProductSnapshotSucceeded}; PdvPaymentMethodsSnapshotEnabled={PdvPaymentMethodsSnapshotEnabled}; PdvPaymentMethodsReceived={PdvPaymentMethodsReceived}; PdvPaymentMethodsImported={PdvPaymentMethodsImported}; PdvPaymentMethodsSnapshotSucceeded={PdvPaymentMethodsSnapshotSucceeded}; HeartbeatEnabled={HeartbeatEnabled}; HeartbeatSucceeded={HeartbeatSucceeded}; Connectivity={Connectivity}; Database={DatabaseName}; pgvector={PgVectorVersion}; Pending={PendingOutboxEvents}; DeadLetter={DeadLetterEvents}; OldestPendingAgeSeconds={OldestPendingAgeSeconds}",

@@ -5,9 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="PDV Local"
-        Height="760"
+        WindowState="Maximized"
         MinHeight="680"
-        Width="1220"
         MinWidth="1040"
         Background="#F8FAFC"
         Loaded="Window_Loaded"
@@ -558,34 +557,38 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Heartbeat" Style="{StaticResource LabelStyle}" />
-                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="HeartbeatValue" Text="-" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Versao PDV" Style="{StaticResource LabelStyle}" />
+                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="AppVersionValue" Text="-" TextWrapping="Wrap" />
 
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="pgvector" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PgVectorValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Heartbeat" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="HeartbeatValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Schema PDV" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="PdvSchemaValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="pgvector" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="PgVectorValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Operadores" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="OperatorsValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Schema PDV" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="PdvSchemaValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Produtos" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="ProductsValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Operadores" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="OperatorsValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Vendas" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="5" Grid.Column="1" x:Name="SalesValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Produtos" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="5" Grid.Column="1" x:Name="ProductsValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Instalacao" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="6" Grid.Column="1" x:Name="InstanceValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Vendas" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="6" Grid.Column="1" x:Name="SalesValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Text="ERP API" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="7" Grid.Column="1" x:Name="ErpApiValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Instalacao" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="7" Grid.Column="1" x:Name="InstanceValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Banco local" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="8" Grid.Column="1" x:Name="DatabaseValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="8" Grid.Column="0" Text="ERP API" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="8" Grid.Column="1" x:Name="ErpApiValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
+
+                                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Banco local" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
+                                    <TextBlock Grid.Row="9" Grid.Column="1" x:Name="DatabaseValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
                                 </Grid>
                             </Border>
 

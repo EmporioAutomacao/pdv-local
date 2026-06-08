@@ -15,4 +15,6 @@ public sealed class SyncAgentOptions
     public int PollingIntervalSeconds { get; init; } = 30;
 
     public int LocalStatusPort { get; init; } = 47891;
+
+    public bool SelfUpdateEnabled { get; init; } = true;
 }

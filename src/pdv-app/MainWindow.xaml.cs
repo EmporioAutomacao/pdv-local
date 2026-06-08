@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
@@ -85,6 +86,9 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        AppVersionValue.Text = typeof(MainWindow).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "desconhecida";
         await _operationAuditRepository.EnsureSchemaAsync(CancellationToken.None);
         await _cashMovementRepository.EnsureSchemaAsync(CancellationToken.None);
         await RefreshStatusAsync();

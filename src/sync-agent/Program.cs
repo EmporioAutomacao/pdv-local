@@ -11,6 +11,7 @@ using SyncAgent.Provisioning;
 using SyncAgent.Reconciliation;
 using SyncAgent.Runtime;
 using SyncAgent.Security;
+using SyncAgent.Update;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -89,6 +90,7 @@ builder.Services.AddHttpClient(PdvPaymentMethodsSnapshotHttpClient.Name)
 builder.Services.AddHttpClient(ErpActivationHttpClient.Name);
 builder.Services.AddSingleton<ManualSyncSignal>();
 builder.Services.AddSingleton<SyncAgentRuntimeState>();
+builder.Services.AddSingleton<SelfUpdater>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService<LocalStatusServer>();
 

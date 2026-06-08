@@ -6,7 +6,7 @@ param(
     [string]$InstanceId,
     [string]$ErpTenantId,
     [string]$ErpApiBaseUrl,
-    [string]$AgentVersion = "0.1.0",
+    [string]$AgentVersion = "1.0.0",
 
     [string]$AccessToken = "",
     [string]$TokenEnvironmentVariable = "PDV_SYNC_ERP_ACCESS_TOKEN",
@@ -514,6 +514,13 @@ if ($EnableArpaCollector) {
 
 Write-AgentConfig -ConfigPath (Join-Path $syncAgentInstallDir "appsettings.json")
 Write-PdvAppConfig -ConfigPath (Join-Path $pdvAppInstallDir "appsettings.json")
+
+# Deploy self-update script e arquivo VERSION (usados pelo mecanismo de auto-update)
+$selfUpdateScript = Join-Path $PSScriptRoot "self-update.ps1"
+if (Test-Path $selfUpdateScript) {
+    Copy-Item $selfUpdateScript -Destination (Join-Path $syncAgentInstallDir "self-update.ps1") -Force
+}
+$AgentVersion | Set-Content (Join-Path $syncAgentInstallDir "VERSION") -Encoding UTF8 -NoNewline
 
 $serviceExe = Join-Path $syncAgentInstallDir "SyncAgent.exe"
 $trayExe = Join-Path $trayInstallDir "SyncAgent.Tray.exe"

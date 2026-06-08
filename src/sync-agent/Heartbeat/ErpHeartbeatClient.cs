@@ -131,13 +131,14 @@ public sealed class ErpHeartbeatClient
                 cancellationToken);
 
             _logger.LogInformation(
-                "ERP heartbeat completed. Connectivity={Connectivity}; QueueSize={QueueSize}; OldestPendingAgeSeconds={OldestPendingAgeSeconds}; NextPollSeconds={NextPollSeconds}",
+                "ERP heartbeat completed. Connectivity={Connectivity}; QueueSize={QueueSize}; OldestPendingAgeSeconds={OldestPendingAgeSeconds}; NextPollSeconds={NextPollSeconds}; PendingUpdateVersion={PendingUpdateVersion}",
                 connectivity,
                 storeStatus.PendingOutboxEvents,
                 storeStatus.OldestPendingAgeSeconds,
-                heartbeatResponse.NextPollSeconds);
+                heartbeatResponse.NextPollSeconds,
+                heartbeatResponse.PendingUpdate?.Version);
 
-            return new HeartbeatSummary(true, true, heartbeatResponse.NextPollSeconds, null);
+            return new HeartbeatSummary(true, true, heartbeatResponse.NextPollSeconds, null, heartbeatResponse.PendingUpdate);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -169,7 +170,8 @@ public sealed record HeartbeatSummary(
     bool Enabled,
     bool Succeeded,
     int? NextPollSeconds,
-    string? LastError)
+    string? LastError,
+    PendingUpdateCommand? PendingUpdate = null)
 {
     public static HeartbeatSummary Disabled { get; } = new(false, false, null, null);
 }
@@ -183,4 +185,11 @@ public sealed record HeartbeatRequest(
 
 public sealed record HeartbeatResponse(
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("next_poll_seconds")] int? NextPollSeconds);
+    [property: JsonPropertyName("next_poll_seconds")] int? NextPollSeconds,
+    [property: JsonPropertyName("pending_update")] PendingUpdateCommand? PendingUpdate = null);
+
+public sealed record PendingUpdateCommand(
+    [property: JsonPropertyName("version")] string Version,
+    [property: JsonPropertyName("download_url")] string DownloadUrl,
+    [property: JsonPropertyName("sha256")] string Sha256,
+    [property: JsonPropertyName("release_notes")] string? ReleaseNotes = null);

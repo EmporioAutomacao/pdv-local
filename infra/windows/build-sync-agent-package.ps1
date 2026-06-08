@@ -1,5 +1,6 @@
 ﻿param(
     [string]$PackageRoot = ".\artifacts\sync-agent-installer",
+    [string]$Version = "1.0.0",
     [switch]$SkipPublish
 )
 
@@ -74,5 +75,20 @@ if ($vcRuntimeInstaller) {
     Copy-Item -LiteralPath $vcRuntimeInstaller.FullName -Destination (Join-Path $packagePath "payload\VcRuntime") -Force
 }
 
-Write-Host "Sync Agent installer package created at: $packagePath"
+# Gravar arquivo VERSION no payload (lido pelo self-update.ps1 para nomear backup)
+$Version | Set-Content (Join-Path $packagePath "payload\SyncAgent\VERSION") -Encoding UTF8 -NoNewline
 
+# Empacotar como ZIP versionado e gerar SHA256
+$zipName    = "pdv-local-v$Version.zip"
+$zipPath    = Join-Path $repoRoot "artifacts\sync-agent-installer\$zipName"
+$sha256Path = "$zipPath.sha256"
+
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+Compress-Archive -Path (Join-Path $packagePath "*") -DestinationPath $zipPath
+
+$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash
+"$hash  $zipName" | Set-Content $sha256Path -Encoding UTF8 -NoNewline
+
+Write-Host "Sync Agent installer package created at: $packagePath"
+Write-Host "ZIP: $zipPath"
+Write-Host "SHA256: $hash"

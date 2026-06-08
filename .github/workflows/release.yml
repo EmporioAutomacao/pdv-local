@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $ver = $tag.TrimStart('v')
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer package
+        shell: pwsh
+        run: |
+          .\infra\windows\build-sync-agent-package.ps1 -Version '${{ steps.version.outputs.VERSION }}'
+
+      - name: Locate artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.version.outputs.VERSION }}'
+          $zip = "artifacts\sync-agent-installer\pdv-local-v$ver.zip"
+          $sha = "$zip.sha256"
+          echo "ZIP=$zip" >> $env:GITHUB_OUTPUT
+          echo "SHA=$sha" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: PDV Local ${{ steps.version.outputs.TAG }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.artifacts.outputs.ZIP }}
+            ${{ steps.artifacts.outputs.SHA }}
