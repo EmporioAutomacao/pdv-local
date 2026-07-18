@@ -337,37 +337,6 @@
 
                     <Border Style="{StaticResource CardStyle}">
                         <StackPanel>
-                            <TextBlock Text="Autorizacao"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimary}"
-                                       Margin="0,0,0,10" />
-
-                            <TextBlock Text="Login supervisor/admin" Style="{StaticResource LabelStyle}" />
-                            <TextBox x:Name="SupervisorLoginTextBox" Style="{StaticResource InputStyle}" KeyDown="SupervisorLoginTextBox_KeyDown" />
-
-                            <TextBlock Text="Motivo" Style="{StaticResource LabelStyle}" />
-                            <TextBox x:Name="SupervisorReasonTextBox"
-                                     Style="{StaticResource InputStyle}"
-                                     TextWrapping="Wrap"
-                                     AcceptsReturn="True"
-                                     Height="58" />
-
-                            <Button x:Name="AuthorizeSupervisorButton"
-                                    Content="Autorizar"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Click="AuthorizeSupervisorButton_Click"
-                                    Margin="0,0,0,10" />
-
-                            <TextBlock Text="Autorizacao atual" Style="{StaticResource LabelStyle}" />
-                            <TextBlock x:Name="SupervisorAuthorizationValue"
-                                       Text="-"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource CardStyle}">
-                        <StackPanel>
                             <TextBlock Text="Pagamento"
                                        FontSize="18"
                                        FontWeight="SemiBold"

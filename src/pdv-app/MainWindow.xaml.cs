@@ -11,12 +11,12 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PdvLocal.Core;
+using static PdvLocal.App.PdvUiFormatting;
 
 namespace PdvLocal.App;
 
 public partial class MainWindow : Window
 {
-    private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
     private static readonly JsonSerializerOptions AuditJsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -43,7 +43,6 @@ public partial class MainWindow : Window
     private PdvOperator? _currentOperator;
     private PdvCashSession? _currentCashSession;
     private PdvProduct? _selectedProduct;
-    private PdvOperator? _authorizedSupervisor;
     private SaleReceiptData? _lastReceipt;
     private PdvOperator? _initialOperator;
 
@@ -104,7 +103,6 @@ public partial class MainWindow : Window
         {
             OperatorLoginTextBox.Text = _initialOperator.Login;
             _currentOperator = _initialOperator;
-            ClearSupervisorAuthorization();
             _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
                 _initialOperator.OperatorId, CancellationToken.None);
             ApplyCurrentSession();
@@ -129,33 +127,6 @@ public partial class MainWindow : Window
     private async void LoadOperatorButton_Click(object sender, RoutedEventArgs e)
     {
         await LoadOperatorAsync();
-    }
-
-    private async void AuthorizeSupervisorButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RunPdvOperationAsync(async () =>
-        {
-            var supervisorLogin = SupervisorLoginTextBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(supervisorLogin))
-            {
-                throw new ArgumentException("Informe o login do supervisor.");
-            }
-
-            var supervisor = await _operatorRepository.FindActiveByLoginAsync(supervisorLogin, CancellationToken.None);
-            if (supervisor is null)
-            {
-                throw new InvalidOperationException($"Supervisor ativo nao encontrado: {supervisorLogin}.");
-            }
-
-            if (!PdvValidation.IsSupervisorRole(supervisor.Role))
-            {
-                throw new InvalidOperationException($"Operador {supervisor.Login} nao possui papel de supervisor/admin.");
-            }
-
-            _authorizedSupervisor = supervisor;
-            ApplySupervisorAuthorization();
-            SetOperationMessage($"Supervisor autorizado: {supervisor.DisplayName}.", isError: false);
-        });
     }
 
     private async void OpenCashButton_Click(object sender, RoutedEventArgs e)
@@ -466,14 +437,6 @@ public partial class MainWindow : Window
         {
             // Desconto invalido, nao preenche automaticamente
         }
-    }
-
-    private void SupervisorLoginTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        AuthorizeSupervisorButton_Click(AuthorizeSupervisorButton, e);
     }
 
     private void ProductSearchResultsGrid_KeyDown(object sender, KeyEventArgs e)
@@ -812,7 +775,6 @@ public partial class MainWindow : Window
         {
             _currentOperator = null;
             _currentCashSession = null;
-            ClearSupervisorAuthorization();
             ApplyCurrentSession();
             await RefreshCashSummaryAsync();
             SetOperationMessage($"Operador ativo nao encontrado: {login}.", isError: true);
@@ -820,7 +782,6 @@ public partial class MainWindow : Window
         }
 
         _currentOperator = operatorRecord;
-        ClearSupervisorAuthorization();
         _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
             operatorRecord.OperatorId,
             CancellationToken.None);
@@ -1065,18 +1026,13 @@ public partial class MainWindow : Window
 
     private SupervisorAuthorization RequireSupervisorAuthorization(string operationDescription)
     {
-        if (_authorizedSupervisor is null)
+        var authorization = SupervisorAuthorizationDialog.Request(this, _operatorRepository, operationDescription);
+        if (authorization is null)
         {
-            throw new InvalidOperationException($"Autorizacao de supervisor obrigatoria para {operationDescription}. Informe o login e clique Autorizar.");
+            throw new InvalidOperationException($"Autorizacao de supervisor cancelada para {operationDescription}.");
         }
 
-        var reason = SupervisorReasonTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            throw new InvalidOperationException($"Informe o motivo da autorizacao para {operationDescription}.");
-        }
-
-        return new SupervisorAuthorization(_authorizedSupervisor, reason);
+        return authorization;
     }
 
     private async Task RecordDraftAuditAsync(
@@ -1132,29 +1088,6 @@ public partial class MainWindow : Window
         }
 
         return auditEvents;
-    }
-
-    private void ApplySupervisorAuthorization()
-    {
-        SupervisorAuthorizationValue.Text = _authorizedSupervisor is null
-            ? "-"
-            : $"{_authorizedSupervisor.DisplayName} ({_authorizedSupervisor.Login} / {_authorizedSupervisor.Role})";
-        SupervisorAuthorizationValue.Foreground = BrushFromHex(
-            _authorizedSupervisor is null ? "#64748B" : "#166534");
-    }
-
-    private void ClearSupervisorAuthorization()
-    {
-        _authorizedSupervisor = null;
-        if (SupervisorAuthorizationValue is not null)
-        {
-            SupervisorAuthorizationValue.Text = "-";
-        }
-
-        if (SupervisorReasonTextBox is not null)
-        {
-            SupervisorReasonTextBox.Clear();
-        }
     }
 
     private string BuildCurrentDraftPayload()
@@ -1328,8 +1261,6 @@ public partial class MainWindow : Window
         _productSearchResults.Clear();
         _saleItems.Clear();
         _payments.Clear();
-        if (SupervisorReasonTextBox is not null)
-            SupervisorReasonTextBox.Clear();
         ProductEntryTextBox.Clear();
         QuantityTextBox.Text = "1";
         UnitPriceTextBox.Text = "0,00";
@@ -1425,41 +1356,6 @@ public partial class MainWindow : Window
     {
         OperationMessageValue.Text = message;
         OperationMessageValue.Foreground = BrushFromHex(isError ? "#991B1B" : "#166534");
-    }
-
-    private static decimal ParseMoney(string value, string fieldName)
-    {
-        if (TryParseMoney(value, out var parsed))
-        {
-            return parsed;
-        }
-
-        throw new ArgumentException($"{fieldName} invalido.");
-    }
-
-    private static bool TryParseMoney(string value, out decimal parsed)
-    {
-        var trimmed = value.Trim();
-        var commaIndex = trimmed.LastIndexOf(',');
-        var dotIndex = trimmed.LastIndexOf('.');
-
-        if (commaIndex >= 0 && commaIndex > dotIndex)
-        {
-            return decimal.TryParse(trimmed, NumberStyles.Number, BrazilianCulture, out parsed)
-                || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.CurrentCulture, out parsed)
-                || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out parsed);
-        }
-
-        if (dotIndex >= 0 && dotIndex > commaIndex)
-        {
-            return decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out parsed)
-                || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.CurrentCulture, out parsed)
-                || decimal.TryParse(trimmed, NumberStyles.Number, BrazilianCulture, out parsed);
-        }
-
-        return decimal.TryParse(trimmed, NumberStyles.Number, BrazilianCulture, out parsed)
-            || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.CurrentCulture, out parsed)
-            || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out parsed);
     }
 
     private async Task RefreshDatabaseStatusAsync()
@@ -1708,221 +1604,4 @@ public partial class MainWindow : Window
             || method.Contains("cartao", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string DisplayCode(PdvProduct product)
-    {
-        return FirstNonEmpty(product.Barcode, product.Sku, product.ExternalKey, product.ProductId.ToString());
-    }
-
-    private static string FirstNonEmpty(params string?[] values)
-    {
-        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "-";
-    }
-
-    private static string FormatDecimal(decimal value)
-    {
-        return value.ToString("0.00", BrazilianCulture);
-    }
-
-    private static string Capitalize(string value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? value
-            : BrazilianCulture.TextInfo.ToTitleCase(value);
-    }
-
-    private static string FormatMoney(decimal value)
-    {
-        return value.ToString("C", BrazilianCulture);
-    }
-
-    private static Brush BrushFromHex(string color)
-    {
-        return (Brush)new BrushConverter().ConvertFromString(color)!;
-    }
-
-    private static string EmptyAsDash(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? "-" : value;
-    }
-}
-
-internal sealed record SyncAgentStatusResponse(
-    [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("provisioned")] bool Provisioned,
-    [property: JsonPropertyName("instance_id")] string? InstanceId,
-    [property: JsonPropertyName("erp_tenant_id")] string? ErpTenantId,
-    [property: JsonPropertyName("erp_api_base_url")] string? ErpApiBaseUrl,
-    [property: JsonPropertyName("database")] string? Database,
-    [property: JsonPropertyName("pgvector_version")] string? PgVectorVersion,
-    [property: JsonPropertyName("pending_outbox_events")] long PendingOutboxEvents,
-    [property: JsonPropertyName("dead_letter_events")] long DeadLetterEvents,
-    [property: JsonPropertyName("last_heartbeat_succeeded")] bool? LastHeartbeatSucceeded,
-    [property: JsonPropertyName("last_heartbeat_connectivity")] string? LastHeartbeatConnectivity,
-    [property: JsonPropertyName("runtime_status")] string? RuntimeStatus,
-    [property: JsonPropertyName("last_error")] string? LastError);
-
-internal sealed class UiProductSearchResult
-{
-    public UiProductSearchResult(PdvProduct product)
-    {
-        Product = product;
-    }
-
-    public PdvProduct Product { get; }
-    public string DisplayCode => FirstNonEmpty(Product.Barcode, Product.Sku, Product.ExternalKey, Product.ProductId.ToString());
-    public string Name => Product.Name;
-    public string Unit => Product.Unit;
-    public string PriceText => Product.Price.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
-
-    private static string FirstNonEmpty(params string?[] values)
-    {
-        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "-";
-    }
-}
-
-internal sealed class UiSaleItem
-{
-    public Guid ProductId { get; init; }
-    public string ExternalKey { get; init; } = string.Empty;
-    public string? Sku { get; init; }
-    public string? Barcode { get; init; }
-    public string Name { get; init; } = string.Empty;
-    public int LineNumber { get; set; }
-    public decimal Quantity { get; init; }
-    public decimal UnitPrice { get; init; }
-    public decimal DiscountAmount { get; init; }
-    public Guid? DiscountSupervisorOperatorId { get; init; }
-    public string? DiscountSupervisorLogin { get; init; }
-    public string? DiscountReason { get; init; }
-    public decimal TotalAmount => Quantity * UnitPrice - DiscountAmount;
-    public string DisplayCode => FirstNonEmpty(Barcode, Sku, ExternalKey, ProductId.ToString());
-    public string QuantityText => Quantity.ToString("0.####", CultureInfo.GetCultureInfo("pt-BR"));
-    public string UnitPriceText => UnitPrice.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
-    public string DiscountAmountText => DiscountAmount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
-    public string TotalAmountText => TotalAmount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
-
-    private static string FirstNonEmpty(params string?[] values)
-    {
-        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "-";
-    }
-}
-
-internal sealed record SupervisorAuthorization(
-    PdvOperator Supervisor,
-    string Reason);
-
-internal sealed class UiPayment
-{
-    public string Method { get; init; } = string.Empty;
-    public string Condition { get; init; } = string.Empty;
-    public decimal Amount { get; init; }
-    public decimal ReceivedAmount { get; init; }
-    public decimal ChangeAmount { get; init; }
-    public string? AuthorizationCode { get; init; }
-    public Guid? PaymentSpeciesId { get; init; }
-    public string? PaymentSpeciesExternalKey { get; init; }
-    public string? PaymentSpeciesKind { get; init; }
-    public Guid? PaymentConditionId { get; init; }
-    public string? PaymentConditionExternalKey { get; init; }
-    public int? Installments { get; init; }
-    public bool RequiresTef { get; init; }
-    public bool AllowsChange { get; init; }
-    public string? TefMetadataJson { get; init; }
-    public string AmountText => Amount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
-    public string ChangeAmountText => ChangeAmount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
-}
-
-internal sealed record UiPaymentSpecies(
-    Guid? PaymentSpeciesId,
-    string ExternalKey,
-    string Name,
-    string Kind,
-    bool RequiresTef,
-    bool AllowsChange)
-{
-    public string DisplayName => RequiresTef
-        ? $"{Name} (TEF)"
-        : Name;
-
-    public static UiPaymentSpecies FromModel(PdvPaymentSpecies species)
-    {
-        return new UiPaymentSpecies(
-            species.PaymentSpeciesId,
-            species.ExternalKey,
-            species.Name,
-            species.Kind,
-            species.RequiresTef,
-            species.AllowsChange);
-    }
-
-    public static UiPaymentSpecies FromTypedName(string name)
-    {
-        var kind = ResolveKind(name);
-        return new UiPaymentSpecies(
-            null,
-            $"typed-{name}",
-            name,
-            kind,
-            kind == "card",
-            kind == "cash");
-    }
-
-    private static string ResolveKind(string name)
-    {
-        if (name.Contains("dinheiro", StringComparison.OrdinalIgnoreCase))
-        {
-            return "cash";
-        }
-
-        if (name.Contains("pix", StringComparison.OrdinalIgnoreCase))
-        {
-            return "pix";
-        }
-
-        if (name.Contains("tef", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("cartao", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("cartão", StringComparison.OrdinalIgnoreCase))
-        {
-            return "card";
-        }
-
-        return "other";
-    }
-}
-
-internal sealed record SaleReceiptData(
-    Guid SaleId,
-    string SaleNumber,
-    DateTimeOffset CompletedAt,
-    string OperatorName,
-    IReadOnlyList<UiSaleItem> Items,
-    decimal SubtotalAmount,
-    decimal ItemDiscountAmount,
-    decimal SaleDiscountAmount,
-    decimal TotalAmount,
-    IReadOnlyList<UiPayment> Payments,
-    decimal TotalChangeAmount);
-
-internal sealed record UiPaymentCondition(
-    Guid? PaymentConditionId,
-    string ExternalKey,
-    string Name,
-    int Installments,
-    int FirstDueDays,
-    int IntervalDays)
-{
-    public string DisplayName => Installments <= 1
-        ? Name
-        : $"{Name} ({Installments}x)";
-
-    public static UiPaymentCondition FromModel(PdvPaymentCondition condition)
-    {
-        return new UiPaymentCondition(
-            condition.PaymentConditionId,
-            condition.ExternalKey,
-            condition.Name,
-            condition.Installments,
-            condition.FirstDueDays,
-            condition.IntervalDays);
-    }
 }

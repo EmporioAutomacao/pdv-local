@@ -27,7 +27,8 @@ public partial class HelpWindow : Window
         new("Delete","Item no carrinho",        "Remover item (exige supervisor e motivo)"),
         new("Enter", "Valor recebido",          "Adicionar pagamento"),
         new("Delete","Pagamento na grade",      "Remover pagamento (exige supervisor e motivo)"),
-        new("Enter", "Login supervisor",        "Autorizar supervisor"),
+        new("Enter", "Diálogo de autorização",  "Confirmar autorização do supervisor (login + senha)"),
+        new("Esc",   "Diálogo de autorização",  "Cancelar autorização"),
         new("Enter", "Login supervisor (cancel.)","Avançar para campo Motivo"),
         new("Enter", "Motivo (cancelamento)",   "Confirmar cancelamento de venda"),
     ];
@@ -36,7 +37,6 @@ public partial class HelpWindow : Window
     [
         new("Campo Restante",        "Vermelho → valor ainda a pagar | Preto → venda paga"),
         new("Status da venda",       "Verde → caixa aberto e pronto | Cinza → bloqueado"),
-        new("Autorização supervisor","Verde → autorizado para a sessão | Cinza → aguardando"),
         new("Título da venda",       "Mostra N itens e total enquanto há itens no carrinho"),
         new("Fundo Desc. item",      "Âmbar quando desconto > 0"),
         new("Fundo Desc. total",     "Âmbar quando desconto > 0"),
