@@ -408,6 +408,53 @@ Fluxo recomendado:
 4. Validar servico, dashboard, PostgreSQL e pgvector.
 5. Guardar evidencias em `artifacts`.
 
+## Homologacao da UI do PDV App (refactor 2026-07)
+
+Suite UIAutomation do novo fluxo (login -> caixa -> venda -> pagamento):
+`tests\homologation\pdv-ui-refactor-2026-07-test.ps1`.
+
+Pre-requisitos na VM:
+
+1. PDV App v1.1.0+ instalado em `C:\Program Files\PDVLocal\PDVApp`
+   (via auto-update do SyncAgent ou copia manual preservando `appsettings.json`).
+2. Operador de teste com senha conhecida. O script usa `admin` /
+   `Homolog@2026` por padrao (parametros `-OperatorLogin` / `-OperatorPassword`).
+   Para definir o hash no banco local da VM, gere com o Django do ERP:
+
+   ```powershell
+   D:\GitHub\erp\venv\Scripts\python.exe -c "from django.contrib.auth.hashers import make_password; print(make_password('Homolog@2026'))"
+   ```
+
+   e aplique via psql na VM:
+
+   ```sql
+   UPDATE pdv.operators SET password_hash = '<hash>' WHERE login = 'admin';
+   ```
+
+   Atencao: o proximo snapshot de operadores do ERP pode sobrescrever o hash.
+3. Executar em sessao interativa via `schtasks /Create ... /IT /RU Suporte` e
+   `/Run`; coletar `C:\ProgramData\PDVLocal\Homologation\ui-refactor-2026-07\results.json`.
+
+### Deploy do PDV App v1.1.0 via auto-update (sem WinRM)
+
+1. `infra\windows\build-sync-agent-package.ps1 -Version 1.1.0` gera o pacote e
+   registra no ERP integrado (`register_sync_package`).
+2. Servir `artifacts\sync-agent-installer` na porta 8099 da maquina dev:
+
+   ```powershell
+   cd D:\GitHub\pdv-local\artifacts\sync-agent-installer
+   python -m http.server 8099 --bind 0.0.0.0
+   ```
+
+   Liberar a porta no firewall (PowerShell como Administrador):
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "PDV Local Package 8099" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8099
+   ```
+
+3. O SyncAgent da VM detecta a versao nova no proximo heartbeat e se atualiza
+   (SyncAgent + PDVApp), preservando `appsettings.json`.
+
 ## Regras de seguranca do Arpa
 
 - O SyncAgent nunca grava no banco Arpa.
