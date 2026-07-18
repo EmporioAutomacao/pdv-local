@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private SaleReceiptData? _lastReceipt;
     private PdvOperator? _initialOperator;
     private bool _startupCashPromptShown;
+    private decimal _saleDiscount;
 
     public MainWindow(PdvOperator initialOperator) : this()
     {
@@ -75,9 +76,6 @@ public partial class MainWindow : Window
         InitializeComponent();
         ProductSearchResultsGrid.ItemsSource = _productSearchResults;
         CartItemsGrid.ItemsSource = _saleItems;
-        PaymentsGrid.ItemsSource = _payments;
-        PaymentMethodComboBox.ItemsSource = _paymentSpecies;
-        PaymentConditionComboBox.ItemsSource = _paymentConditions;
         LocalApiValue.Text = _configuration.SyncAgentLocalApiBaseUrl.ToString();
         ResetSale(clearMessage: false);
         ApplyCurrentSession();
@@ -354,20 +352,15 @@ public partial class MainWindow : Window
         UpdateSelectedProductTotal();
     }
 
-    private void SaleDiscountTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
-    {
-        UpdateTotals();
-        var hasDiscount = TryParseMoney(SaleDiscountTextBox.Text, out var discount) && discount > 0;
-        SaleDiscountTextBox.Background = hasDiscount ? BrushFromHex("#FEF3C7") : Brushes.White;
-    }
-
     private void MainWindow_KeyDown(object sender, KeyEventArgs e)
     {
         switch (e.Key)
         {
+            case Key.System when e.SystemKey == Key.F10:
+            case Key.F10:
             case Key.F12:
                 e.Handled = true;
-                CompleteSaleButton_Click(CompleteSaleButton, e);
+                StartPayment();
                 break;
             case Key.F2:
                 e.Handled = true;
@@ -420,35 +413,6 @@ public partial class MainWindow : Window
         });
     }
 
-    private void PaymentReceivedTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        AddPaymentButton_Click(AddPaymentButton, e);
-    }
-
-    private void PaymentReceivedTextBox_GotFocus(object sender, RoutedEventArgs e)
-    {
-        if (_currentCashSession is null || _saleItems.Count == 0)
-            return;
-        if (TryParseMoney(PaymentReceivedTextBox.Text, out var current) && current != 0)
-            return;
-        try
-        {
-            var remaining = CalculateRemainingAmount();
-            if (remaining > 0)
-            {
-                PaymentReceivedTextBox.Text = FormatDecimal(remaining);
-                PaymentReceivedTextBox.SelectAll();
-            }
-        }
-        catch (ArgumentException)
-        {
-            // Desconto invalido, nao preenche automaticamente
-        }
-    }
-
     private void ProductSearchResultsGrid_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter)
@@ -481,120 +445,50 @@ public partial class MainWindow : Window
         RemoveItemButton_Click(RemoveItemButton, e);
     }
 
-    private void PaymentsGrid_KeyDown(object sender, KeyEventArgs e)
+    private void PaymentButton_Click(object sender, RoutedEventArgs e)
     {
-        if (e.Key != Key.Delete)
-            return;
-        e.Handled = true;
-        RemovePaymentButton_Click(RemovePaymentButton, e);
+        StartPayment();
     }
 
-    private async void AddPaymentButton_Click(object sender, RoutedEventArgs e)
+    private void StartPayment()
     {
-        await RunPdvOperationAsync(async () =>
+        RunPdvOperation(() =>
         {
             EnsureCashSession();
             if (_saleItems.Count == 0)
             {
-                throw new InvalidOperationException("Inclua ao menos um item antes de registrar pagamento.");
+                throw new InvalidOperationException("Inclua ao menos um item antes de finalizar.");
             }
 
-            var remaining = CalculateRemainingAmount();
-            if (remaining <= 0)
-            {
-                throw new InvalidOperationException("A venda ja esta paga.");
-            }
+            var subtotal = _saleItems.Sum(item => item.Quantity * item.UnitPrice);
+            var itemDiscount = _saleItems.Sum(item => item.DiscountAmount);
+            var window = new PaymentWindow(
+                subtotal,
+                itemDiscount,
+                _saleDiscount,
+                _payments,
+                _paymentSpecies,
+                _paymentConditions,
+                _tefPaymentProvider,
+                _configuration.Tef.Provider,
+                _operatorRepository,
+                (operationType, authorization, payload) =>
+                    RecordDraftAuditAsync(operationType, authorization, payload, CancellationToken.None))
+            { Owner = this };
 
-            var method = ReadPaymentMethod();
-            var condition = ReadPaymentCondition();
-            var receivedAmount = ParseMoney(PaymentReceivedTextBox.Text, "Valor recebido");
-            if (receivedAmount <= 0)
-            {
-                throw new ArgumentException("Valor recebido deve ser maior que zero.");
-            }
-
-            var isCash = method.AllowsChange || IsCashPayment(method.Name);
-            var isTef = method.RequiresTef || IsTefPayment(method.Name);
-            var appliedAmount = receivedAmount;
-            var changeAmount = 0m;
-            TefAuthorizationResult? tefAuthorization = null;
-
-            if (receivedAmount > remaining)
-            {
-                if (!isCash)
-                {
-                    throw new ArgumentException("Pagamento maior que o restante so e permitido para dinheiro, por causa do troco.");
-                }
-
-                appliedAmount = remaining;
-                changeAmount = receivedAmount - remaining;
-            }
-
-            if (isTef)
-            {
-                tefAuthorization = await _tefPaymentProvider.AuthorizeAsync(
-                    new TefAuthorizationRequest(
-                        method.Name,
-                        appliedAmount,
-                        condition.Installments,
-                        condition.Name,
-                        method.ExternalKey,
-                        condition.ExternalKey),
-                    CancellationToken.None);
-            }
-
-            _payments.Add(new UiPayment
-            {
-                Method = method.Name,
-                Condition = condition.Name,
-                Amount = appliedAmount,
-                ReceivedAmount = receivedAmount,
-                ChangeAmount = changeAmount,
-                AuthorizationCode = tefAuthorization?.AuthorizationCode,
-                PaymentSpeciesId = method.PaymentSpeciesId,
-                PaymentSpeciesExternalKey = method.ExternalKey,
-                PaymentSpeciesKind = method.Kind,
-                PaymentConditionId = condition.PaymentConditionId,
-                PaymentConditionExternalKey = condition.ExternalKey,
-                Installments = condition.Installments,
-                RequiresTef = isTef,
-                AllowsChange = method.AllowsChange,
-                TefMetadataJson = tefAuthorization?.MetadataJson
-            });
-
-            PaymentReceivedTextBox.Text = FormatDecimal(CalculateRemainingAmount());
+            var confirmed = window.ShowDialog() == true;
+            _saleDiscount = window.SaleDiscount;
             UpdateTotals();
-            SetOperationMessage(isTef
-                ? $"Pagamento TEF {tefAuthorization?.Status ?? "capturado"} registrado pelo provider {_configuration.Tef.Provider}."
-                : "Pagamento registrado.",
-                isError: false);
+            SaveDraftToBackground();
+
+            if (confirmed)
+            {
+                _ = CompleteSaleAsync();
+            }
         });
     }
 
-    private async void RemovePaymentButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RunPdvOperationAsync(async () =>
-        {
-            EnsureCashSession();
-            if (PaymentsGrid.SelectedItem is not UiPayment selected)
-            {
-                throw new InvalidOperationException("Selecione um pagamento para remover.");
-            }
-
-            var authorization = RequireSupervisorAuthorization("remover pagamento");
-            await RecordDraftAuditAsync(
-                "payment_removed",
-                authorization,
-                BuildPaymentPayload(selected),
-                CancellationToken.None);
-
-            _payments.Remove(selected);
-            UpdateTotals();
-            SetOperationMessage("Pagamento removido com autorizacao de supervisor.", isError: false);
-        });
-    }
-
-    private async void CompleteSaleButton_Click(object sender, RoutedEventArgs e)
+    private async Task CompleteSaleAsync()
     {
         await RunPdvOperationAsync(async () =>
         {
@@ -604,7 +498,7 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("Inclua ao menos um item antes de finalizar.");
             }
 
-            var saleDiscount = ParseMoney(SaleDiscountTextBox.Text, "Desconto total");
+            var saleDiscount = _saleDiscount;
             var auditEvents = BuildCompletedSaleAuditEvents(saleDiscount);
             var saleNumber = $"PDV-{DateTimeOffset.Now:yyyyMMddHHmmssfff}";
             var saleId = await _saleRepository.CreateCompletedSaleAsync(
@@ -902,7 +796,7 @@ public partial class MainWindow : Window
             }
 
             if (draft.SaleDiscount > 0)
-                SaleDiscountTextBox.Text = FormatDecimal(draft.SaleDiscount);
+                _saleDiscount = draft.SaleDiscount;
 
             UpdateTotals();
             SetOperationMessage(
@@ -925,7 +819,7 @@ public partial class MainWindow : Window
             .ToList();
         var cashSessionId = _currentCashSession.CashSessionId;
         var operatorId = _currentOperator.OperatorId;
-        var saleDiscount = TryParseMoney(SaleDiscountTextBox.Text, out var d) ? d : 0m;
+        var saleDiscount = _saleDiscount;
 
         _ = _saleRepository
             .SaveDraftAsync(cashSessionId, operatorId, items, saleDiscount, CancellationToken.None)
@@ -1078,7 +972,7 @@ public partial class MainWindow : Window
                 payment.AuthorizationCode,
                 payment.TefMetadataJson
             }),
-            sale_discount_amount = TryParseMoney(SaleDiscountTextBox.Text, out var saleDiscount) ? saleDiscount : 0,
+            sale_discount_amount = _saleDiscount,
             total_amount = TryParseMoney(TotalValue.Text.Replace("R$", "", StringComparison.Ordinal), out var total) ? total : 0
         }, AuditJsonOptions);
     }
@@ -1101,26 +995,6 @@ public partial class MainWindow : Window
         }, AuditJsonOptions);
     }
 
-    private static string BuildPaymentPayload(UiPayment payment)
-    {
-        return JsonSerializer.Serialize(new
-        {
-            payment.Method,
-            payment.Condition,
-            payment.Amount,
-            payment.ReceivedAmount,
-            payment.ChangeAmount,
-            payment.AuthorizationCode,
-            payment.PaymentSpeciesExternalKey,
-            payment.PaymentSpeciesKind,
-            payment.PaymentConditionExternalKey,
-            payment.Installments,
-            payment.RequiresTef,
-            payment.AllowsChange,
-            payment.TefMetadataJson
-        }, AuditJsonOptions);
-    }
-
     private void ApplyCurrentSession()
     {
         OperatorStatusText.Text = _currentOperator is null
@@ -1137,12 +1011,7 @@ public partial class MainWindow : Window
     {
         var canSell = _currentOperator is not null && _currentCashSession is not null;
         SalePanel.IsEnabled = canSell;
-        AddPaymentButton.IsEnabled = canSell;
-        RemovePaymentButton.IsEnabled = canSell;
-        CompleteSaleButton.IsEnabled = canSell;
-        PaymentMethodComboBox.IsEnabled = canSell;
-        PaymentReceivedTextBox.IsEnabled = canSell;
-        PaymentConditionComboBox.IsEnabled = canSell;
+        PaymentButton.IsEnabled = canSell;
         CashSalesButton.IsEnabled = _currentCashSession is not null;
         SaleGateValue.Text = canSell
             ? "Caixa aberto. Lance produtos pelo campo principal."
@@ -1157,16 +1026,11 @@ public partial class MainWindow : Window
         _productSearchResults.Clear();
         _saleItems.Clear();
         _payments.Clear();
+        _saleDiscount = 0;
         ProductEntryTextBox.Clear();
         QuantityTextBox.Text = "1";
         UnitPriceTextBox.Text = "0,00";
         ItemDiscountTextBox.Text = "0,00";
-        SaleDiscountTextBox.Text = "0,00";
-        SaleDiscountTextBox.Background = Brushes.White;
-        PaymentMethodComboBox.Text = "dinheiro";
-        PaymentConditionComboBox.Text = "A vista";
-        PaymentReceivedTextBox.Text = "0,00";
-        SelectDefaultPaymentCatalogItems();
         UpdateSelectedProductTotal();
         UpdateTotals();
         if (clearMessage)
@@ -1203,27 +1067,17 @@ public partial class MainWindow : Window
 
     private void UpdateTotals()
     {
-        if (SubtotalValue is null || TotalValue is null || PaidValue is null || RemainingValue is null || ChangeValue is null)
+        if (SubtotalValue is null || TotalValue is null)
         {
             return;
         }
 
         var subtotal = _saleItems.Sum(item => item.Quantity * item.UnitPrice);
         var itemDiscount = _saleItems.Sum(item => item.DiscountAmount);
-        var saleDiscount = TryParseMoney(SaleDiscountTextBox.Text, out var parsedSaleDiscount)
-            ? parsedSaleDiscount
-            : 0;
-        var total = Math.Max(0, subtotal - itemDiscount - saleDiscount);
-        var paid = _payments.Sum(payment => payment.Amount);
-        var remaining = Math.Max(0, total - paid);
-        var change = _payments.Sum(payment => payment.ChangeAmount);
+        var total = Math.Max(0, subtotal - itemDiscount - _saleDiscount);
 
         SubtotalValue.Text = FormatMoney(subtotal);
         TotalValue.Text = FormatMoney(total);
-        PaidValue.Text = FormatMoney(paid);
-        RemainingValue.Text = FormatMoney(remaining);
-        RemainingValue.Foreground = remaining > 0 ? BrushFromHex("#DC2626") : BrushFromHex("#0F172A");
-        ChangeValue.Text = FormatMoney(change);
 
         if (SaleTitleValue is not null)
         {
@@ -1231,21 +1085,6 @@ public partial class MainWindow : Window
                 ? "Venda"
                 : $"Venda — {_saleItems.Count} {(_saleItems.Count == 1 ? "item" : "itens")} — {FormatMoney(total)}";
         }
-    }
-
-    private decimal CalculateRemainingAmount()
-    {
-        var subtotal = _saleItems.Sum(item => item.Quantity * item.UnitPrice);
-        var itemDiscount = _saleItems.Sum(item => item.DiscountAmount);
-        var saleDiscount = ParseMoney(SaleDiscountTextBox.Text, "Desconto total");
-        var total = subtotal - itemDiscount - saleDiscount;
-        var paid = _payments.Sum(payment => payment.Amount);
-        if (total < 0)
-        {
-            throw new ArgumentException("Desconto total nao pode deixar a venda negativa.");
-        }
-
-        return Math.Max(0, total - paid);
     }
 
     private void SetOperationMessage(string message, bool isError)
@@ -1288,8 +1127,6 @@ public partial class MainWindow : Window
         {
             ApplyFallbackPaymentCatalog();
         }
-
-        SelectDefaultPaymentCatalogItems();
     }
 
     private void ApplyFallbackPaymentCatalog()
@@ -1302,21 +1139,6 @@ public partial class MainWindow : Window
 
         _paymentConditions.Clear();
         _paymentConditions.Add(new UiPaymentCondition(null, "fallback-a-vista", "A vista", 1, 0, 0));
-    }
-
-    private void SelectDefaultPaymentCatalogItems()
-    {
-        if (PaymentMethodComboBox.SelectedItem is not UiPaymentSpecies && _paymentSpecies.Count > 0)
-        {
-            PaymentMethodComboBox.SelectedItem = _paymentSpecies.FirstOrDefault(item => item.Kind == "cash")
-                ?? _paymentSpecies[0];
-        }
-
-        if (PaymentConditionComboBox.SelectedItem is not UiPaymentCondition && _paymentConditions.Count > 0)
-        {
-            PaymentConditionComboBox.SelectedItem = _paymentConditions.FirstOrDefault(item => item.Installments == 1 && item.FirstDueDays == 0)
-                ?? _paymentConditions[0];
-        }
     }
 
     private void ApplyStatus(SyncAgentStatusResponse status)
@@ -1448,56 +1270,6 @@ public partial class MainWindow : Window
         {
             ProductEntryTextBox.Focus();
         }
-    }
-
-    private static string ReadPaymentMethod(System.Windows.Controls.ComboBox comboBox)
-    {
-        return comboBox.Text.Trim();
-    }
-
-    private UiPaymentSpecies ReadPaymentMethod()
-    {
-        if (PaymentMethodComboBox.SelectedItem is UiPaymentSpecies selected)
-        {
-            return selected;
-        }
-
-        var methodName = ReadPaymentMethod(PaymentMethodComboBox);
-        if (string.IsNullOrWhiteSpace(methodName))
-        {
-            throw new ArgumentException("Especie de pagamento e obrigatoria.");
-        }
-
-        return _paymentSpecies.FirstOrDefault(item => item.Name.Equals(methodName, StringComparison.OrdinalIgnoreCase))
-            ?? UiPaymentSpecies.FromTypedName(methodName);
-    }
-
-    private UiPaymentCondition ReadPaymentCondition()
-    {
-        if (PaymentConditionComboBox.SelectedItem is UiPaymentCondition selected)
-        {
-            return selected;
-        }
-
-        var conditionName = ReadPaymentMethod(PaymentConditionComboBox);
-        if (string.IsNullOrWhiteSpace(conditionName))
-        {
-            throw new ArgumentException("Condicao de pagamento e obrigatoria.");
-        }
-
-        return _paymentConditions.FirstOrDefault(item => item.Name.Equals(conditionName, StringComparison.OrdinalIgnoreCase))
-            ?? new UiPaymentCondition(null, $"typed-{conditionName}", conditionName, 1, 0, 0);
-    }
-
-    private static bool IsCashPayment(string method)
-    {
-        return method.Contains("dinheiro", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsTefPayment(string method)
-    {
-        return method.Contains("tef", StringComparison.OrdinalIgnoreCase)
-            || method.Contains("cartao", StringComparison.OrdinalIgnoreCase);
     }
 
 }

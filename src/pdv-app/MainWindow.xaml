@@ -236,8 +236,8 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="150" />
+                                    <ColumnDefinition Width="170" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
                                 <StackPanel Grid.Column="0">
@@ -254,14 +254,6 @@
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Desc. total" Style="{StaticResource LabelStyle}" />
-                                    <TextBox x:Name="SaleDiscountTextBox"
-                                             Style="{StaticResource InputStyle}"
-                                             Text="0,00"
-                                             TextChanged="SaleDiscountTextBox_TextChanged" />
-                                </StackPanel>
-
-                                <StackPanel Grid.Column="3">
                                     <TextBlock Text="Total" Style="{StaticResource LabelStyle}" />
                                     <TextBlock x:Name="TotalValue"
                                                Text="R$ 0,00"
@@ -269,92 +261,21 @@
                                                FontSize="26"
                                                FontWeight="Bold" />
                                 </StackPanel>
+
+                                <Button Grid.Column="3"
+                                        x:Name="PaymentButton"
+                                        Content="Pagamento (F10)"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Click="PaymentButton_Click"
+                                        VerticalAlignment="Bottom"
+                                        Padding="16,10"
+                                        Margin="12,0,0,0" />
                             </Grid>
                         </Grid>
                     </Border>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1">
-                    <Border Style="{StaticResource CardStyle}">
-                        <StackPanel>
-                            <TextBlock Text="Pagamento"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimary}"
-                                       Margin="0,0,0,10" />
-
-                            <TextBlock Text="Especie" Style="{StaticResource LabelStyle}" />
-                            <ComboBox x:Name="PaymentMethodComboBox"
-                                      IsEditable="True"
-                                      DisplayMemberPath="DisplayName"
-                                      TextSearch.TextPath="Name"
-                                      Margin="0,0,10,8"
-                                      Padding="8,6" />
-
-                            <TextBlock Text="Condicao" Style="{StaticResource LabelStyle}" />
-                            <ComboBox x:Name="PaymentConditionComboBox"
-                                      IsEditable="True"
-                                      DisplayMemberPath="DisplayName"
-                                      TextSearch.TextPath="Name"
-                                      Margin="0,0,10,8"
-                                      Padding="8,6" />
-
-                            <TextBlock Text="Valor recebido" Style="{StaticResource LabelStyle}" />
-                            <TextBox x:Name="PaymentReceivedTextBox" Style="{StaticResource InputStyle}" Text="0,00"
-                                     KeyDown="PaymentReceivedTextBox_KeyDown"
-                                     GotFocus="PaymentReceivedTextBox_GotFocus" />
-
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Button x:Name="AddPaymentButton"
-                                        Content="Adicionar"
-                                        Style="{StaticResource PrimaryButtonStyle}"
-                                        Click="AddPaymentButton_Click"
-                                        Margin="0,0,8,0" />
-                                <Button x:Name="RemovePaymentButton"
-                                        Content="Remover"
-                                        Style="{StaticResource SecondaryButtonStyle}"
-                                        Click="RemovePaymentButton_Click" />
-                            </StackPanel>
-
-                            <DataGrid x:Name="PaymentsGrid" MaxHeight="160" Margin="0,0,0,10" KeyDown="PaymentsGrid_KeyDown">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Especie" Binding="{Binding Method}" Width="*" />
-                                    <DataGridTextColumn Header="Condicao" Binding="{Binding Condition}" Width="95" />
-                                    <DataGridTextColumn Header="Aplicado" Binding="{Binding AmountText}" Width="82" />
-                                    <DataGridTextColumn Header="Troco" Binding="{Binding ChangeAmountText}" Width="72" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Pago" Style="{StaticResource LabelStyle}" />
-                                    <TextBlock x:Name="PaidValue" Text="R$ 0,00" Style="{StaticResource ValueStyle}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1">
-                                    <TextBlock Text="Restante" Style="{StaticResource LabelStyle}" />
-                                    <TextBlock x:Name="RemainingValue" Text="R$ 0,00" Style="{StaticResource ValueStyle}" />
-                                </StackPanel>
-                            </Grid>
-
-                            <TextBlock Text="Troco" Style="{StaticResource LabelStyle}" />
-                            <TextBlock x:Name="ChangeValue"
-                                       Text="R$ 0,00"
-                                       Foreground="{DynamicResource SuccessText}"
-                                       FontSize="24"
-                                       FontWeight="Bold"
-                                       Margin="0,0,0,12" />
-
-                            <Button x:Name="CompleteSaleButton"
-                                    Content="Finalizar venda"
-                                    Style="{StaticResource PrimaryButtonStyle}"
-                                    Click="CompleteSaleButton_Click" />
-                        </StackPanel>
-                    </Border>
-
                     <Expander Header="Detalhes tecnicos" IsExpanded="False" Margin="0,0,0,12">
                         <StackPanel>
                             <UniformGrid Columns="5" Margin="0,8,0,0">
