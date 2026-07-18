@@ -93,6 +93,7 @@ public sealed class PdvSalesPublisher
             ["operator_id"] = sale.OperatorId.ToString(),
             ["operator_external_id"] = sale.OperatorExternalId,
             ["customer_id"] = sale.CustomerId?.ToString(),
+            ["customer_document"] = sale.CustomerDocument,
             ["occurred_at_utc"] = sale.OccurredAtUtc.ToString("O"),
             ["status"] = sale.Status,
             ["currency"] = "BRL",

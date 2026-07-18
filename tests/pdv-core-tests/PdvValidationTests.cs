@@ -53,6 +53,38 @@ public sealed class PdvValidationTests
         Assert.False(PdvValidation.TryParseQuantityCodeShortcut(input, out _, out _));
     }
 
+    [Theory]
+    [InlineData("529.982.247-25", "52998224725")]
+    [InlineData("52998224725", "52998224725")]
+    [InlineData("11.222.333/0001-81", "11222333000181")]
+    [InlineData("11222333000181", "11222333000181")]
+    public void TryNormalizeCustomerDocument_accepts_valid_cpf_and_cnpj(string input, string expected)
+    {
+        Assert.True(PdvValidation.TryNormalizeCustomerDocument(input, out var normalized));
+        Assert.Equal(expected, normalized);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("123")]
+    [InlineData("52998224726")]
+    [InlineData("11111111111")]
+    [InlineData("11.222.333/0001-80")]
+    [InlineData("00000000000000")]
+    [InlineData("abcdefghijk")]
+    public void TryNormalizeCustomerDocument_rejects_invalid_documents(string? input)
+    {
+        Assert.False(PdvValidation.TryNormalizeCustomerDocument(input, out _));
+    }
+
+    [Fact]
+    public void ValidateCompletedSale_rejects_invalid_customer_document()
+    {
+        var command = BuildSaleCommand(totalPayment: 19) with { CustomerDocument = "12345678900" };
+        Assert.Throws<ArgumentException>(() => PdvValidation.ValidateCompletedSale(command));
+    }
+
     [Fact]
     public void ValidateOperationAudit_rejects_missing_supervisor()
     {

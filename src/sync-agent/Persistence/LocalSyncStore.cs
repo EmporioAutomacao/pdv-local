@@ -1166,7 +1166,8 @@ public sealed class LocalSyncStore
                     )
                     FROM pdv.payments payments
                     WHERE payments.sale_id = sales.sale_id
-                ), '[]'::jsonb) AS payments
+                ), '[]'::jsonb) AS payments,
+                sales.customer_document
             FROM pdv.sales sales
             JOIN pdv.operators operators ON operators.operator_id = sales.operator_id
             WHERE sales.sync_status = 'pending_sync'
@@ -1195,7 +1196,8 @@ public sealed class LocalSyncStore
                 reader.GetDecimal(9),
                 reader.GetDecimal(10),
                 JsonNode.Parse(reader.GetString(11))?.AsArray() ?? [],
-                JsonNode.Parse(reader.GetString(12))?.AsArray() ?? []));
+                JsonNode.Parse(reader.GetString(12))?.AsArray() ?? [],
+                reader.IsDBNull(13) ? null : reader.GetString(13)));
         }
 
         return records;
@@ -2048,7 +2050,8 @@ public sealed record PdvSalePendingPublishRecord(
     decimal DiscountAmount,
     decimal TotalAmount,
     JsonArray Items,
-    JsonArray Payments);
+    JsonArray Payments,
+    string? CustomerDocument = null);
 
 public sealed record PdvRejectedSaleRecord(
     Guid SaleId,

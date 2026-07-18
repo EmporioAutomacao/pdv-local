@@ -106,7 +106,13 @@ public sealed record CompletedSaleCommand(
     IReadOnlyList<CompletedSaleItemCommand> Items,
     IReadOnlyList<CompletedSalePaymentCommand> Payments,
     decimal DiscountAmount = 0,
-    IReadOnlyList<CompletedSaleAuditCommand>? AuditEvents = null);
+    IReadOnlyList<CompletedSaleAuditCommand>? AuditEvents = null,
+    string? CustomerDocument = null);
+
+public sealed record PdvCustomer(
+    Guid CustomerId,
+    string Name,
+    string? Document);
 
 public sealed record CompletedSaleItemCommand(
     Guid ProductId,

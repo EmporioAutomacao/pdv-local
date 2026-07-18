@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS pdv.sales (
     cash_session_id uuid NOT NULL REFERENCES pdv.cash_sessions (cash_session_id),
     operator_id uuid NOT NULL REFERENCES pdv.operators (operator_id),
     customer_id uuid NULL REFERENCES pdv.customers (customer_id),
+    customer_document text NULL,
     sale_number text NOT NULL UNIQUE,
     status text NOT NULL,
     subtotal_amount numeric(14, 2) NOT NULL DEFAULT 0,
@@ -160,6 +161,9 @@ CREATE TABLE IF NOT EXISTS pdv.sales (
     CONSTRAINT sales_status_check CHECK (status IN ('draft', 'completed', 'cancelled')),
     CONSTRAINT sales_sync_status_check CHECK (sync_status IN ('not_published', 'pending_sync', 'sent', 'accepted', 'rejected'))
 );
+
+-- Bases existentes (criadas antes do campo de CPF/CNPJ na venda)
+ALTER TABLE pdv.sales ADD COLUMN IF NOT EXISTS customer_document text NULL;
 
 CREATE INDEX IF NOT EXISTS ix_sales_status
     ON pdv.sales (status, created_at_utc DESC);

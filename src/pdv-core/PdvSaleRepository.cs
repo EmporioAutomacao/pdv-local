@@ -20,6 +20,15 @@ public sealed class PdvSaleRepository
         _connectionString = connectionString;
     }
 
+    public async Task EnsureSchemaAsync(CancellationToken cancellationToken)
+    {
+        const string sql = "ALTER TABLE pdv.sales ADD COLUMN IF NOT EXISTS customer_document text NULL";
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<Guid> CreateCompletedSaleAsync(
         CompletedSaleCommand command,
         CancellationToken cancellationToken)
@@ -309,6 +318,7 @@ public sealed class PdvSaleRepository
                 cash_session_id,
                 operator_id,
                 customer_id,
+                customer_document,
                 sale_number,
                 status,
                 subtotal_amount,
@@ -322,6 +332,7 @@ public sealed class PdvSaleRepository
                 @cash_session_id,
                 @operator_id,
                 @customer_id,
+                @customer_document,
                 @sale_number,
                 'completed',
                 @subtotal_amount,
@@ -337,6 +348,8 @@ public sealed class PdvSaleRepository
         insertCommand.Parameters.AddWithValue("cash_session_id", command.CashSessionId);
         insertCommand.Parameters.AddWithValue("operator_id", command.OperatorId);
         insertCommand.Parameters.AddWithValue("customer_id", (object?)command.CustomerId ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("customer_document",
+            string.IsNullOrWhiteSpace(command.CustomerDocument) ? DBNull.Value : command.CustomerDocument);
         insertCommand.Parameters.AddWithValue("sale_number", command.SaleNumber);
         insertCommand.Parameters.AddWithValue("subtotal_amount", subtotal);
         insertCommand.Parameters.AddWithValue("discount_amount", discountAmount);

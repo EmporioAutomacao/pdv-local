@@ -49,6 +49,84 @@ public static class PdvValidation
         return true;
     }
 
+    /// <summary>
+    /// Normaliza um CPF/CNPJ digitado (aceita pontuacao) para somente digitos e
+    /// valida os digitos verificadores. Retorna false para documentos invalidos.
+    /// </summary>
+    public static bool TryNormalizeCustomerDocument(string? input, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false;
+        }
+
+        var digits = new string(input.Where(char.IsDigit).ToArray());
+        var isValid = digits.Length switch
+        {
+            11 => IsValidCpf(digits),
+            14 => IsValidCnpj(digits),
+            _ => false
+        };
+
+        if (!isValid)
+        {
+            return false;
+        }
+
+        normalized = digits;
+        return true;
+    }
+
+    private static bool IsValidCpf(string digits)
+    {
+        if (digits.Distinct().Count() == 1)
+        {
+            return false;
+        }
+
+        var firstCheck = CalculateDocumentCheckDigit(digits, 9, weightStart: 10);
+        var secondCheck = CalculateDocumentCheckDigit(digits, 10, weightStart: 11);
+        return digits[9] - '0' == firstCheck && digits[10] - '0' == secondCheck;
+    }
+
+    private static int CalculateDocumentCheckDigit(string digits, int length, int weightStart)
+    {
+        var sum = 0;
+        for (var index = 0; index < length; index++)
+        {
+            sum += (digits[index] - '0') * (weightStart - index);
+        }
+
+        var remainder = sum % 11;
+        return remainder < 2 ? 0 : 11 - remainder;
+    }
+
+    private static bool IsValidCnpj(string digits)
+    {
+        if (digits.Distinct().Count() == 1)
+        {
+            return false;
+        }
+
+        int[] firstWeights = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+        int[] secondWeights = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+        return digits[12] - '0' == CalculateCnpjCheckDigit(digits, firstWeights)
+            && digits[13] - '0' == CalculateCnpjCheckDigit(digits, secondWeights);
+    }
+
+    private static int CalculateCnpjCheckDigit(string digits, int[] weights)
+    {
+        var sum = 0;
+        for (var index = 0; index < weights.Length; index++)
+        {
+            sum += (digits[index] - '0') * weights[index];
+        }
+
+        var remainder = sum % 11;
+        return remainder < 2 ? 0 : 11 - remainder;
+    }
+
     private static readonly HashSet<string> AllowedOperatorRoles = new(StringComparer.Ordinal)
     {
         "admin",
@@ -173,6 +251,12 @@ public static class PdvValidation
         if (command.DiscountAmount < 0)
         {
             throw new ArgumentException("Desconto da venda nao pode ser negativo.", nameof(command));
+        }
+
+        if (!string.IsNullOrWhiteSpace(command.CustomerDocument)
+            && !TryNormalizeCustomerDocument(command.CustomerDocument, out _))
+        {
+            throw new ArgumentException("CPF/CNPJ do cliente invalido.", nameof(command));
         }
 
         if (command.Items.Count == 0)

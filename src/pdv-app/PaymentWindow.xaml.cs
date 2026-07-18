@@ -16,9 +16,12 @@ public partial class PaymentWindow : Window
     private readonly ITefPaymentProvider _tefPaymentProvider;
     private readonly string _tefProviderName;
     private readonly PdvOperatorRepository _operatorRepository;
+    private readonly PdvCustomerRepository _customerRepository;
     private readonly Func<string, SupervisorAuthorization, string, Task> _recordAuditAsync;
 
     public decimal SaleDiscount { get; private set; }
+    public string? CustomerDocument { get; private set; }
+    public Guid? CustomerId { get; private set; }
 
     internal PaymentWindow(
         decimal subtotal,
@@ -30,6 +33,7 @@ public partial class PaymentWindow : Window
         ITefPaymentProvider tefPaymentProvider,
         string tefProviderName,
         PdvOperatorRepository operatorRepository,
+        PdvCustomerRepository customerRepository,
         Func<string, SupervisorAuthorization, string, Task> recordAuditAsync)
     {
         _subtotal = subtotal;
@@ -41,6 +45,7 @@ public partial class PaymentWindow : Window
         _tefPaymentProvider = tefPaymentProvider;
         _tefProviderName = tefProviderName;
         _operatorRepository = operatorRepository;
+        _customerRepository = customerRepository;
         _recordAuditAsync = recordAuditAsync;
 
         InitializeComponent();
@@ -230,9 +235,44 @@ public partial class PaymentWindow : Window
         });
     }
 
-    private void CompleteSaleButton_Click(object sender, RoutedEventArgs e)
+    private async void CustomerDocumentTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
-        try
+        await RunAsync(async () =>
+        {
+            await ResolveCustomerDocumentAsync();
+        });
+    }
+
+    private async Task ResolveCustomerDocumentAsync()
+    {
+        var documentText = CustomerDocumentTextBox.Text.Trim();
+        if (documentText.Length == 0)
+        {
+            CustomerDocument = null;
+            CustomerId = null;
+            CustomerNameText.Text = "";
+            return;
+        }
+
+        if (!PdvValidation.TryNormalizeCustomerDocument(documentText, out var normalized))
+        {
+            CustomerDocument = null;
+            CustomerId = null;
+            CustomerNameText.Text = "";
+            throw new ArgumentException("CPF/CNPJ invalido.");
+        }
+
+        CustomerDocument = normalized;
+        var customer = await _customerRepository.FindActiveByDocumentAsync(normalized, CancellationToken.None);
+        CustomerId = customer?.CustomerId;
+        CustomerNameText.Text = customer is null
+            ? "Consumidor nao cadastrado"
+            : $"Cliente: {customer.Name}";
+    }
+
+    private async void CompleteSaleButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAsync(async () =>
         {
             var remaining = CalculateRemainingAmount();
             if (remaining > 0)
@@ -240,12 +280,9 @@ public partial class PaymentWindow : Window
                 throw new InvalidOperationException($"Ainda restam {FormatMoney(remaining)} a pagar.");
             }
 
+            await ResolveCustomerDocumentAsync();
             DialogResult = true;
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            ShowMessage(ex.Message, isError: true);
-        }
+        });
     }
 
     private decimal CalculateRemainingAmount()

@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly PdvSaleRepository _saleRepository;
     private readonly PdvOperationAuditRepository _operationAuditRepository;
     private readonly PdvCashMovementRepository _cashMovementRepository;
+    private readonly PdvCustomerRepository _customerRepository;
     private readonly ITefPaymentProvider _tefPaymentProvider;
     private readonly HttpClient _httpClient;
     private readonly DispatcherTimer _statusRefreshTimer;
@@ -48,6 +49,8 @@ public partial class MainWindow : Window
     private PdvOperator? _initialOperator;
     private bool _startupCashPromptShown;
     private decimal _saleDiscount;
+    private Guid? _pendingCustomerId;
+    private string? _pendingCustomerDocument;
 
     public MainWindow(PdvOperator initialOperator) : this()
     {
@@ -65,6 +68,7 @@ public partial class MainWindow : Window
         _saleRepository = new PdvSaleRepository(_configuration.PdvLocalConnectionString);
         _operationAuditRepository = new PdvOperationAuditRepository(_configuration.PdvLocalConnectionString);
         _cashMovementRepository = new PdvCashMovementRepository(_configuration.PdvLocalConnectionString);
+        _customerRepository = new PdvCustomerRepository(_configuration.PdvLocalConnectionString);
         _tefPaymentProvider = new ConfiguredTefPaymentProvider(_configuration.Tef);
         _httpClient = new HttpClient
         {
@@ -101,6 +105,7 @@ public partial class MainWindow : Window
         _clockTimer.Start();
         await _operationAuditRepository.EnsureSchemaAsync(CancellationToken.None);
         await _cashMovementRepository.EnsureSchemaAsync(CancellationToken.None);
+        await _saleRepository.EnsureSchemaAsync(CancellationToken.None);
         await RefreshStatusAsync();
         _statusRefreshTimer.Start();
 
@@ -477,12 +482,15 @@ public partial class MainWindow : Window
                 _tefPaymentProvider,
                 _configuration.Tef.Provider,
                 _operatorRepository,
+                _customerRepository,
                 (operationType, authorization, payload) =>
                     RecordDraftAuditAsync(operationType, authorization, payload, CancellationToken.None))
             { Owner = this };
 
             var confirmed = window.ShowDialog() == true;
             _saleDiscount = window.SaleDiscount;
+            _pendingCustomerId = window.CustomerId;
+            _pendingCustomerDocument = window.CustomerDocument;
             UpdateTotals();
             SaveDraftToBackground();
 
@@ -510,7 +518,7 @@ public partial class MainWindow : Window
                 new CompletedSaleCommand(
                     CashSessionId: _currentCashSession!.CashSessionId,
                     OperatorId: _currentOperator!.OperatorId,
-                    CustomerId: null,
+                    CustomerId: _pendingCustomerId,
                     SaleNumber: saleNumber,
                     Items: _saleItems
                         .Select(item => new CompletedSaleItemCommand(
@@ -536,7 +544,8 @@ public partial class MainWindow : Window
                             payment.TefMetadataJson))
                         .ToArray(),
                     DiscountAmount: saleDiscount,
-                    AuditEvents: auditEvents),
+                    AuditEvents: auditEvents,
+                    CustomerDocument: _pendingCustomerDocument),
                 CancellationToken.None);
 
             var receipt = BuildReceiptData(saleId, saleNumber, saleDiscount);
@@ -1024,6 +1033,8 @@ public partial class MainWindow : Window
         _saleItems.Clear();
         _payments.Clear();
         _saleDiscount = 0;
+        _pendingCustomerId = null;
+        _pendingCustomerDocument = null;
         ProductEntryTextBox.Clear();
         QuantityTextBox.Text = "1";
         UnitPriceTextBox.Text = "0,00";
