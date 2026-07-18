@@ -1,0 +1,63 @@
+<Window x:Class="PdvLocal.App.LockScreenWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Terminal travado"
+        WindowState="Maximized"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackground}"
+        Loaded="Window_Loaded">
+    <Grid>
+        <Border HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{DynamicResource SurfacePrimary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="40,32"
+                Width="380">
+            <StackPanel>
+                <TextBlock Text="Terminal travado"
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimary}"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,4" />
+                <TextBlock x:Name="LockedOperatorText"
+                           Text=""
+                           FontSize="12"
+                           Foreground="{DynamicResource TextSecondary}"
+                           HorizontalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,24" />
+
+                <TextBlock Text="Senha" Style="{StaticResource FieldLabelStyle}" />
+                <PasswordBox x:Name="UnlockPasswordBox"
+                             Background="{DynamicResource InputBg}"
+                             Foreground="{DynamicResource InputFg}"
+                             BorderBrush="{DynamicResource InputBorder}"
+                             BorderThickness="1"
+                             Padding="10,7"
+                             Margin="0,0,0,18" />
+
+                <Button x:Name="UnlockButton"
+                        Content="Destravar"
+                        IsDefault="True"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        HorizontalAlignment="Stretch"
+                        Padding="12,10"
+                        Click="UnlockButton_Click" />
+
+                <TextBlock x:Name="UnlockErrorText"
+                           Text=""
+                           Foreground="#E53E3E"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Margin="0,12,0,0"
+                           HorizontalAlignment="Center"
+                           Visibility="Collapsed" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

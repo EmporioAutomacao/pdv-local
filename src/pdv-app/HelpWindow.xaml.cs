@@ -8,12 +8,14 @@ public partial class HelpWindow : Window
     [
         new("F1",    "Qualquer tela",           "Abrir esta janela de ajuda"),
         new("F2",    "Tela de venda",           "Nova venda (exige supervisor se houver itens)"),
+        new("F3",    "Tela de venda",           "Consulta de preço (não lança item na venda)"),
         new("F4",    "Tela de venda",           "Abrir diálogo do caixa (abrir/fechar/suprimento/sangria)"),
         new("F8",    "Caixa aberto",            "Abrir consulta de vendas do caixa"),
         new("F9",    "Após 1ª venda",           "Reimprimir último comprovante de venda"),
         new("F10",   "Tela de venda",           "Pagamento / finalizar venda (F12 também funciona)"),
         new("F11",   "Tela de venda",           "Trocar de operador (bloqueado com venda em andamento)"),
         new("Ctrl+D","Tela de venda",           "Diagnóstico e ativação"),
+        new("Ctrl+L","Tela de venda",           "Travar terminal (exige a senha do operador para voltar)"),
         new("Esc",   "Produto selecionado",     "Cancelar seleção de produto e limpar campos"),
         new("Esc",   "Diálogos",                "Fechar o diálogo atual"),
     ];
@@ -24,6 +26,7 @@ public partial class HelpWindow : Window
         new("Enter", "Fundo de troco (Caixa)",  "Abrir caixa"),
         new("Enter", "Valor contado (Caixa)",   "Fechar caixa"),
         new("Enter", "Campo Produto",           "Buscar produto / adicionar ao carrinho"),
+        new("qtd*código", "Campo Produto",      "Ex.: 3*1187 lança 3 unidades do código 1187"),
         new("↑  ↓",  "Grid de resultados",     "Navegar entre produtos encontrados"),
         new("Enter", "Grid de resultados",      "Selecionar produto destacado"),
         new("Enter", "Quantidade",              "Adicionar item ao carrinho"),

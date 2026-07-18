@@ -363,9 +363,17 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 HelpButton_Click(HelpButton, e);
                 break;
+            case Key.F3:
+                e.Handled = true;
+                OpenPriceCheckWindow();
+                break;
             case Key.F4:
                 e.Handled = true;
                 OpenCashWindow();
+                break;
+            case Key.L when Keyboard.Modifiers == ModifierKeys.Control:
+                e.Handled = true;
+                LockTerminal();
                 break;
             case Key.F11:
                 e.Handled = true;
@@ -613,9 +621,36 @@ public partial class MainWindow : Window
         new TechnicalDetailsWindow { Owner = this }.ShowDialog();
     }
 
+    private void OpenPriceCheckWindow()
+    {
+        new PriceCheckWindow(_productRepository) { Owner = this }.ShowDialog();
+    }
+
+    private void PriceCheckButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenPriceCheckWindow();
+    }
+
+    private void LockTerminal()
+    {
+        if (_currentOperator is null)
+        {
+            return;
+        }
+
+        new LockScreenWindow(_currentOperator, _operatorRepository) { Owner = this }.ShowDialog();
+    }
+
     private async Task SearchProductsAsync()
     {
         var query = ProductEntryTextBox.Text.Trim();
+        if (PdvValidation.TryParseQuantityCodeShortcut(query, out var shortcutQuantity, out var shortcutQuery))
+        {
+            QuantityTextBox.Text = shortcutQuantity.ToString("0.####", BrazilianCulture);
+            ProductEntryTextBox.Text = shortcutQuery;
+            query = shortcutQuery;
+        }
+
         if (string.IsNullOrWhiteSpace(query))
         {
             throw new ArgumentException("Informe um codigo, codigo de barras ou nome de produto.");

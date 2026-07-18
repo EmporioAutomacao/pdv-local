@@ -27,6 +27,11 @@
                         Style="{StaticResource SecondaryButtonStyle}"
                         Click="HelpButton_Click"
                         Margin="0,0,8,0" />
+                <Button x:Name="PriceCheckButton"
+                        Content="F3 Preço"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="PriceCheckButton_Click"
+                        Margin="0,0,8,0" />
                 <Button x:Name="CashButton"
                         Content="F4 Caixa"
                         Style="{StaticResource SecondaryButtonStyle}"

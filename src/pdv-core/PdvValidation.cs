@@ -1,7 +1,54 @@
+using System.Globalization;
+
 namespace PdvLocal.Core;
 
 public static class PdvValidation
 {
+    /// <summary>
+    /// Interpreta o atalho de PDV "quantidade*codigo" (ex.: "3*1187" ou "1,5*7891234").
+    /// Retorna false quando a entrada nao segue o formato — nesse caso ela deve ser
+    /// tratada como busca normal de produto.
+    /// </summary>
+    public static bool TryParseQuantityCodeShortcut(string? input, out decimal quantity, out string productQuery)
+    {
+        quantity = 0;
+        productQuery = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false;
+        }
+
+        var separatorIndex = input.IndexOf('*');
+        if (separatorIndex <= 0 || separatorIndex >= input.Length - 1)
+        {
+            return false;
+        }
+
+        var quantityText = input[..separatorIndex].Trim();
+        var queryText = input[(separatorIndex + 1)..].Trim();
+        if (quantityText.Length == 0 || queryText.Length == 0 || queryText.Contains('*'))
+        {
+            return false;
+        }
+
+        var decimalCulture = quantityText.LastIndexOf('.') > quantityText.LastIndexOf(',')
+            ? CultureInfo.InvariantCulture
+            : CultureInfo.GetCultureInfo("pt-BR");
+        if (!decimal.TryParse(quantityText, NumberStyles.Number, decimalCulture, out quantity))
+        {
+            return false;
+        }
+
+        if (quantity <= 0)
+        {
+            return false;
+        }
+
+        productQuery = queryText;
+        return true;
+    }
+
     private static readonly HashSet<string> AllowedOperatorRoles = new(StringComparer.Ordinal)
     {
         "admin",

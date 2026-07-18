@@ -26,6 +26,33 @@ public sealed class PdvValidationTests
         Assert.False(PdvValidation.IsSupervisorRole("operator"));
     }
 
+    [Theory]
+    [InlineData("3*1187", 3, "1187")]
+    [InlineData("1,5*7891234000000", 1.5, "7891234000000")]
+    [InlineData("2.25*ABC-01", 2.25, "ABC-01")]
+    [InlineData(" 10 * arroz ", 10, "arroz")]
+    public void TryParseQuantityCodeShortcut_parses_quantity_and_query(string input, decimal expectedQuantity, string expectedQuery)
+    {
+        Assert.True(PdvValidation.TryParseQuantityCodeShortcut(input, out var quantity, out var query));
+        Assert.Equal(expectedQuantity, quantity);
+        Assert.Equal(expectedQuery, query);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("1187")]
+    [InlineData("*1187")]
+    [InlineData("3*")]
+    [InlineData("0*1187")]
+    [InlineData("-2*1187")]
+    [InlineData("abc*1187")]
+    [InlineData("2*3*1187")]
+    public void TryParseQuantityCodeShortcut_rejects_invalid_input(string? input)
+    {
+        Assert.False(PdvValidation.TryParseQuantityCodeShortcut(input, out _, out _));
+    }
+
     [Fact]
     public void ValidateOperationAudit_rejects_missing_supervisor()
     {
