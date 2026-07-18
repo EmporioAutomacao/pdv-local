@@ -1,0 +1,103 @@
+<Window x:Class="PdvLocal.App.CashSessionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Caixa"
+        Width="430" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfacePrimary}"
+        Loaded="Window_Loaded">
+    <Border Padding="28,24">
+        <StackPanel>
+            <TextBlock Text="Caixa"
+                       FontSize="20"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimary}"
+                       Margin="0,0,0,4" />
+            <TextBlock x:Name="CashOperatorText"
+                       Text=""
+                       FontSize="12"
+                       Foreground="{DynamicResource TextSecondary}"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,18" />
+
+            <StackPanel x:Name="OpenStatePanel">
+                <TextBlock Text="Fundo de troco (abertura)" Style="{StaticResource FieldLabelStyle}" />
+                <TextBox x:Name="OpeningAmountTextBox"
+                         Style="{StaticResource InputStyle}"
+                         FontSize="18"
+                         Text="0,00"
+                         KeyDown="OpeningAmountTextBox_KeyDown"
+                         Margin="0,0,0,14" />
+                <Button x:Name="OpenCashButton"
+                        Content="Abrir caixa"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="OpenCashButton_Click"
+                        HorizontalAlignment="Stretch"
+                        Padding="12,10" />
+            </StackPanel>
+
+            <StackPanel x:Name="OpenedStatePanel">
+                <TextBlock Text="Caixa atual" Style="{StaticResource FieldLabelStyle}" />
+                <TextBlock x:Name="CurrentCashSessionValue"
+                           Text="-"
+                           Foreground="{DynamicResource TextPrimary}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,10" />
+
+                <TextBlock Text="Resumo do caixa" Style="{StaticResource FieldLabelStyle}" />
+                <TextBlock x:Name="CashSummaryValue"
+                           Text="-"
+                           Foreground="{DynamicResource TextPrimary}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,14" />
+
+                <TextBlock Text="Movimento de caixa" Style="{StaticResource FieldLabelStyle}" />
+                <DockPanel Margin="0,0,0,14" LastChildFill="True">
+                    <Button x:Name="CashWithdrawalButton"
+                            Content="Sangria"
+                            DockPanel.Dock="Right"
+                            Style="{StaticResource DangerButtonStyle}"
+                            Click="CashWithdrawalButton_Click" />
+                    <Button x:Name="CashSupplyButton"
+                            Content="Suprimento"
+                            DockPanel.Dock="Right"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="CashSupplyButton_Click"
+                            Margin="0,0,8,0" />
+                    <TextBox x:Name="CashMovementAmountTextBox"
+                             Style="{StaticResource InputStyle}"
+                             Text="0,00" />
+                </DockPanel>
+
+                <TextBlock Text="Valor contado no fechamento" Style="{StaticResource FieldLabelStyle}" />
+                <TextBox x:Name="ClosingAmountTextBox"
+                         Style="{StaticResource InputStyle}"
+                         Text="0,00"
+                         KeyDown="ClosingAmountTextBox_KeyDown"
+                         Margin="0,0,0,14" />
+                <Button x:Name="CloseCashButton"
+                        Content="Fechar caixa"
+                        Style="{StaticResource DangerButtonStyle}"
+                        Click="CloseCashButton_Click"
+                        HorizontalAlignment="Stretch"
+                        Padding="12,10" />
+            </StackPanel>
+
+            <TextBlock x:Name="CashMessageText"
+                       Text=""
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Margin="0,12,0,0"
+                       Visibility="Collapsed" />
+
+            <Button x:Name="CloseWindowButton"
+                    Content="Voltar (Esc)"
+                    IsCancel="True"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Right"
+                    Margin="0,16,0,0" />
+        </StackPanel>
+    </Border>
+</Window>

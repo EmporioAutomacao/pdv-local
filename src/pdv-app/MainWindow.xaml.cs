@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private PdvProduct? _selectedProduct;
     private SaleReceiptData? _lastReceipt;
     private PdvOperator? _initialOperator;
+    private bool _startupCashPromptShown;
 
     public MainWindow(PdvOperator initialOperator) : this()
     {
@@ -101,13 +102,35 @@ public partial class MainWindow : Window
 
         if (_initialOperator is not null)
         {
-            OperatorLoginTextBox.Text = _initialOperator.Login;
             _currentOperator = _initialOperator;
             _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
                 _initialOperator.OperatorId, CancellationToken.None);
             ApplyCurrentSession();
-            await RefreshCashSummaryAsync();
-            SetOperationMessage($"Operador carregado: {_initialOperator.DisplayName}.", isError: false);
+            SetOperationMessage($"Operador: {_initialOperator.DisplayName}.", isError: false);
+
+            if (_currentCashSession is null)
+            {
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(TryOpenStartupCashWindow));
+            }
+            else
+            {
+                await LoadDraftIfAvailableAsync();
+                FocusProductEntry();
+            }
+        }
+    }
+
+    private void TryOpenStartupCashWindow()
+    {
+        if (_startupCashPromptShown)
+        {
+            return;
+        }
+
+        _startupCashPromptShown = true;
+        if (_currentCashSession is null && _currentOperator is not null)
+        {
+            OpenCashWindow();
         }
     }
 
@@ -124,127 +147,106 @@ public partial class MainWindow : Window
         });
     }
 
-    private async void LoadOperatorButton_Click(object sender, RoutedEventArgs e)
+    private void CashButton_Click(object sender, RoutedEventArgs e)
     {
-        await LoadOperatorAsync();
+        OpenCashWindow();
     }
 
-    private async void OpenCashButton_Click(object sender, RoutedEventArgs e)
+    private void SwitchOperatorButton_Click(object sender, RoutedEventArgs e)
+    {
+        SwitchOperator();
+    }
+
+    private void OpenCashWindow()
+    {
+        if (_currentOperator is null)
+        {
+            return;
+        }
+
+        var hadSession = _currentCashSession is not null;
+        var window = new CashSessionWindow(
+            _currentOperator,
+            _currentCashSession,
+            _cashSessionRepository,
+            _cashMovementRepository,
+            _operatorRepository,
+            hasPendingSale: _saleItems.Count > 0 || _payments.Count > 0)
+        { Owner = this };
+        window.ShowDialog();
+
+        _currentCashSession = window.CurrentSession;
+        ApplyCurrentSession();
+
+        if (!hadSession && _currentCashSession is not null)
+        {
+            _ = HandleCashOpenedAsync();
+        }
+        else if (hadSession && _currentCashSession is null)
+        {
+            SetOperationMessage("Caixa fechado.", isError: false);
+            _ = RefreshDatabaseStatusAsync();
+        }
+    }
+
+    private async Task HandleCashOpenedAsync()
     {
         await RunPdvOperationAsync(async () =>
         {
-            var operatorRecord = await LoadOperatorAsync();
-            if (operatorRecord is null)
-            {
-                return;
-            }
-
-            var openingAmount = ParseMoney(OpeningAmountTextBox.Text, "Valor de abertura");
-            var existingCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
-                operatorRecord.OperatorId,
-                CancellationToken.None);
-            if (existingCashSession is not null)
-            {
-                _currentCashSession = existingCashSession;
-                ApplyCurrentSession();
-                await RefreshCashSummaryAsync();
-                SetOperationMessage("Caixa aberto existente carregado.", isError: false);
-                await LoadDraftIfAvailableAsync();
-                FocusProductEntry();
-                return;
-            }
-
-            var cashSessionId = await _cashSessionRepository.OpenAsync(
-                new OpenCashSessionCommand(operatorRecord.OperatorId, openingAmount, null),
-                CancellationToken.None);
-            _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
-                operatorRecord.OperatorId,
-                CancellationToken.None);
-            ApplyCurrentSession();
-            await RefreshCashSummaryAsync();
-            SetOperationMessage($"Caixa aberto: {cashSessionId}.", isError: false);
+            SetOperationMessage("Caixa aberto. Lance produtos pelo campo principal.", isError: false);
             await LoadDraftIfAvailableAsync();
             FocusProductEntry();
             await RefreshDatabaseStatusAsync();
         });
     }
 
-    private async void CloseCashButton_Click(object sender, RoutedEventArgs e)
+    private void SwitchOperator()
+    {
+        if (_saleItems.Count > 0 || _payments.Count > 0)
+        {
+            SetOperationMessage("Finalize ou cancele a venda em andamento antes de trocar de operador.", isError: true);
+            return;
+        }
+
+        var login = new LoginWindow(_configuration.PdvLocalConnectionString) { Owner = this };
+        if (login.ShowDialog() != true || login.AuthenticatedOperator is null)
+        {
+            return;
+        }
+
+        _ = ApplyOperatorAsync(login.AuthenticatedOperator);
+    }
+
+    private async Task ApplyOperatorAsync(PdvOperator newOperator)
     {
         await RunPdvOperationAsync(async () =>
         {
-            EnsureCashSession();
-            if (_saleItems.Count > 0 || _payments.Count > 0)
-            {
-                throw new InvalidOperationException("Finalize ou limpe a venda em andamento antes de fechar o caixa.");
-            }
+            var previousOperator = _currentOperator;
+            var previousSession = _currentCashSession;
 
-            var closingAmount = ParseMoney(ClosingAmountTextBox.Text, "Valor de fechamento");
-            var summary = await _cashMovementRepository.GetSummaryAsync(
-                _currentCashSession!.CashSessionId,
+            _currentOperator = newOperator;
+            _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
+                newOperator.OperatorId,
                 CancellationToken.None);
-            var difference = closingAmount - summary.ExpectedCashAmount;
-            await _cashSessionRepository.CloseAsync(
-                new CloseCashSessionCommand(
-                    _currentCashSession.CashSessionId,
-                    closingAmount,
-                    BuildCloseCashNotes(summary, closingAmount)),
-                CancellationToken.None);
-            SetOperationMessage($"Caixa fechado: {_currentCashSession.CashSessionId}. Diferenca: {FormatMoney(difference)}.", isError: false);
-            _currentCashSession = null;
             ApplyCurrentSession();
-            await RefreshDatabaseStatusAsync();
-        });
-    }
 
-    private async void CashSupplyButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RecordCashMovementAsync("supply");
-    }
+            var previousCashStaysOpen = previousSession is not null
+                && previousOperator is not null
+                && previousOperator.OperatorId != newOperator.OperatorId;
+            SetOperationMessage(previousCashStaysOpen
+                ? $"Operador: {newOperator.DisplayName}. O caixa de {previousOperator!.DisplayName} permanece aberto."
+                : $"Operador: {newOperator.DisplayName}.",
+                isError: false);
 
-    private async void CashWithdrawalButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RecordCashMovementAsync("withdrawal");
-    }
-
-    private async Task RecordCashMovementAsync(string movementType)
-    {
-        await RunPdvOperationAsync(async () =>
-        {
-            EnsureCashSession();
-            if (_saleItems.Count > 0 || _payments.Count > 0)
+            if (_currentCashSession is null)
             {
-                throw new InvalidOperationException("Finalize ou limpe a venda em andamento antes de movimentar o caixa.");
+                OpenCashWindow();
             }
-
-            var movementName = movementType == "supply" ? "suprimento" : "sangria";
-            var amount = ParseMoney(CashMovementAmountTextBox.Text, $"Valor de {movementName}");
-            var authorization = RequireSupervisorAuthorization($"registrar {movementName}");
-
-            if (movementType == "withdrawal")
+            else
             {
-                var summary = await _cashMovementRepository.GetSummaryAsync(
-                    _currentCashSession!.CashSessionId,
-                    CancellationToken.None);
-                if (amount > summary.ExpectedCashAmount)
-                {
-                    throw new ArgumentException("Sangria nao pode ser maior que o dinheiro esperado no caixa.");
-                }
+                await LoadDraftIfAvailableAsync();
+                FocusProductEntry();
             }
-
-            var movementId = await _cashMovementRepository.InsertAsync(
-                new PdvCashMovementCommand(
-                    _currentCashSession!.CashSessionId,
-                    _currentOperator!.OperatorId,
-                    authorization.Supervisor.OperatorId,
-                    movementType,
-                    amount,
-                    authorization.Reason),
-                CancellationToken.None);
-
-            CashMovementAmountTextBox.Text = "0,00";
-            await RefreshCashSummaryAsync();
-            SetOperationMessage($"{Capitalize(movementName)} registrado com auditoria. ID: {movementId}.", isError: false);
         });
     }
 
@@ -375,6 +377,14 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 HelpButton_Click(HelpButton, e);
                 break;
+            case Key.F4:
+                e.Handled = true;
+                OpenCashWindow();
+                break;
+            case Key.F11:
+                e.Handled = true;
+                SwitchOperator();
+                break;
             case Key.F8 when CashSalesButton.IsEnabled:
                 e.Handled = true;
                 CashSalesButton_Click(CashSalesButton, e);
@@ -461,30 +471,6 @@ public partial class MainWindow : Window
             AddSelectedProductToCart();
             return Task.CompletedTask;
         });
-    }
-
-    private void OperatorLoginTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        LoadOperatorButton_Click(LoadOperatorButton, e);
-    }
-
-    private void OpeningAmountTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        OpenCashButton_Click(OpenCashButton, e);
-    }
-
-    private void ClosingAmountTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        CloseCashButton_Click(CloseCashButton, e);
     }
 
     private void CartItemsGrid_KeyDown(object sender, KeyEventArgs e)
@@ -659,7 +645,6 @@ public partial class MainWindow : Window
             ReprintButton.Visibility = Visibility.Visible;
             ResetSale(clearMessage: false);
             SetOperationMessage($"Venda {saleNumber} finalizada e pendente de sincronizacao. ID: {saleId}.", isError: false);
-            await RefreshCashSummaryAsync();
             await RefreshDatabaseStatusAsync();
             FocusProductEntry();
             new SaleReceiptWindow(receipt, _saleRepository) { Owner = this }.Show();
@@ -765,30 +750,6 @@ public partial class MainWindow : Window
         {
             CheckUpdateButton.IsEnabled = true;
         }
-    }
-
-    private async Task<PdvOperator?> LoadOperatorAsync()
-    {
-        var login = OperatorLoginTextBox.Text.Trim();
-        var operatorRecord = await _operatorRepository.FindActiveByLoginAsync(login, CancellationToken.None);
-        if (operatorRecord is null)
-        {
-            _currentOperator = null;
-            _currentCashSession = null;
-            ApplyCurrentSession();
-            await RefreshCashSummaryAsync();
-            SetOperationMessage($"Operador ativo nao encontrado: {login}.", isError: true);
-            return null;
-        }
-
-        _currentOperator = operatorRecord;
-        _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
-            operatorRecord.OperatorId,
-            CancellationToken.None);
-        ApplyCurrentSession();
-        await RefreshCashSummaryAsync();
-        SetOperationMessage($"Operador carregado: {operatorRecord.DisplayName}.", isError: false);
-        return operatorRecord;
     }
 
     private async Task SearchProductsAsync()
@@ -1015,12 +976,12 @@ public partial class MainWindow : Window
     {
         if (_currentOperator is null)
         {
-            throw new InvalidOperationException("Carregue um operador antes de operar o caixa.");
+            throw new InvalidOperationException("Faca login para operar o PDV.");
         }
 
         if (_currentCashSession is null)
         {
-            throw new InvalidOperationException("Abra ou carregue um caixa antes de vender.");
+            throw new InvalidOperationException("Abra o caixa (F4) antes de vender.");
         }
     }
 
@@ -1162,75 +1123,14 @@ public partial class MainWindow : Window
 
     private void ApplyCurrentSession()
     {
-        CurrentOperatorValue.Text = _currentOperator is null
-            ? "-"
-            : $"{_currentOperator.DisplayName} ({_currentOperator.Login} / { _currentOperator.Role})";
-        CurrentCashSessionValue.Text = _currentCashSession is null
-            ? "-"
-            : $"{_currentCashSession.CashSessionId} / {_currentCashSession.Status}";
-        if (_currentCashSession is null && CashSummaryValue is not null)
-        {
-            CashSummaryValue.Text = "-";
-        }
+        OperatorStatusText.Text = _currentOperator is null
+            ? "Operador: -"
+            : $"Operador: {_currentOperator.DisplayName} ({_currentOperator.Login})";
+        CashStatusText.Text = _currentCashSession is null
+            ? "Caixa: fechado — F4 para abrir"
+            : $"Caixa: aberto desde {_currentCashSession.OpenedAtUtc.LocalDateTime:dd/MM/yyyy HH:mm}";
 
         ApplySaleGate();
-    }
-
-    private async Task RefreshCashSummaryAsync()
-    {
-        if (CashSummaryValue is null)
-        {
-            return;
-        }
-
-        if (_currentCashSession is null)
-        {
-            CashSummaryValue.Text = "-";
-            return;
-        }
-
-        var summary = await _cashMovementRepository.GetSummaryAsync(
-            _currentCashSession.CashSessionId,
-            CancellationToken.None);
-        CashSummaryValue.Text = FormatCashSummary(summary);
-        ClosingAmountTextBox.Text = FormatDecimal(summary.ExpectedCashAmount);
-    }
-
-    private static string FormatCashSummary(PdvCashSessionSummary summary)
-    {
-        var speciesText = summary.PaymentSpecies.Count == 0
-            ? "-"
-            : Environment.NewLine + string.Join(
-                Environment.NewLine,
-                summary.PaymentSpecies.Select(item => $"  {item.SpeciesName}: {FormatMoney(item.Amount)}"));
-
-        return string.Join(
-            Environment.NewLine,
-            $"Abertura: {FormatMoney(summary.OpeningAmount)}",
-            $"Vendas: {FormatMoney(summary.TotalSalesAmount)} ({summary.SaleCount})",
-            $"Dinheiro em vendas: {FormatMoney(summary.CashSalesAmount)}",
-            $"Suprimentos: {FormatMoney(summary.SupplyAmount)}",
-            $"Sangrias: {FormatMoney(summary.WithdrawalAmount)}",
-            $"Dinheiro esperado: {FormatMoney(summary.ExpectedCashAmount)}",
-            $"Por especie: {speciesText}");
-    }
-
-    private static string BuildCloseCashNotes(
-        PdvCashSessionSummary summary,
-        decimal closingAmount)
-    {
-        var difference = closingAmount - summary.ExpectedCashAmount;
-        return string.Join(
-            " | ",
-            "Fechado pelo PDV App",
-            $"abertura={FormatDecimal(summary.OpeningAmount)}",
-            $"vendas={FormatDecimal(summary.TotalSalesAmount)}",
-            $"dinheiro_vendas={FormatDecimal(summary.CashSalesAmount)}",
-            $"suprimentos={FormatDecimal(summary.SupplyAmount)}",
-            $"sangrias={FormatDecimal(summary.WithdrawalAmount)}",
-            $"dinheiro_esperado={FormatDecimal(summary.ExpectedCashAmount)}",
-            $"dinheiro_informado={FormatDecimal(closingAmount)}",
-            $"diferenca={FormatDecimal(difference)}");
     }
 
     private void ApplySaleGate()
@@ -1242,15 +1142,11 @@ public partial class MainWindow : Window
         CompleteSaleButton.IsEnabled = canSell;
         PaymentMethodComboBox.IsEnabled = canSell;
         PaymentReceivedTextBox.IsEnabled = canSell;
-        CloseCashButton.IsEnabled = _currentCashSession is not null;
-        CashSalesButton.IsEnabled = _currentCashSession is not null;
-        CashMovementAmountTextBox.IsEnabled = canSell;
-        CashSupplyButton.IsEnabled = canSell;
-        CashWithdrawalButton.IsEnabled = canSell;
         PaymentConditionComboBox.IsEnabled = canSell;
+        CashSalesButton.IsEnabled = _currentCashSession is not null;
         SaleGateValue.Text = canSell
             ? "Caixa aberto. Lance produtos pelo campo principal."
-            : "Venda bloqueada. Carregue operador e abra caixa.";
+            : "Venda bloqueada. Caixa fechado — pressione F4 para abrir.";
         SaleGateValue.Foreground = BrushFromHex(canSell ? "#166534" : "#64748B");
     }
 

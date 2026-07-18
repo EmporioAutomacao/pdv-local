@@ -32,6 +32,16 @@
                         Style="{StaticResource SecondaryButtonStyle}"
                         Click="HelpButton_Click"
                         Margin="0,0,8,0" />
+                <Button x:Name="CashButton"
+                        Content="F4 Caixa"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="CashButton_Click"
+                        Margin="0,0,8,0" />
+                <Button x:Name="SwitchOperatorButton"
+                        Content="F11 Operador"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="SwitchOperatorButton_Click"
+                        Margin="0,0,8,0" />
                 <Button x:Name="ReprintButton"
                         Content="Reimprimir"
                         Style="{StaticResource SecondaryButtonStyle}"
@@ -267,76 +277,6 @@
                 <StackPanel Grid.Column="1">
                     <Border Style="{StaticResource CardStyle}">
                         <StackPanel>
-                            <TextBlock Text="Caixa"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimary}"
-                                       Margin="0,0,0,10" />
-
-                            <TextBlock Text="Login do operador" Style="{StaticResource LabelStyle}" />
-                            <TextBox x:Name="OperatorLoginTextBox" Style="{StaticResource InputStyle}" Text="admin" KeyDown="OperatorLoginTextBox_KeyDown" />
-
-                            <StackPanel Orientation="Horizontal">
-                                <StackPanel Width="145">
-                                    <TextBlock Text="Abertura" Style="{StaticResource LabelStyle}" />
-                                    <TextBox x:Name="OpeningAmountTextBox" Style="{StaticResource InputStyle}" Text="0,00" KeyDown="OpeningAmountTextBox_KeyDown" />
-                                </StackPanel>
-                                <StackPanel Width="145">
-                                    <TextBlock Text="Fechamento" Style="{StaticResource LabelStyle}" />
-                                    <TextBox x:Name="ClosingAmountTextBox" Style="{StaticResource InputStyle}" Text="0,00" KeyDown="ClosingAmountTextBox_KeyDown" />
-                                </StackPanel>
-                            </StackPanel>
-
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Button x:Name="LoadOperatorButton"
-                                        Content="Carregar"
-                                        Style="{StaticResource SecondaryButtonStyle}"
-                                        Click="LoadOperatorButton_Click"
-                                        Margin="0,0,8,0" />
-                                <Button x:Name="OpenCashButton"
-                                        Content="Abrir caixa"
-                                        Style="{StaticResource PrimaryButtonStyle}"
-                                        Click="OpenCashButton_Click" />
-                            </StackPanel>
-
-                            <Button x:Name="CloseCashButton"
-                                    Content="Fechar caixa"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Click="CloseCashButton_Click"
-                                    Margin="0,0,0,12" />
-
-                            <TextBlock Text="Movimento de caixa" Style="{StaticResource LabelStyle}" />
-                            <TextBox x:Name="CashMovementAmountTextBox"
-                                     Style="{StaticResource InputStyle}"
-                                     Text="0,00" />
-
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Button x:Name="CashSupplyButton"
-                                        Content="Suprimento"
-                                        Style="{StaticResource SecondaryButtonStyle}"
-                                        Click="CashSupplyButton_Click"
-                                        Margin="0,0,8,0" />
-                                <Button x:Name="CashWithdrawalButton"
-                                        Content="Sangria"
-                                        Style="{StaticResource DangerButtonStyle}"
-                                        Click="CashWithdrawalButton_Click" />
-                            </StackPanel>
-
-                            <TextBlock Text="Operador atual" Style="{StaticResource LabelStyle}" />
-                            <TextBlock x:Name="CurrentOperatorValue" Text="-" TextWrapping="Wrap" Margin="0,0,0,8" />
-
-                            <TextBlock Text="Caixa atual" Style="{StaticResource LabelStyle}" />
-                            <TextBlock x:Name="CurrentCashSessionValue" Text="-" TextWrapping="Wrap" Margin="0,0,0,8" />
-
-                            <TextBlock Text="Resumo do caixa" Style="{StaticResource LabelStyle}" />
-                            <TextBlock x:Name="CashSummaryValue"
-                                       Text="-"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource CardStyle}">
-                        <StackPanel>
                             <TextBlock Text="Pagamento"
                                        FontSize="18"
                                        FontWeight="SemiBold"
@@ -545,12 +485,27 @@
             </Grid>
         </ScrollViewer>
 
-        <TextBlock Grid.Row="3"
-                   x:Name="FooterText"
-                   Text="Aguardando status."
-                   Foreground="{DynamicResource TextSecondary}"
-                   FontSize="12"
-                   Margin="0,12,0,0" />
+        <DockPanel Grid.Row="3" Margin="0,12,0,0" LastChildFill="True">
+            <TextBlock x:Name="OperatorStatusText"
+                       DockPanel.Dock="Left"
+                       Text="Operador: -"
+                       Foreground="{DynamicResource TextPrimary}"
+                       FontWeight="SemiBold"
+                       FontSize="12"
+                       Margin="0,0,18,0" />
+            <TextBlock x:Name="CashStatusText"
+                       DockPanel.Dock="Left"
+                       Text="Caixa: fechado — F4 para abrir"
+                       Foreground="{DynamicResource TextPrimary}"
+                       FontWeight="SemiBold"
+                       FontSize="12"
+                       Margin="0,0,18,0" />
+            <TextBlock x:Name="FooterText"
+                       Text="Aguardando status."
+                       Foreground="{DynamicResource TextSecondary}"
+                       FontSize="12"
+                       TextAlignment="Right" />
+        </DockPanel>
 
         <TextBlock x:Name="LocalApiValue" Visibility="Collapsed" />
     </Grid>
