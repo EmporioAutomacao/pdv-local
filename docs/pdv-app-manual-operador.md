@@ -228,6 +228,23 @@ O sistema valida que o supervisor está ativo e tem papel supervisor/admin. A ve
 
 ---
 
+## Configurações
+
+O botão **Configurações** no cabeçalho da tela principal abre a janela de
+preferências do aplicativo.
+
+### Tema
+
+| Opção | Descrição |
+|-------|-----------|
+| **Claro** (padrão) | Fundo branco, texto escuro — recomendado para ambientes com luz natural |
+| **Escuro** | Fundo cinza-chumbo, texto claro — reduz fadiga ocular em ambientes com pouca luz |
+
+A preferência é salva automaticamente e aplicada na próxima vez que o PDV App
+for aberto. A troca de tema é instantânea — não é necessário reiniciar.
+
+---
+
 ## Ajuda rápida
 
 Pressione **F1** em qualquer momento para abrir a janela de ajuda integrada. Ela exibe em uma única tela:

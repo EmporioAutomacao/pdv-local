@@ -8,74 +8,9 @@
         WindowState="Maximized"
         MinHeight="680"
         MinWidth="1040"
-        Background="#F8FAFC"
+        Background="{DynamicResource WindowBackground}"
         Loaded="Window_Loaded"
         KeyDown="MainWindow_KeyDown">
-    <Window.Resources>
-        <Style x:Key="CardStyle" TargetType="Border">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#E2E8F0" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="14" />
-            <Setter Property="Margin" Value="0,0,12,12" />
-        </Style>
-
-        <Style x:Key="LabelStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#64748B" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Margin" Value="0,0,0,5" />
-        </Style>
-
-        <Style x:Key="ValueStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#0F172A" />
-            <Setter Property="FontSize" Value="18" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-        </Style>
-
-        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#2563EB" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderBrush" Value="#2563EB" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="12,8" />
-            <Setter Property="MinWidth" Value="108" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-
-        <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
-            <Setter Property="Background" Value="#DC2626" />
-            <Setter Property="BorderBrush" Value="#DC2626" />
-        </Style>
-
-        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="Foreground" Value="#334155" />
-            <Setter Property="BorderBrush" Value="#CBD5E1" />
-        </Style>
-
-        <Style x:Key="InputStyle" TargetType="TextBox">
-            <Setter Property="Padding" Value="10,7" />
-            <Setter Property="BorderBrush" Value="#CBD5E1" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Margin" Value="0,0,10,8" />
-            <Setter Property="MinWidth" Value="120" />
-        </Style>
-
-        <Style TargetType="DataGrid">
-            <Setter Property="AutoGenerateColumns" Value="False" />
-            <Setter Property="CanUserAddRows" Value="False" />
-            <Setter Property="CanUserDeleteRows" Value="False" />
-            <Setter Property="IsReadOnly" Value="True" />
-            <Setter Property="HeadersVisibility" Value="Column" />
-            <Setter Property="GridLinesVisibility" Value="Horizontal" />
-            <Setter Property="BorderBrush" Value="#E2E8F0" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="RowHeaderWidth" Value="0" />
-            <Setter Property="SelectionMode" Value="Single" />
-        </Style>
-    </Window.Resources>
 
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -87,6 +22,11 @@
 
         <DockPanel Grid.Row="0" LastChildFill="True">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="SettingsButton"
+                        Content="Configurações"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="SettingsButton_Click"
+                        Margin="0,0,8,0" />
                 <Button x:Name="HelpButton"
                         Content="F1 Ajuda"
                         Style="{StaticResource SecondaryButtonStyle}"
@@ -119,9 +59,9 @@
                 <TextBlock Text="PDV Local"
                            FontSize="28"
                            FontWeight="Bold"
-                           Foreground="#0F172A" />
+                           Foreground="{DynamicResource TextPrimary}" />
                 <TextBlock Text="Frente de caixa local"
-                           Foreground="#64748B"
+                           Foreground="{DynamicResource TextSecondary}"
                            FontSize="14"
                            Margin="0,2,0,0" />
             </StackPanel>
@@ -129,15 +69,15 @@
 
         <Border Grid.Row="1"
                 x:Name="BannerBorder"
-                Background="#EFF6FF"
-                BorderBrush="#BFDBFE"
+                Background="{DynamicResource AccentBg}"
+                BorderBrush="{DynamicResource AccentBorder}"
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="12"
                 Margin="0,18,0,14">
             <TextBlock x:Name="BannerText"
                        Text="Carregando status do SyncAgent..."
-                       Foreground="#1E40AF"
+                       Foreground="{DynamicResource AccentText}"
                        FontWeight="SemiBold"
                        TextWrapping="Wrap" />
         </Border>
@@ -155,10 +95,10 @@
                             <TextBlock Text="Operadores"
                                        FontSize="18"
                                        FontWeight="SemiBold"
-                                       Foreground="#0F172A"
+                                       Foreground="{DynamicResource TextPrimary}"
                                        Margin="0,0,0,4" />
                             <TextBlock Text="Nenhum operador foi importado do ERP ainda. O PDV Local nao cria usuarios manualmente; os operadores devem vir do ERP por sincronizacao."
-                                       Foreground="#64748B"
+                                       Foreground="{DynamicResource TextSecondary}"
                                        TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
@@ -190,10 +130,10 @@
                                                Text="Venda"
                                                FontSize="20"
                                                FontWeight="SemiBold"
-                                               Foreground="#0F172A" />
+                                               Foreground="{DynamicResource TextPrimary}" />
                                     <TextBlock x:Name="SaleGateValue"
                                                Text="Abra um caixa para liberar a venda."
-                                               Foreground="#64748B"
+                                               Foreground="{DynamicResource TextSecondary}"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                             </DockPanel>
@@ -236,7 +176,7 @@
                                     <TextBlock x:Name="SelectedProductTotalValue"
                                                Text="R$ 0,00"
                                                FontWeight="SemiBold"
-                                               Foreground="#0F172A"
+                                               Foreground="{DynamicResource TextPrimary}"
                                                Margin="0,8,10,0" />
                                 </StackPanel>
 
@@ -294,7 +234,7 @@
                                     <TextBlock Text="Mensagem" Style="{StaticResource LabelStyle}" />
                                     <TextBlock x:Name="OperationMessageValue"
                                                Text="-"
-                                               Foreground="#334155"
+                                               Foreground="{DynamicResource TextPrimary}"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
@@ -315,7 +255,7 @@
                                     <TextBlock Text="Total" Style="{StaticResource LabelStyle}" />
                                     <TextBlock x:Name="TotalValue"
                                                Text="R$ 0,00"
-                                               Foreground="#0F172A"
+                                               Foreground="{DynamicResource TextPrimary}"
                                                FontSize="26"
                                                FontWeight="Bold" />
                                 </StackPanel>
@@ -330,7 +270,7 @@
                             <TextBlock Text="Caixa"
                                        FontSize="18"
                                        FontWeight="SemiBold"
-                                       Foreground="#0F172A"
+                                       Foreground="{DynamicResource TextPrimary}"
                                        Margin="0,0,0,10" />
 
                             <TextBlock Text="Login do operador" Style="{StaticResource LabelStyle}" />
@@ -400,7 +340,7 @@
                             <TextBlock Text="Autorizacao"
                                        FontSize="18"
                                        FontWeight="SemiBold"
-                                       Foreground="#0F172A"
+                                       Foreground="{DynamicResource TextPrimary}"
                                        Margin="0,0,0,10" />
 
                             <TextBlock Text="Login supervisor/admin" Style="{StaticResource LabelStyle}" />
@@ -431,7 +371,7 @@
                             <TextBlock Text="Pagamento"
                                        FontSize="18"
                                        FontWeight="SemiBold"
-                                       Foreground="#0F172A"
+                                       Foreground="{DynamicResource TextPrimary}"
                                        Margin="0,0,0,10" />
 
                             <TextBlock Text="Especie" Style="{StaticResource LabelStyle}" />
@@ -494,7 +434,7 @@
                             <TextBlock Text="Troco" Style="{StaticResource LabelStyle}" />
                             <TextBlock x:Name="ChangeValue"
                                        Text="R$ 0,00"
-                                       Foreground="#166534"
+                                       Foreground="{DynamicResource SuccessText}"
                                        FontSize="24"
                                        FontWeight="Bold"
                                        Margin="0,0,0,12" />
@@ -614,6 +554,22 @@
                                     <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DatabaseErrorValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
                                 </Grid>
                             </Border>
+
+                            <Button x:Name="CheckUpdateButton"
+                                    Content="Verificar atualização"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,8,0,0"
+                                    Padding="14,8"
+                                    HorizontalAlignment="Left"
+                                    Click="CheckUpdateButton_Click"
+                                    ToolTip="Solicita ao Sync Agent que consulte o ERP por uma atualização disponível" />
+                            <TextBlock x:Name="CheckUpdateStatusText"
+                                       Text=""
+                                       FontSize="12"
+                                       Foreground="{DynamicResource StatusText}"
+                                       Margin="0,6,0,0"
+                                       TextWrapping="Wrap"
+                                       Visibility="Collapsed" />
                         </StackPanel>
                     </Expander>
                 </StackPanel>
@@ -623,7 +579,7 @@
         <TextBlock Grid.Row="3"
                    x:Name="FooterText"
                    Text="Aguardando status."
-                   Foreground="#64748B"
+                   Foreground="{DynamicResource TextSecondary}"
                    FontSize="12"
                    Margin="0,12,0,0" />
 

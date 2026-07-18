@@ -109,6 +109,7 @@ GET  http://127.0.0.1:47891/setup
 GET  http://127.0.0.1:47891/status
 POST http://127.0.0.1:47891/setup/activate
 POST http://127.0.0.1:47891/sync-now
+POST http://127.0.0.1:47891/check-update
 ```
 
 `GET /` abre o dashboard local HTML.
@@ -171,6 +172,12 @@ local ou exportar relatorio controlado em rotina propria.
 - ultimo heartbeat.
 
 `POST /sync-now` sinaliza um ciclo manual.
+
+`POST /check-update` solicita verificacao imediata de atualizacao pendente.
+Equivale a um ciclo manual, mas com intencao semantica de verificacao de versao.
+O botao "Verificar atualizacao" em Detalhes Tecnicos do PDV App usa este
+endpoint. O ERP deve ter um comando `pending_update` registrado para a
+instalacao; caso contrario, o ciclo roda normalmente sem efeito visivel.
 
 A API local deve permanecer restrita a loopback. Nao publicar em interfaces de
 rede externas.
@@ -469,6 +476,31 @@ sync_agent.agent_state
 agent.heartbeat
 ```
 
+Resposta do ERP:
+
+```json
+{
+  "status": "ok",
+  "next_poll_seconds": 30,
+  "pending_update": null
+}
+```
+
+Quando o ERP tiver um pacote pendente para a instalacao, `pending_update` contem:
+
+```json
+{
+  "version": "1.1.0",
+  "download_url": "https://github.com/ORG/pdv-local/releases/download/v1.1.0/pdv-local-v1.1.0.zip",
+  "sha256": "abc123...",
+  "release_notes": "Melhorias UX"
+}
+```
+
+O agente processa o campo e aciona o `SelfUpdater` se a versao alvo for diferente
+da versao atual. Apos a atualizacao, o proximo heartbeat reporta a nova versao
+e o ERP limpa o comando pendente automaticamente.
+
 ## Tray Windows
 
 Projeto:
@@ -620,6 +652,137 @@ O ERP compara os contadores e o `aggregate_hash` por entidade com os eventos
 recebidos na mesma janela. O resultado remoto e anexado ao `summary` local como
 `remote_matched` e `remote_response`.
 
+## Auto-update
+
+O SyncAgent suporta atualizacao remota dos binarios sem acesso direto a maquina
+cliente. O operador do ERP aciona a atualizacao pelo admin; o agente detecta o
+comando no proximo heartbeat e executa sem intervencao manual.
+
+### Onde acionar no ERP
+
+No admin do ERP: **API de Sincronizacao > Instalacoes do PDV**
+(`/admin/sync_api/syncinstallation/`)
+
+1. Marque uma ou mais instalacoes.
+2. Acao: **Solicitar atualizacao para instalacoes selecionadas** → Ir.
+3. Selecione o pacote no dropdown. A versao, URL e SHA256 sao preenchidos automaticamente.
+4. Clique **Agendar atualizacao**.
+
+> O pacote ja deve estar cadastrado em **API de Sincronizacao > Pacotes de atualizacao**
+> (`/admin/sync_api/syncpackage/`). O `build-sync-agent-package.ps1` registra
+> automaticamente ao finalizar o build.
+
+### Fluxo completo
+
+```text
+build-sync-agent-package.ps1 -Version X.Y.Z
+  -> gera ZIP + SHA256
+  -> registra SyncPackage no ERP via management command
+ERP Admin seleciona instalacoes + seleciona pacote no dropdown
+  -> ERP grava pending_update por instalacao
+  -> proximo heartbeat (max 30s): resposta inclui pending_update
+  -> SelfUpdater baixa ZIP para %TEMP%\pdv-update\<version>\payload.zip
+  -> verifica SHA256 localmente
+  -> lanca self-update.ps1 como processo separado (herda SYSTEM)
+  -> SyncAgent para via StopApplication()
+  -> self-update.ps1:
+       aguarda servico parar (60s)
+       encerra PDV App se em execucao
+       desabilita auto-recovery do servico
+       backup: %InstallRoot%\Backups\<versao-anterior>\
+       Expand-Archive do ZIP
+       copia SyncAgent, PDVApp e SyncAgentTray novos
+       reabilita auto-recovery
+       Start-Service
+       se falhar: restaura backup e reinicia versao anterior
+  -> proximo heartbeat reporta nova versao
+  -> ERP limpa pending_update automaticamente
+```
+
+### Arquivos envolvidos
+
+- `src/sync-agent/Update/SelfUpdater.cs` — download, verificacao SHA256, disparo
+- `src/sync-agent/Heartbeat/ErpHeartbeatClient.cs` — deserializa `pending_update`
+- `src/sync-agent/Configuration/SyncAgentOptions.cs` — flag `SelfUpdateEnabled`
+- `infra/windows/self-update.ps1` — substituicao de binarios, backup e rollback
+- `infra/windows/build-sync-agent-package.ps1` — gera pacote ZIP versionado
+- `.github/workflows/release.yml` — publica automaticamente no GitHub Releases
+
+### Geracao de pacote versionado
+
+```powershell
+.\infra\windows\build-sync-agent-package.ps1 -Version 1.1.0
+```
+
+Gera o ZIP, calcula o SHA256 e **registra automaticamente** o pacote no ERP
+(container Docker `arara-integrated-dev-erp_cliente_web-1` deve estar em execucao):
+
+```text
+artifacts\sync-agent-installer\pdv-local-v1.1.0.zip
+artifacts\sync-agent-installer\pdv-local-v1.1.0.zip.sha256
+```
+
+Parametros opcionais:
+
+| Parametro | Padrao | Descricao |
+|-----------|--------|-----------|
+| `-DownloadBaseUrl` | `http://192.168.0.31:8099` | URL base de onde o ZIP sera servido |
+| `-ErpContainer` | `arara-integrated-dev-erp_cliente_web-1` | Nome do container Django |
+| `-SkipErpRegister` | (ausente) | Pula o registro no ERP |
+| `-SkipPublish` | (ausente) | Pula a compilacao, so reempacota |
+
+Para cadastrar manualmente um pacote no ERP:
+
+```powershell
+docker exec arara-integrated-dev-erp_cliente_web-1 python manage.py register_sync_package `
+    --pkg-version 1.1.0 `
+    --url "http://192.168.0.31:8099/pdv-local-v1.1.0.zip" `
+    --sha256 "<hash>"
+```
+
+### Configuracao
+
+Por padrao `SelfUpdateEnabled` e `true`. Para desabilitar:
+
+```json
+{
+  "SyncAgent": {
+    "SelfUpdateEnabled": false
+  }
+}
+```
+
+### Log de atualizacao
+
+O script grava no Windows Event Log:
+
+```powershell
+Get-EventLog -LogName Application -Source "PDV Local Self-Update" -Newest 20
+```
+
+### Rollback manual
+
+Se o script falhar antes de gravar o backup ou o operador quiser forcar o
+rollback manualmente:
+
+```powershell
+$backupDir = "C:\Program Files\PDVLocal\Backups\1.0.0"
+Stop-Service "PDV Local Sync Agent" -Force
+Copy-Item "$backupDir\SyncAgent\*" "C:\Program Files\PDVLocal\SyncAgent\" -Recurse -Force
+Copy-Item "$backupDir\PDVApp\*" "C:\Program Files\PDVLocal\PDVApp\" -Recurse -Force
+Copy-Item "$backupDir\SyncAgentTray\*" "C:\Program Files\PDVLocal\SyncAgentTray\" -Recurse -Force
+Start-Service "PDV Local Sync Agent"
+```
+
+### Tempo estimado
+
+- Deteccao do comando: ate 30s
+- Download do pacote: depende da conexao (tipicamente < 2 min para ~100 MB)
+- Substituicao de binarios: < 60s
+- Reinicio do servico: ate 30s
+
+Total tipico: 3-5 minutos.
+
 ## Instalacao Windows
 
 Gerar pacote:
@@ -740,6 +903,9 @@ Base tecnica concluida:
 - API ERP inicial;
 - tray;
 - instalador Windows;
+- auto-update via heartbeat com rollback automatico;
+- GitHub Actions para release versionado;
+- botao "Verificar atualizacao" no PDV App;
 - documentacao operacional.
 
 Pendencias fora da base tecnica da Sprint 1:

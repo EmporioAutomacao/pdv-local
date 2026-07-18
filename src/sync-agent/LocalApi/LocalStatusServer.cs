@@ -135,6 +135,24 @@ public sealed class LocalStatusServer : BackgroundService
                 return;
             }
 
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/check-update")
+            {
+                var accepted = _manualSyncSignal.TrySignal();
+
+                await WriteJsonAsync(
+                    context.Response,
+                    accepted ? HttpStatusCode.Accepted : HttpStatusCode.Conflict,
+                    new
+                    {
+                        accepted,
+                        message = accepted
+                            ? "Verificacao de atualizacao solicitada. O agente consultara o ERP no proximo ciclo."
+                            : "Ja existe uma sincronizacao em andamento. Tente novamente em instantes."
+                    },
+                    cancellationToken);
+                return;
+            }
+
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/pdv-sales/reprocess")
             {
                 await HandlePdvSaleReprocessAsync(context, cancellationToken);
@@ -346,6 +364,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Como validar rapidamente</h2>
                   <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/status" -Method Get
             Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/sync-now" -Method Post
+            Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/check-update" -Method Post
             Get-Service "PDV Local Sync Agent"</pre>
                 </section>
 
@@ -387,12 +406,35 @@ public sealed class LocalStatusServer : BackgroundService
                 </section>
 
                 <section class="panel">
+                  <h2>Atualizacao automatica</h2>
+                  <p>O operador do ERP pode enviar uma atualizacao remota sem acesso direto a esta maquina.</p>
+                  <table>
+                    <tr><th>Etapa</th><th>Descricao</th></tr>
+                    <tr><td>1. Pacote</td><td>O build script registra o pacote automaticamente em <strong>API de Sincronizacao &gt; Pacotes de atualizacao</strong> ao gerar o ZIP.</td></tr>
+                    <tr><td>2. ERP Admin</td><td>Em <strong>API de Sincronizacao &gt; Instalacoes do PDV</strong>, selecione a instalacao, acao <em>Solicitar atualizacao</em>, escolha o pacote no dropdown e clique <em>Agendar atualizacao</em>.</td></tr>
+                    <tr><td>3. Heartbeat</td><td>Em ate 30s, o agente recebe <code>pending_update</code> na resposta do ERP.</td></tr>
+                    <tr><td>4. Download</td><td>O agente baixa o ZIP e verifica o SHA256 antes de prosseguir.</td></tr>
+                    <tr><td>5. Atualizacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico.</td></tr>
+                    <tr><td>6. Rollback</td><td>Se o servico nao iniciar, o script restaura o backup automaticamente.</td></tr>
+                  </table>
+                  <p style="margin-top:10px;">O PDV App encerra durante a atualizacao. O tempo de interrupcao e inferior a 60 segundos.</p>
+                  <p>Para solicitar verificacao imediata sem esperar o proximo ciclo:</p>
+                  <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/check-update" -Method Post</pre>
+                  <p>Ou use o botao <strong>Verificar atualizacao</strong> em Detalhes Tecnicos no PDV App.</p>
+                  <p>Log de atualizacao no Windows Event Log:</p>
+                  <pre>Get-EventLog -LogName Application -Source "PDV Local Self-Update" -Newest 20</pre>
+                </section>
+
+                <section class="panel">
                   <h2>Arquivos e servico Windows</h2>
                   <table>
                     <tr><th>Item</th><th>Caminho/valor</th></tr>
                     <tr><td>Servico</td><td><code>PDV Local Sync Agent</code></td></tr>
                     <tr><td>Instalacao padrao</td><td><code>C:\Program Files\PDVLocal</code></td></tr>
                     <tr><td>API local</td><td><code>http://127.0.0.1:{{options.LocalStatusPort}}</code></td></tr>
+                    <tr><td>Script de atualizacao</td><td><code>C:\Program Files\PDVLocal\SyncAgent\self-update.ps1</code></td></tr>
+                    <tr><td>Backup de versoes</td><td><code>C:\Program Files\PDVLocal\Backups\&lt;versao&gt;\</code></td></tr>
+                    <tr><td>Versao instalada</td><td><code>C:\Program Files\PDVLocal\SyncAgent\VERSION</code></td></tr>
                     <tr><td>Documentacao tecnica</td><td><code>docs/sync-agent-sprint-1-manual.md</code></td></tr>
                   </table>
                 </section>

@@ -46,7 +46,34 @@ Ele contem:
 - scripts de instalacao/desinstalacao;
 - script de smoke test operacional;
 - scripts SQL de bootstrap do PostgreSQL;
+- `self-update.ps1` para atualizacao automatica remota;
+- arquivo `VERSION` com a versao instalada;
 - guias operacionais em `docs`.
+
+### Pacote versionado para release
+
+Para gerar um pacote com versao especifica (usado pelo auto-update):
+
+```powershell
+.\infra\windows\build-sync-agent-package.ps1 -Version 1.1.0
+```
+
+Gera adicionalmente:
+
+```text
+artifacts\sync-agent-installer\pdv-local-v1.1.0.zip
+artifacts\sync-agent-installer\pdv-local-v1.1.0.zip.sha256
+```
+
+Para release automatico via GitHub Actions, crie uma tag e faca push:
+
+```powershell
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+O workflow `.github/workflows/release.yml` constroi e publica o ZIP e o
+arquivo `.sha256` na aba Releases do repositorio.
 
 ## Bootstrap do banco
 

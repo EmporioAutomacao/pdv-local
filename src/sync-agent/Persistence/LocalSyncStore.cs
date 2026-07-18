@@ -683,7 +683,7 @@ public sealed class LocalSyncStore
                 @external_operator_id,
                 @login,
                 @display_name,
-                '',
+                @password_hash,
                 @role,
                 @active,
                 @permissions,
@@ -694,6 +694,7 @@ public sealed class LocalSyncStore
                 external_operator_id = EXCLUDED.external_operator_id,
                 login = EXCLUDED.login,
                 display_name = EXCLUDED.display_name,
+                password_hash = EXCLUDED.password_hash,
                 role = EXCLUDED.role,
                 active = EXCLUDED.active,
                 permissions = EXCLUDED.permissions,
@@ -715,6 +716,7 @@ public sealed class LocalSyncStore
             command.Parameters.AddWithValue("external_operator_id", item.OperatorId);
             command.Parameters.AddWithValue("login", item.Login);
             command.Parameters.AddWithValue("display_name", item.DisplayName);
+            command.Parameters.AddWithValue("password_hash", item.PasswordHash);
             command.Parameters.AddWithValue("role", role);
             command.Parameters.AddWithValue("active", item.Active && item.DeletedAtUtc is null);
             command.Parameters.AddWithValue("permissions", NpgsqlDbType.Jsonb, permissions);

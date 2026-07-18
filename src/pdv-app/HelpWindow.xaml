@@ -6,38 +6,8 @@
         Height="560"
         MinWidth="480"
         MinHeight="400"
-        Background="#F8FAFC"
+        Background="{DynamicResource WindowBackground}"
         WindowStartupLocation="CenterOwner">
-    <Window.Resources>
-        <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#1E40AF" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,14,0,4" />
-        </Style>
-        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="Foreground" Value="#374151" />
-            <Setter Property="BorderBrush" Value="#D1D5DB" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="14,7" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -48,17 +18,17 @@
 
         <!-- Cabeçalho -->
         <Border Grid.Row="0"
-                Background="White"
-                BorderBrush="#E2E8F0"
+                Background="{DynamicResource SurfacePrimary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,0,0,1"
                 Padding="18,14">
             <StackPanel>
                 <TextBlock Text="Atalhos e referência rápida"
                            FontSize="20"
                            FontWeight="Bold"
-                           Foreground="#0F172A" />
+                           Foreground="{DynamicResource TextPrimary}" />
                 <TextBlock Text="PDV Local — referência para operadores"
-                           Foreground="#64748B"
+                           Foreground="{DynamicResource TextSecondary}"
                            FontSize="13"
                            Margin="0,3,0,0" />
             </StackPanel>
@@ -82,8 +52,8 @@
                           GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#F1F5F9"
                           BorderThickness="1"
-                          BorderBrush="#E2E8F0"
-                          RowBackground="White"
+                          BorderBrush="{DynamicResource BorderPrimary}"
+                          RowBackground="{DynamicResource SurfacePrimary}"
                           AlternatingRowBackground="#FAFAFA"
                           HeadersVisibility="Column"
                           FontSize="13">
@@ -123,8 +93,8 @@
                           GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#F1F5F9"
                           BorderThickness="1"
-                          BorderBrush="#E2E8F0"
-                          RowBackground="White"
+                          BorderBrush="{DynamicResource BorderPrimary}"
+                          RowBackground="{DynamicResource SurfacePrimary}"
                           AlternatingRowBackground="#FAFAFA"
                           HeadersVisibility="Column"
                           FontSize="13">
@@ -164,8 +134,8 @@
                           GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#F1F5F9"
                           BorderThickness="1"
-                          BorderBrush="#E2E8F0"
-                          RowBackground="White"
+                          BorderBrush="{DynamicResource BorderPrimary}"
+                          RowBackground="{DynamicResource SurfacePrimary}"
                           AlternatingRowBackground="#FAFAFA"
                           HeadersVisibility="Column"
                           FontSize="13">
@@ -193,7 +163,7 @@
                 </DataGrid>
 
                 <TextBlock Margin="0,14,0,4"
-                           Foreground="#94A3B8"
+                           Foreground="{DynamicResource TextTertiary}"
                            FontSize="11"
                            Text="Dica: o supervisor pode ser autorizado uma única vez por turno. Após autorizado, informe apenas o Motivo em cada operação." />
 
@@ -202,8 +172,8 @@
 
         <!-- Botão fechar -->
         <Border Grid.Row="2"
-                Background="White"
-                BorderBrush="#E2E8F0"
+                Background="{DynamicResource SurfacePrimary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,1,0,0"
                 Padding="18,12">
             <Button Content="Fechar"

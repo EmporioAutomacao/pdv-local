@@ -45,6 +45,12 @@ public partial class MainWindow : Window
     private PdvProduct? _selectedProduct;
     private PdvOperator? _authorizedSupervisor;
     private SaleReceiptData? _lastReceipt;
+    private PdvOperator? _initialOperator;
+
+    public MainWindow(PdvOperator initialOperator) : this()
+    {
+        _initialOperator = initialOperator;
+    }
 
     public MainWindow()
     {
@@ -93,6 +99,18 @@ public partial class MainWindow : Window
         await _cashMovementRepository.EnsureSchemaAsync(CancellationToken.None);
         await RefreshStatusAsync();
         _statusRefreshTimer.Start();
+
+        if (_initialOperator is not null)
+        {
+            OperatorLoginTextBox.Text = _initialOperator.Login;
+            _currentOperator = _initialOperator;
+            ClearSupervisorAuthorization();
+            _currentCashSession = await _cashSessionRepository.FindOpenByOperatorAsync(
+                _initialOperator.OperatorId, CancellationToken.None);
+            ApplyCurrentSession();
+            await RefreshCashSummaryAsync();
+            SetOperationMessage($"Operador carregado: {_initialOperator.DisplayName}.", isError: false);
+        }
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -744,6 +762,45 @@ public partial class MainWindow : Window
             await LoadPaymentCatalogAsync();
             _isRefreshingStatus = false;
             SetLoadingState(false);
+        }
+    }
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new SettingsWindow { Owner = this };
+        win.ShowDialog();
+    }
+
+    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdateButton.IsEnabled = false;
+        CheckUpdateStatusText.Visibility = Visibility.Visible;
+        CheckUpdateStatusText.BringIntoView();
+        CheckUpdateStatusText.Text = "Solicitando verificacao de atualizacao...";
+        CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "StatusText");
+
+        try
+        {
+            var response = await _httpClient.PostAsync("/check-update", null);
+            if (response.IsSuccessStatusCode)
+            {
+                CheckUpdateStatusText.Text = "Solicitacao enviada. O agente verificara o ERP no proximo ciclo (ate 30s).";
+                CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "SuccessText");
+            }
+            else
+            {
+                CheckUpdateStatusText.Text = "Ja existe uma sincronizacao em andamento. Tente novamente em instantes.";
+                CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "WarningText");
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            CheckUpdateStatusText.Text = "Nao foi possivel contatar o SyncAgent local. Verifique se o servico esta em execucao.";
+            CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "WarningText");
+        }
+        finally
+        {
+            CheckUpdateButton.IsEnabled = true;
         }
     }
 

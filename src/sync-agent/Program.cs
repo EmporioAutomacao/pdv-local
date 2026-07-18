@@ -17,6 +17,20 @@ using Npgsql;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+// VERSION file is the authoritative source after self-updates; override appsettings if present.
+var versionFilePath = Path.Combine(AppContext.BaseDirectory, "VERSION");
+if (File.Exists(versionFilePath))
+{
+    var fileVersion = File.ReadAllText(versionFilePath).Trim();
+    if (!string.IsNullOrWhiteSpace(fileVersion))
+    {
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            { "SyncAgent:AgentVersion", fileVersion }
+        });
+    }
+}
+
 builder.Services.AddWindowsService(options =>
 {
     options.ServiceName = "PDV Local Sync Agent";

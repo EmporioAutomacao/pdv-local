@@ -1,0 +1,57 @@
+<Window x:Class="PdvLocal.App.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PDV Local — Acesso"
+        Width="340" SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True"
+        Background="{DynamicResource SurfacePrimary}"
+        Loaded="Window_Loaded">
+    <Border Padding="36,32">
+        <StackPanel>
+            <TextBlock Text="PDV Local"
+                       FontSize="22"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimary}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,4"/>
+            <TextBlock Text="Identifique-se para continuar"
+                       FontSize="12"
+                       Foreground="{DynamicResource TextSecondary}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,28"/>
+
+            <TextBlock Text="Usuário" Style="{StaticResource FieldLabelStyle}"/>
+            <TextBox x:Name="LoginTextBox"
+                     Style="{StaticResource InputStyle}"
+                     Margin="0,0,0,14"/>
+
+            <TextBlock Text="Senha" Style="{StaticResource FieldLabelStyle}"/>
+            <PasswordBox x:Name="SenhaPasswordBox"
+                         Background="{DynamicResource InputBg}"
+                         Foreground="{DynamicResource InputFg}"
+                         BorderBrush="{DynamicResource InputBorder}"
+                         BorderThickness="1"
+                         Padding="10,7"
+                         Margin="0,0,0,20"/>
+
+            <Button x:Name="EntrarButton"
+                    Content="Entrar"
+                    IsDefault="True"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    HorizontalAlignment="Stretch"
+                    Padding="12,10"
+                    Click="EntrarButton_Click"/>
+
+            <TextBlock x:Name="ErrorText"
+                       Text=""
+                       Foreground="#E53E3E"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Margin="0,12,0,0"
+                       HorizontalAlignment="Center"
+                       Visibility="Collapsed"/>
+        </StackPanel>
+    </Border>
+</Window>

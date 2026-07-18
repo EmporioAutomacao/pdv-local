@@ -205,4 +205,5 @@ public sealed record PdvOperatorSnapshotItem(
     [property: JsonPropertyName("active")] bool Active,
     [property: JsonPropertyName("permissions")] IReadOnlyList<string> Permissions,
     [property: JsonPropertyName("updated_at_utc")] DateTimeOffset UpdatedAtUtc,
-    [property: JsonPropertyName("deleted_at_utc")] DateTimeOffset? DeletedAtUtc);
+    [property: JsonPropertyName("deleted_at_utc")] DateTimeOffset? DeletedAtUtc,
+    [property: JsonPropertyName("password_hash")] string PasswordHash = "");

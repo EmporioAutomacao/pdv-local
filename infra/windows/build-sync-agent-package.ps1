@@ -1,7 +1,10 @@
 ﻿param(
-    [string]$PackageRoot = ".\artifacts\sync-agent-installer",
-    [string]$Version = "1.0.0",
-    [switch]$SkipPublish
+    [string]$PackageRoot    = ".\artifacts\sync-agent-installer",
+    [string]$Version        = "1.0.0",
+    [string]$DownloadBaseUrl = "http://192.168.0.31:8099",
+    [string]$ErpContainer   = "arara-integrated-dev-erp_cliente_web-1",
+    [switch]$SkipPublish,
+    [switch]$SkipErpRegister
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,7 +39,9 @@ New-Item -ItemType Directory -Force -Path (Join-Path $packagePath "payload\SyncA
 New-Item -ItemType Directory -Force -Path (Join-Path $packagePath "infra") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $packagePath "docs") | Out-Null
 
-Copy-Item -Path (Join-Path $agentArtifact "*") -Destination (Join-Path $packagePath "payload\SyncAgent") -Recurse -Force
+Get-ChildItem -Path $agentArtifact | Where-Object { $_.Name -ne 'appsettings.json' } | Copy-Item -Destination (Join-Path $packagePath "payload\SyncAgent") -Recurse -Force
+# Incluir o script de auto-update no payload para que futuras versões o atualizem automaticamente
+Copy-Item -Path (Join-Path $repoRoot "infra\windows\self-update.ps1") -Destination (Join-Path $packagePath "payload\SyncAgent\self-update.ps1") -Force
 Copy-Item -Path (Join-Path $trayArtifact "*") -Destination (Join-Path $packagePath "payload\SyncAgentTray") -Recurse -Force
 Copy-Item -Path (Join-Path $pdvAppArtifact "*") -Destination (Join-Path $packagePath "payload\PDVApp") -Recurse -Force
 Copy-Item -Path (Join-Path $installerArtifact "*") -Destination (Join-Path $packagePath "payload\SyncAgentInstaller") -Recurse -Force
@@ -92,3 +97,26 @@ $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash
 Write-Host "Sync Agent installer package created at: $packagePath"
 Write-Host "ZIP: $zipPath"
 Write-Host "SHA256: $hash"
+
+# Registrar pacote no ERP automaticamente
+if (-not $SkipErpRegister) {
+    $downloadUrl = "$DownloadBaseUrl/$zipName"
+    $running = docker ps --filter "name=$ErpContainer" --format "{{.Names}}" 2>$null
+    if ($running -eq $ErpContainer) {
+        Write-Host "`nRegistrando v$Version no ERP ($ErpContainer)..."
+        docker exec $ErpContainer python manage.py register_sync_package `
+            --pkg-version $Version `
+            --url $downloadUrl `
+            --sha256 $hash 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Pacote disponivel em: $downloadUrl"
+        } else {
+            Write-Warning "Falha ao registrar no ERP. Cadastre manualmente em /admin/sync_api/syncpackage/"
+        }
+    } else {
+        Write-Warning "Container ERP '$ErpContainer' nao encontrado. Cadastre o pacote manualmente em /admin/sync_api/syncpackage/"
+        Write-Host "  Versao:  $Version"
+        Write-Host "  URL:     $downloadUrl"
+        Write-Host "  SHA256:  $hash"
+    }
+}

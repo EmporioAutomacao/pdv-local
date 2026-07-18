@@ -67,8 +67,9 @@ if ($svc -and $svc.Status -ne 'Stopped') {
     Start-Sleep -Seconds 3
 }
 
-# --- 3. Encerrar PDV App se em execucao ---
-Get-Process -Name 'PdvLocal.App' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# --- 3. Encerrar PDV App e SyncAgent Tray se em execucao ---
+Get-Process -Name 'PdvLocal.App','SyncAgent.Tray' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 4  # aguardar liberacao de file handles
 
 # --- 4. Desabilitar recuperacao automatica temporariamente ---
 & sc.exe failure $ServiceName reset= 0 actions= "" | Out-Null
@@ -87,7 +88,8 @@ foreach ($comp in @('SyncAgent', 'PDVApp', 'SyncAgentTray')) {
     $src = Join-Path $InstallRoot $comp
     $dst = Join-Path $backupDir $comp
     if (Test-Path $src) {
-        Copy-Item $src $dst -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        Copy-Item "$src\*" $dst -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -122,27 +124,32 @@ try {
 & sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/300000 | Out-Null
 
 # --- 9. Iniciar servico ---
+function Start-ServiceWithRetry {
+    param([string]$Name, [int]$TimeoutSeconds = 60)
+    & sc.exe start $Name 2>&1 | Out-Null
+    for ($t = 0; $t -lt $TimeoutSeconds; $t += 5) {
+        Start-Sleep -Seconds 5
+        $s = Get-Service -Name $Name -ErrorAction SilentlyContinue
+        if ($s -and $s.Status -eq 'Running') { return $true }
+    }
+    return $false
+}
+
 if ($success) {
     Write-Log "Iniciando servico '$ServiceName'..."
-    try {
-        Start-Service $ServiceName
+    if (Start-ServiceWithRetry $ServiceName 60) {
+        Write-Log "Auto-update concluido com sucesso. Versao instalada: $Version."
+    } else {
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        Write-Log "Servico nao iniciou em 60s (status=$($svc.Status)). Restaurando backup." 'Error'
+        & sc.exe stop $ServiceName 2>&1 | Out-Null
         Start-Sleep -Seconds 5
-        $svc = Get-Service -Name $ServiceName
-        if ($svc.Status -eq 'Running') {
-            Write-Log "Auto-update concluido com sucesso. Versao instalada: $Version."
-        } else {
-            Write-Log "Servico nao iniciou apos update (status=$($svc.Status)). Restaurando backup." 'Error'
-            Restore-Backup $backupDir
-            Start-Service $ServiceName -ErrorAction SilentlyContinue
-        }
-    } catch {
-        Write-Log "Falha ao iniciar servico: $_. Restaurando backup." 'Error'
         Restore-Backup $backupDir
-        Start-Service $ServiceName -ErrorAction SilentlyContinue
+        Start-ServiceWithRetry $ServiceName 30 | Out-Null
     }
 } else {
     Write-Log "Update abortado. Servico sera reiniciado com versao anterior."
-    Start-Service $ServiceName -ErrorAction SilentlyContinue
+    Start-ServiceWithRetry $ServiceName 30 | Out-Null
 }
 
 # --- 10. Limpeza ---

@@ -6,67 +6,9 @@
         Height="560"
         MinWidth="540"
         MinHeight="440"
-        Background="#F8FAFC"
+        Background="{DynamicResource WindowBackground}"
         WindowStartupLocation="CenterOwner"
         Loaded="Window_Loaded">
-    <Window.Resources>
-        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="Foreground" Value="#374151" />
-            <Setter Property="BorderBrush" Value="#D1D5DB" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="14,7" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="DangerButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#DC2626" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderBrush" Value="#DC2626" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="14,7" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#64748B" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,0,0,3" />
-        </Style>
-        <Style x:Key="FieldInputStyle" TargetType="TextBox">
-            <Setter Property="BorderBrush" Value="#D1D5DB" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="8,6" />
-            <Setter Property="FontSize" Value="13" />
-        </Style>
-    </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -79,8 +21,8 @@
 
         <!-- Cabeçalho -->
         <Border Grid.Row="0"
-                Background="White"
-                BorderBrush="#E2E8F0"
+                Background="{DynamicResource SurfacePrimary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,0,0,1"
                 Padding="18,14">
             <DockPanel LastChildFill="True">
@@ -99,9 +41,9 @@
                     <TextBlock Text="Vendas do Caixa"
                                FontSize="20"
                                FontWeight="Bold"
-                               Foreground="#0F172A" />
+                               Foreground="{DynamicResource TextPrimary}" />
                     <TextBlock x:Name="SessionInfoText"
-                               Foreground="#64748B"
+                               Foreground="{DynamicResource TextSecondary}"
                                FontSize="13"
                                Margin="0,3,0,0" />
                 </StackPanel>
@@ -120,7 +62,7 @@
                   SelectionMode="Single"
                   GridLinesVisibility="Horizontal"
                   HorizontalGridLinesBrush="#F1F5F9"
-                  RowBackground="White"
+                  RowBackground="{DynamicResource SurfacePrimary}"
                   AlternatingRowBackground="#FAFAFA"
                   BorderThickness="0"
                   HeadersVisibility="Column"
@@ -211,8 +153,8 @@
         <!-- Painel de cancelamento (oculto por padrão) -->
         <Border Grid.Row="2"
                 x:Name="CancellationPanel"
-                Background="#FFF7ED"
-                BorderBrush="#F59E0B"
+                Background="{DynamicResource WarningPanelBg}"
+                BorderBrush="{DynamicResource WarningPanelBorder}"
                 BorderThickness="0,2,0,0"
                 Padding="18,14"
                 Visibility="Collapsed">
@@ -220,7 +162,7 @@
                 <TextBlock x:Name="CancelTitleText"
                            FontSize="14"
                            FontWeight="SemiBold"
-                           Foreground="#92400E"
+                           Foreground="{DynamicResource WarningText}"
                            Margin="0,0,0,10" />
 
                 <StackPanel Orientation="Horizontal">
@@ -255,7 +197,7 @@
                 </StackPanel>
 
                 <TextBlock x:Name="CancelErrorText"
-                           Foreground="#B91C1C"
+                           Foreground="{DynamicResource ErrorText}"
                            FontSize="12"
                            Margin="0,8,0,0"
                            Visibility="Collapsed"
@@ -265,25 +207,25 @@
 
         <!-- Rodapé com totais -->
         <Border Grid.Row="3"
-                Background="#F1F5F9"
-                BorderBrush="#E2E8F0"
+                Background="{DynamicResource SurfaceTertiary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,1,0,0"
                 Padding="18,10">
             <DockPanel LastChildFill="True">
                 <TextBlock x:Name="SummaryCountText"
                            DockPanel.Dock="Left"
-                           Foreground="#64748B"
+                           Foreground="{DynamicResource TextSecondary}"
                            FontSize="13"
                            VerticalAlignment="Center" />
                 <TextBlock x:Name="SummaryTotalText"
                            DockPanel.Dock="Right"
                            FontSize="15"
                            FontWeight="Bold"
-                           Foreground="#0F172A"
+                           Foreground="{DynamicResource TextPrimary}"
                            VerticalAlignment="Center" />
                 <TextBlock x:Name="LoadingText"
                            Text="Carregando..."
-                           Foreground="#64748B"
+                           Foreground="{DynamicResource TextSecondary}"
                            FontSize="13"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
@@ -293,8 +235,8 @@
 
         <!-- Botão fechar -->
         <Border Grid.Row="4"
-                Background="White"
-                BorderBrush="#E2E8F0"
+                Background="{DynamicResource SurfacePrimary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,1,0,0"
                 Padding="18,12">
             <Button Content="Fechar"

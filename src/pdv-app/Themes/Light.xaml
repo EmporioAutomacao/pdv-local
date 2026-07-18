@@ -1,0 +1,62 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Fundos -->
+    <SolidColorBrush x:Key="WindowBackground"     Color="#F8FAFC" />
+    <SolidColorBrush x:Key="SurfacePrimary"       Color="White" />
+    <SolidColorBrush x:Key="SurfaceSecondary"     Color="#F8FAFC" />
+    <SolidColorBrush x:Key="SurfaceTertiary"      Color="#F1F5F9" />
+    <SolidColorBrush x:Key="SurfaceAlt"           Color="#FAFAFA" />
+
+    <!-- Texto -->
+    <SolidColorBrush x:Key="TextPrimary"          Color="#0F172A" />
+    <SolidColorBrush x:Key="TextSecondary"        Color="#64748B" />
+    <SolidColorBrush x:Key="TextTertiary"         Color="#94A3B8" />
+    <SolidColorBrush x:Key="TextOnAccent"         Color="White" />
+
+    <!-- Bordas -->
+    <SolidColorBrush x:Key="BorderPrimary"        Color="#E2E8F0" />
+    <SolidColorBrush x:Key="BorderSecondary"      Color="#CBD5E1" />
+
+    <!-- Acento / Banner -->
+    <SolidColorBrush x:Key="AccentBg"             Color="#EFF6FF" />
+    <SolidColorBrush x:Key="AccentBorder"         Color="#BFDBFE" />
+    <SolidColorBrush x:Key="AccentText"           Color="#1E40AF" />
+
+    <!-- Botao primario -->
+    <SolidColorBrush x:Key="PrimaryBtnBg"         Color="#2563EB" />
+    <SolidColorBrush x:Key="PrimaryBtnBorder"     Color="#2563EB" />
+    <SolidColorBrush x:Key="PrimaryBtnFg"         Color="White" />
+
+    <!-- Botao secundario -->
+    <SolidColorBrush x:Key="SecondaryBtnBg"       Color="White" />
+    <SolidColorBrush x:Key="SecondaryBtnBorder"   Color="#CBD5E1" />
+    <SolidColorBrush x:Key="SecondaryBtnFg"       Color="#334155" />
+
+    <!-- Botao perigo -->
+    <SolidColorBrush x:Key="DangerBtnBg"          Color="#DC2626" />
+    <SolidColorBrush x:Key="DangerBtnBorder"      Color="#DC2626" />
+    <SolidColorBrush x:Key="DangerBtnFg"          Color="White" />
+
+    <!-- Input -->
+    <SolidColorBrush x:Key="InputBg"              Color="White" />
+    <SolidColorBrush x:Key="InputBorder"          Color="#CBD5E1" />
+    <SolidColorBrush x:Key="InputFg"              Color="#0F172A" />
+
+    <!-- DataGrid -->
+    <SolidColorBrush x:Key="GridLineBrush"        Color="#F1F5F9" />
+    <SolidColorBrush x:Key="GridHeaderBg"         Color="#F8FAFC" />
+    <SolidColorBrush x:Key="GridRowBg"            Color="White" />
+    <SolidColorBrush x:Key="GridRowAltBg"         Color="#FAFAFA" />
+    <SolidColorBrush x:Key="GridSelectionBg"      Color="#EFF6FF" />
+    <SolidColorBrush x:Key="GridSelectionFg"      Color="#1E40AF" />
+
+    <!-- Semanticos -->
+    <SolidColorBrush x:Key="SuccessText"          Color="#166534" />
+    <SolidColorBrush x:Key="WarningText"          Color="#92400E" />
+    <SolidColorBrush x:Key="WarningPanelBg"       Color="#FFF7ED" />
+    <SolidColorBrush x:Key="WarningPanelBorder"   Color="#F59E0B" />
+    <SolidColorBrush x:Key="ErrorText"            Color="#B91C1C" />
+    <SolidColorBrush x:Key="StatusText"           Color="#475569" />
+
+</ResourceDictionary>
