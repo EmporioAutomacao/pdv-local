@@ -73,6 +73,36 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Seção: Sistema -->
+                <TextBlock Text="SISTEMA"
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextSecondary}"
+                           Margin="0,20,0,12" />
+
+                <Border Background="{DynamicResource SurfacePrimary}"
+                        BorderBrush="{DynamicResource BorderPrimary}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Diagnóstico"
+                                   Foreground="{DynamicResource TextPrimary}"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,6" />
+                        <TextBlock Text="Status do SyncAgent, banco local, ativação e atualizações."
+                                   Foreground="{DynamicResource TextSecondary}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,12" />
+                        <Button x:Name="TechnicalDetailsButton"
+                                Content="Diagnóstico e ativação"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Left"
+                                Click="TechnicalDetailsButton_Click" />
+                    </StackPanel>
+                </Border>
+
             </StackPanel>
         </ScrollViewer>
 

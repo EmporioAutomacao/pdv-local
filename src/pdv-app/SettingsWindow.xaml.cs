@@ -32,5 +32,10 @@ public partial class SettingsWindow : Window
         prefs.Save();
     }
 
+    private void TechnicalDetailsButton_Click(object sender, RoutedEventArgs e)
+    {
+        new TechnicalDetailsWindow { Owner = this }.ShowDialog();
+    }
+
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 }

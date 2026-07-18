@@ -12,7 +12,7 @@
         Loaded="Window_Loaded"
         KeyDown="MainWindow_KeyDown">
 
-    <Grid Margin="24">
+    <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -21,12 +21,7 @@
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" LastChildFill="True">
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="SettingsButton"
-                        Content="Configurações"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Click="SettingsButton_Click"
-                        Margin="0,0,8,0" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button x:Name="HelpButton"
                         Content="F1 Ajuda"
                         Style="{StaticResource SecondaryButtonStyle}"
@@ -37,43 +32,37 @@
                         Style="{StaticResource SecondaryButtonStyle}"
                         Click="CashButton_Click"
                         Margin="0,0,8,0" />
+                <Button x:Name="CashSalesButton"
+                        Content="F8 Vendas"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="CashSalesButton_Click"
+                        IsEnabled="False"
+                        Margin="0,0,8,0" />
+                <Button x:Name="ReprintButton"
+                        Content="F9 Reimprimir"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="ReprintButton_Click"
+                        Visibility="Collapsed"
+                        Margin="0,0,8,0" />
                 <Button x:Name="SwitchOperatorButton"
                         Content="F11 Operador"
                         Style="{StaticResource SecondaryButtonStyle}"
                         Click="SwitchOperatorButton_Click"
                         Margin="0,0,8,0" />
-                <Button x:Name="ReprintButton"
-                        Content="Reimprimir"
+                <Button x:Name="SettingsButton"
+                        Content="Configurações"
                         Style="{StaticResource SecondaryButtonStyle}"
-                        Click="ReprintButton_Click"
-                        Visibility="Collapsed"
-                        Margin="0,0,8,0" />
-                <Button x:Name="CashSalesButton"
-                        Content="Vendas do caixa"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Click="CashSalesButton_Click"
-                        IsEnabled="False"
-                        Margin="0,0,8,0" />
-                <Button x:Name="RefreshButton"
-                        Content="Atualizar"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Click="RefreshButton_Click"
-                        Margin="0,0,8,0" />
-                <Button x:Name="OpenSetupButton"
-                        Content="Ativacao"
-                        Style="{StaticResource PrimaryButtonStyle}"
-                        Click="OpenSetupButton_Click" />
+                        Click="SettingsButton_Click" />
             </StackPanel>
 
             <StackPanel>
                 <TextBlock Text="PDV Local"
-                           FontSize="28"
+                           FontSize="24"
                            FontWeight="Bold"
                            Foreground="{DynamicResource TextPrimary}" />
                 <TextBlock Text="Frente de caixa local"
                            Foreground="{DynamicResource TextSecondary}"
-                           FontSize="14"
-                           Margin="0,2,0,0" />
+                           FontSize="13" />
             </StackPanel>
         </DockPanel>
 
@@ -84,7 +73,7 @@
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="12"
-                Margin="0,18,0,14">
+                Margin="0,12,0,10">
             <TextBlock x:Name="BannerText"
                        Text="Carregando status do SyncAgent..."
                        Foreground="{DynamicResource AccentText}"
@@ -92,34 +81,32 @@
                        TextWrapping="Wrap" />
         </Border>
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="380" />
-                </Grid.ColumnDefinitions>
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-                <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                    <Border x:Name="OperatorsImportPanel" Style="{StaticResource CardStyle}" Margin="0,0,12,12" Visibility="Collapsed">
-                        <StackPanel>
-                            <TextBlock Text="Operadores"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimary}"
-                                       Margin="0,0,0,4" />
-                            <TextBlock Text="Nenhum operador foi importado do ERP ainda. O PDV Local nao cria usuarios manualmente; os operadores devem vir do ERP por sincronizacao."
-                                       Foreground="{DynamicResource TextSecondary}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
+            <Border x:Name="OperatorsImportPanel" Grid.Row="0" Style="{StaticResource CardStyle}" Margin="0,0,0,10" Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="Operadores"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimary}"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="Nenhum operador foi importado do ERP ainda. O PDV Local nao cria usuarios manualmente; os operadores devem vir do ERP por sincronizacao."
+                               Foreground="{DynamicResource TextSecondary}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
-                    <Border x:Name="SalePanel" Style="{StaticResource CardStyle}" Margin="0,0,12,12">
+            <Border x:Name="SalePanel" Grid.Row="1" Style="{StaticResource CardStyle}" Margin="0">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="220" />
+                                <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
@@ -219,6 +206,7 @@
 
                             <DataGrid Grid.Row="3"
                                       x:Name="CartItemsGrid"
+                                      VerticalAlignment="Stretch"
                                       Margin="0,0,0,10"
                                       KeyDown="CartItemsGrid_KeyDown">
                                 <DataGrid.Columns>
@@ -272,161 +260,50 @@
                                         Margin="12,0,0,0" />
                             </Grid>
                         </Grid>
-                    </Border>
-                </StackPanel>
+            </Border>
+        </Grid>
 
-                <StackPanel Grid.Column="1">
-                    <Expander Header="Detalhes tecnicos" IsExpanded="False" Margin="0,0,0,12">
-                        <StackPanel>
-                            <UniformGrid Columns="5" Margin="0,8,0,0">
-                                <Border Style="{StaticResource CardStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Ativacao" Style="{StaticResource LabelStyle}" />
-                                        <TextBlock x:Name="ProvisioningValue" Text="-" Style="{StaticResource ValueStyle}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource CardStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Runtime" Style="{StaticResource LabelStyle}" />
-                                        <TextBlock x:Name="RuntimeValue" Text="-" Style="{StaticResource ValueStyle}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource CardStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Pendentes" Style="{StaticResource LabelStyle}" />
-                                        <TextBlock x:Name="PendingValue" Text="-" Style="{StaticResource ValueStyle}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource CardStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Dead-letter" Style="{StaticResource LabelStyle}" />
-                                        <TextBlock x:Name="DeadLetterValue" Text="-" Style="{StaticResource ValueStyle}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource CardStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Caixas abertos" Style="{StaticResource LabelStyle}" />
-                                        <TextBlock x:Name="OpenCashSessionsValue" Text="-" Style="{StaticResource ValueStyle}" />
-                                    </StackPanel>
-                                </Border>
-                            </UniformGrid>
-
-                            <Border Style="{StaticResource CardStyle}" Margin="0,8,0,12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="135" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Versao PDV" Style="{StaticResource LabelStyle}" />
-                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="AppVersionValue" Text="-" TextWrapping="Wrap" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Heartbeat" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="HeartbeatValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="pgvector" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="PgVectorValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Schema PDV" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="PdvSchemaValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Operadores" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="OperatorsValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Produtos" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="5" Grid.Column="1" x:Name="ProductsValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Vendas" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="6" Grid.Column="1" x:Name="SalesValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Instalacao" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="7" Grid.Column="1" x:Name="InstanceValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Text="ERP API" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="8" Grid.Column="1" x:Name="ErpApiValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Banco local" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="9" Grid.Column="1" x:Name="DatabaseValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource CardStyle}">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="120" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Tenant ERP" Style="{StaticResource LabelStyle}" />
-                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="TenantValue" Text="-" TextWrapping="Wrap" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Ultimo erro" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="LastErrorValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Erro banco" Style="{StaticResource LabelStyle}" Margin="0,10,0,5" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DatabaseErrorValue" Text="-" TextWrapping="Wrap" Margin="0,10,0,0" />
-                                </Grid>
-                            </Border>
-
-                            <Button x:Name="CheckUpdateButton"
-                                    Content="Verificar atualização"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Margin="0,8,0,0"
-                                    Padding="14,8"
-                                    HorizontalAlignment="Left"
-                                    Click="CheckUpdateButton_Click"
-                                    ToolTip="Solicita ao Sync Agent que consulte o ERP por uma atualização disponível" />
-                            <TextBlock x:Name="CheckUpdateStatusText"
-                                       Text=""
-                                       FontSize="12"
-                                       Foreground="{DynamicResource StatusText}"
-                                       Margin="0,6,0,0"
-                                       TextWrapping="Wrap"
-                                       Visibility="Collapsed" />
-                        </StackPanel>
-                    </Expander>
-                </StackPanel>
-            </Grid>
-        </ScrollViewer>
-
-        <DockPanel Grid.Row="3" Margin="0,12,0,0" LastChildFill="True">
-            <TextBlock x:Name="OperatorStatusText"
-                       DockPanel.Dock="Left"
-                       Text="Operador: -"
-                       Foreground="{DynamicResource TextPrimary}"
-                       FontWeight="SemiBold"
-                       FontSize="12"
-                       Margin="0,0,18,0" />
-            <TextBlock x:Name="CashStatusText"
-                       DockPanel.Dock="Left"
-                       Text="Caixa: fechado — F4 para abrir"
-                       Foreground="{DynamicResource TextPrimary}"
-                       FontWeight="SemiBold"
-                       FontSize="12"
-                       Margin="0,0,18,0" />
-            <TextBlock x:Name="FooterText"
-                       Text="Aguardando status."
-                       Foreground="{DynamicResource TextSecondary}"
-                       FontSize="12"
-                       TextAlignment="Right" />
-        </DockPanel>
+        <Border Grid.Row="3"
+                Background="{DynamicResource SurfacePrimary}"
+                BorderBrush="{DynamicResource BorderPrimary}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12,8"
+                Margin="0,10,0,0">
+            <DockPanel LastChildFill="False">
+                <TextBlock x:Name="OperatorStatusText"
+                           DockPanel.Dock="Left"
+                           Text="Operador: -"
+                           Foreground="{DynamicResource TextPrimary}"
+                           FontWeight="SemiBold"
+                           FontSize="12"
+                           Margin="0,0,18,0" />
+                <TextBlock x:Name="CashStatusText"
+                           DockPanel.Dock="Left"
+                           Text="Caixa: fechado — F4 para abrir"
+                           Foreground="{DynamicResource TextPrimary}"
+                           FontWeight="SemiBold"
+                           FontSize="12"
+                           Margin="0,0,18,0" />
+                <TextBlock x:Name="SyncStatusText"
+                           DockPanel.Dock="Left"
+                           Text="Sync: aguardando status"
+                           Foreground="{DynamicResource TextSecondary}"
+                           FontSize="12"
+                           Margin="0,0,18,0" />
+                <TextBlock x:Name="ClockText"
+                           DockPanel.Dock="Right"
+                           Text=""
+                           Foreground="{DynamicResource TextSecondary}"
+                           FontSize="12" />
+                <TextBlock x:Name="VersionText"
+                           DockPanel.Dock="Right"
+                           Text=""
+                           Foreground="{DynamicResource TextSecondary}"
+                           FontSize="12"
+                           Margin="0,0,18,0" />
+            </DockPanel>
+        </Border>
 
         <TextBlock x:Name="LocalApiValue" Visibility="Collapsed" />
     </Grid>

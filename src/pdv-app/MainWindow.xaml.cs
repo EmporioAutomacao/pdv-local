@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private readonly ITefPaymentProvider _tefPaymentProvider;
     private readonly HttpClient _httpClient;
     private readonly DispatcherTimer _statusRefreshTimer;
+    private readonly DispatcherTimer _clockTimer;
     private bool _isRefreshingStatus;
     private readonly ObservableCollection<UiProductSearchResult> _productSearchResults = [];
     private readonly ObservableCollection<UiSaleItem> _saleItems = [];
@@ -72,6 +73,8 @@ public partial class MainWindow : Window
         };
         _statusRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _statusRefreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _clockTimer.Tick += (_, _) => ClockText.Text = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
 
         InitializeComponent();
         ProductSearchResultsGrid.ItemsSource = _productSearchResults;
@@ -84,15 +87,18 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _statusRefreshTimer.Stop();
+        _clockTimer.Stop();
         _httpClient.Dispose();
         base.OnClosed(e);
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        AppVersionValue.Text = typeof(MainWindow).Assembly
+        VersionText.Text = "Versao " + (typeof(MainWindow).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion ?? "desconhecida";
+            ?.InformationalVersion ?? "desconhecida");
+        ClockText.Text = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
+        _clockTimer.Start();
         await _operationAuditRepository.EnsureSchemaAsync(CancellationToken.None);
         await _cashMovementRepository.EnsureSchemaAsync(CancellationToken.None);
         await RefreshStatusAsync();
@@ -130,19 +136,6 @@ public partial class MainWindow : Window
         {
             OpenCashWindow();
         }
-    }
-
-    private async void RefreshButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RefreshStatusAsync();
-    }
-
-    private void OpenSetupButton_Click(object sender, RoutedEventArgs e)
-    {
-        Process.Start(new ProcessStartInfo(new Uri(_configuration.SyncAgentLocalApiBaseUrl, "/setup").ToString())
-        {
-            UseShellExecute = true
-        });
     }
 
     private void CashButton_Click(object sender, RoutedEventArgs e)
@@ -378,6 +371,10 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 SwitchOperator();
                 break;
+            case Key.D when Keyboard.Modifiers == ModifierKeys.Control:
+                e.Handled = true;
+                OpenTechnicalDetailsWindow();
+                break;
             case Key.F8 when CashSalesButton.IsEnabled:
                 e.Handled = true;
                 CashSalesButton_Click(CashSalesButton, e);
@@ -581,7 +578,6 @@ public partial class MainWindow : Window
         if (_isRefreshingStatus)
             return;
         _isRefreshingStatus = true;
-        SetLoadingState(true);
 
         try
         {
@@ -603,7 +599,6 @@ public partial class MainWindow : Window
             await RefreshDatabaseStatusAsync();
             await LoadPaymentCatalogAsync();
             _isRefreshingStatus = false;
-            SetLoadingState(false);
         }
     }
 
@@ -613,37 +608,9 @@ public partial class MainWindow : Window
         win.ShowDialog();
     }
 
-    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+    private void OpenTechnicalDetailsWindow()
     {
-        CheckUpdateButton.IsEnabled = false;
-        CheckUpdateStatusText.Visibility = Visibility.Visible;
-        CheckUpdateStatusText.BringIntoView();
-        CheckUpdateStatusText.Text = "Solicitando verificacao de atualizacao...";
-        CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "StatusText");
-
-        try
-        {
-            var response = await _httpClient.PostAsync("/check-update", null);
-            if (response.IsSuccessStatusCode)
-            {
-                CheckUpdateStatusText.Text = "Solicitacao enviada. O agente verificara o ERP no proximo ciclo (ate 30s).";
-                CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "SuccessText");
-            }
-            else
-            {
-                CheckUpdateStatusText.Text = "Ja existe uma sincronizacao em andamento. Tente novamente em instantes.";
-                CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "WarningText");
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            CheckUpdateStatusText.Text = "Nao foi possivel contatar o SyncAgent local. Verifique se o servico esta em execucao.";
-            CheckUpdateStatusText.SetResourceReference(ForegroundProperty, "WarningText");
-        }
-        finally
-        {
-            CheckUpdateButton.IsEnabled = true;
-        }
+        new TechnicalDetailsWindow { Owner = this }.ShowDialog();
     }
 
     private async Task SearchProductsAsync()
@@ -851,7 +818,6 @@ public partial class MainWindow : Window
 
     private async Task RunPdvOperationAsync(Func<Task> operation)
     {
-        SetLoadingState(true);
         try
         {
             await operation();
@@ -859,10 +825,6 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Npgsql.NpgsqlException or TimeoutException)
         {
             SetOperationMessage(ex.Message, isError: true);
-        }
-        finally
-        {
-            SetLoadingState(false);
         }
     }
 
@@ -1143,29 +1105,14 @@ public partial class MainWindow : Window
 
     private void ApplyStatus(SyncAgentStatusResponse status)
     {
-        var provisionedText = status.Provisioned ? "Ativado" : "Nao ativado";
-        var heartbeatText = status.LastHeartbeatSucceeded == true
-            ? $"Online / {status.LastHeartbeatConnectivity ?? "-"}"
-            : "Sem heartbeat";
-
-        ProvisioningValue.Text = provisionedText;
-        RuntimeValue.Text = EmptyAsDash(status.RuntimeStatus);
-        HeartbeatValue.Text = heartbeatText;
-        PendingValue.Text = status.PendingOutboxEvents.ToString();
-        DeadLetterValue.Text = status.DeadLetterEvents.ToString();
-        InstanceValue.Text = EmptyAsDash(status.InstanceId);
-        TenantValue.Text = EmptyAsDash(status.ErpTenantId);
-        ErpApiValue.Text = EmptyAsDash(status.ErpApiBaseUrl);
-        DatabaseValue.Text = EmptyAsDash(status.Database);
-        LastErrorValue.Text = EmptyAsDash(status.LastError);
-
         if (!status.Provisioned)
         {
             SetBanner(
-                "Esta instalacao ainda nao esta ativada. Clique em Ativacao para conectar ao ERP.",
+                "Esta instalacao ainda nao esta ativada. Abra Configuracoes > Diagnostico e ativacao para conectar ao ERP.",
                 "#FEF3C7",
                 "#F59E0B",
                 "#92400E");
+            SyncStatusText.Text = "Sync: nao ativado";
         }
         else if (status.LastHeartbeatSucceeded != true)
         {
@@ -1174,90 +1121,39 @@ public partial class MainWindow : Window
                 "#FEF3C7",
                 "#F59E0B",
                 "#92400E");
+            SyncStatusText.Text = "Sync: sem heartbeat";
         }
         else if (status.PendingOutboxEvents > 0 || status.DeadLetterEvents > 0)
         {
-            SetBanner(
-                "SyncAgent conectado. Existem eventos pendentes ou dead-letter para acompanhamento.",
-                "#EFF6FF",
-                "#BFDBFE",
-                "#1E40AF");
+            BannerBorder.Visibility = Visibility.Collapsed;
+            SyncStatusText.Text = status.DeadLetterEvents > 0
+                ? $"Sync: {status.PendingOutboxEvents} pendente(s), {status.DeadLetterEvents} dead-letter"
+                : $"Sync: {status.PendingOutboxEvents} pendente(s)";
         }
         else
         {
-            SetBanner(
-                "SyncAgent conectado, ativado e sem pendencias locais.",
-                "#DCFCE7",
-                "#86EFAC",
-                "#166534");
+            BannerBorder.Visibility = Visibility.Collapsed;
+            SyncStatusText.Text = "Sync: OK";
         }
-
-        FooterText.Text = $"Atualizado em {DateTime.Now:dd/MM/yyyy HH:mm:ss}. API local: {_configuration.SyncAgentLocalApiBaseUrl}";
     }
 
     private void ApplyDatabaseStatus(PdvDatabaseStatus status)
     {
-        if (!status.IsAvailable)
-        {
-            PgVectorValue.Text = "-";
-            PdvSchemaValue.Text = "indisponivel";
-            OperatorsValue.Text = "-";
-            ProductsValue.Text = "-";
-            SalesValue.Text = "-";
-            OpenCashSessionsValue.Text = "-";
-            DatabaseValue.Text = "-";
-            DatabaseErrorValue.Text = EmptyAsDash(status.Error);
-            return;
-        }
-
-        PgVectorValue.Text = EmptyAsDash(status.PgVectorVersion);
-        PdvSchemaValue.Text = status.PdvSchemaExists
-            ? $"ok / {status.PdvTableCount} tabelas"
-            : "nao criado";
-        OperatorsValue.Text = status.OperatorCount.ToString();
-        ProductsValue.Text = status.ProductCount.ToString();
-        SalesValue.Text = status.SaleCount.ToString();
-        OpenCashSessionsValue.Text = status.OpenCashSessionCount.ToString();
-        OperatorsImportPanel.Visibility = status.PdvSchemaExists && status.OperatorCount == 0
+        OperatorsImportPanel.Visibility = status.IsAvailable && status.PdvSchemaExists && status.OperatorCount == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
-
-        DatabaseValue.Text = $"{EmptyAsDash(status.DatabaseName)} / {EmptyAsDash(status.UserName)} / {EmptyAsDash(status.TimeZone)}";
-        DatabaseErrorValue.Text = "-";
     }
 
     private void ApplyOfflineState(string message)
     {
-        ProvisioningValue.Text = "-";
-        RuntimeValue.Text = "offline";
-        HeartbeatValue.Text = "-";
-        PendingValue.Text = "-";
-        DeadLetterValue.Text = "-";
-        PgVectorValue.Text = "-";
-        PdvSchemaValue.Text = "-";
-        OperatorsValue.Text = "-";
-        ProductsValue.Text = "-";
-        SalesValue.Text = "-";
-        OpenCashSessionsValue.Text = "-";
         OperatorsImportPanel.Visibility = Visibility.Collapsed;
-        InstanceValue.Text = "-";
-        TenantValue.Text = "-";
-        ErpApiValue.Text = "-";
-        DatabaseValue.Text = "-";
-        LastErrorValue.Text = message;
-
         SetBanner(message, "#FEE2E2", "#FCA5A5", "#991B1B");
-        FooterText.Text = $"Falha na leitura em {DateTime.Now:dd/MM/yyyy HH:mm:ss}. API local: {_configuration.SyncAgentLocalApiBaseUrl}";
-    }
-
-    private void SetLoadingState(bool isLoading)
-    {
-        RefreshButton.IsEnabled = !isLoading;
-        RefreshButton.Content = isLoading ? "Atualizando..." : "Atualizar";
+        SyncStatusText.Text = "Sync: offline";
     }
 
     private void SetBanner(string message, string background, string border, string foreground)
     {
+        BannerBorder.Visibility = Visibility.Visible;
         BannerText.Text = message;
         BannerBorder.Background = BrushFromHex(background);
         BannerBorder.BorderBrush = BrushFromHex(border);
