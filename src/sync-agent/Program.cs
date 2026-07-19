@@ -88,6 +88,7 @@ builder.Services.AddSingleton<ErpReconciliationClient>();
 builder.Services.AddSingleton<PdvOperatorSnapshotClient>();
 builder.Services.AddSingleton<PdvProductSnapshotClient>();
 builder.Services.AddSingleton<PdvPaymentMethodsSnapshotClient>();
+builder.Services.AddSingleton<PdvCustomerSnapshotClient>();
 builder.Services.AddSingleton<PdvSalesPublisher>();
 builder.Services.AddHttpClient(ErpEventDispatcherHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
@@ -100,6 +101,8 @@ builder.Services.AddHttpClient(PdvOperatorSnapshotHttpClient.Name)
 builder.Services.AddHttpClient(PdvProductSnapshotHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(PdvPaymentMethodsSnapshotHttpClient.Name)
+    .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
+builder.Services.AddHttpClient(PdvCustomerSnapshotHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpActivationHttpClient.Name);
 builder.Services.AddSingleton<ManualSyncSignal>();

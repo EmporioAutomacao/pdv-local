@@ -1044,6 +1044,117 @@ public sealed class LocalSyncStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<int> UpsertPdvCustomersAsync(
+        IReadOnlyCollection<PdvCustomerSnapshotItem> customers,
+        CancellationToken cancellationToken)
+    {
+        if (customers.Count == 0)
+        {
+            return 0;
+        }
+
+        const string sql = """
+            INSERT INTO pdv.customers (
+                customer_id,
+                source_system,
+                external_key,
+                document,
+                name,
+                email,
+                phone,
+                active,
+                payload,
+                updated_at_utc
+            )
+            VALUES (
+                @customer_id,
+                'erp',
+                @external_key,
+                @document,
+                @name,
+                @email,
+                @phone,
+                @active,
+                @payload,
+                @updated_at_utc
+            )
+            ON CONFLICT (customer_id) DO UPDATE
+            SET
+                source_system = EXCLUDED.source_system,
+                external_key = EXCLUDED.external_key,
+                document = EXCLUDED.document,
+                name = EXCLUDED.name,
+                email = EXCLUDED.email,
+                phone = EXCLUDED.phone,
+                active = EXCLUDED.active,
+                payload = EXCLUDED.payload,
+                updated_at_utc = EXCLUDED.updated_at_utc
+            """;
+
+        var imported = 0;
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var item in customers)
+        {
+            var customerId = DeterministicGuid.Create("erp-pdv-customer", item.CustomerId);
+            var payloadObject = item.Payload.HasValue && item.Payload.Value.ValueKind == JsonValueKind.Object
+                ? JsonObject.Create(item.Payload.Value) ?? new JsonObject()
+                : new JsonObject();
+            if (!string.IsNullOrWhiteSpace(item.TradeName))
+            {
+                payloadObject["trade_name"] = item.TradeName.Trim();
+            }
+
+            await using var command = new NpgsqlCommand(sql, connection, transaction);
+            command.Parameters.AddWithValue("customer_id", customerId);
+            command.Parameters.AddWithValue("external_key", FirstNonEmpty(item.CustomerId));
+            command.Parameters.AddWithValue("document", (object?)NormalizeOptionalText(item.Document) ?? DBNull.Value);
+            command.Parameters.AddWithValue("name", FirstNonEmpty(item.Name, $"Cliente {item.CustomerId}"));
+            command.Parameters.AddWithValue("email", (object?)NormalizeOptionalText(item.Email) ?? DBNull.Value);
+            command.Parameters.AddWithValue("phone", (object?)NormalizeOptionalText(item.Phone) ?? DBNull.Value);
+            command.Parameters.AddWithValue("active", item.Active && item.DeletedAtUtc is null);
+            command.Parameters.AddWithValue("payload", NpgsqlDbType.Jsonb, ToCanonicalJson(payloadObject));
+            command.Parameters.AddWithValue("updated_at_utc", item.UpdatedAtUtc);
+            imported += await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return imported;
+    }
+
+    public async Task UpsertPdvCustomerSnapshotStateAsync(
+        DateTimeOffset timestampUtc,
+        bool succeeded,
+        int imported,
+        int? responseStatusCode,
+        string? error,
+        CancellationToken cancellationToken)
+    {
+        var stateValue = new JsonObject
+        {
+            ["timestamp_utc"] = timestampUtc.ToUniversalTime().ToString("O"),
+            ["succeeded"] = succeeded,
+            ["imported"] = imported,
+            ["response_status_code"] = responseStatusCode,
+            ["error"] = error
+        };
+
+        const string sql = """
+            INSERT INTO sync_agent.agent_state (state_key, state_value)
+            VALUES ('pdv.customers.snapshot', @state_value)
+            ON CONFLICT (state_key) DO UPDATE
+            SET
+                state_value = EXCLUDED.state_value,
+                updated_at_utc = now()
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("state_value", NpgsqlDbType.Jsonb, ToCanonicalJson(stateValue));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<OutboxEnqueueResult> EnqueueOutboxEventAsync(
         OutboxEventDraft draft,
         CancellationToken cancellationToken)

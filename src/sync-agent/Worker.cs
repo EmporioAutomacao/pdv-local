@@ -25,6 +25,7 @@ public sealed class Worker : BackgroundService
     private readonly PdvOperatorSnapshotClient _pdvOperatorSnapshotClient;
     private readonly PdvProductSnapshotClient _pdvProductSnapshotClient;
     private readonly PdvPaymentMethodsSnapshotClient _pdvPaymentMethodsSnapshotClient;
+    private readonly PdvCustomerSnapshotClient _pdvCustomerSnapshotClient;
     private readonly PdvSalesPublisher _pdvSalesPublisher;
     private readonly ErpActivationClient _erpActivationClient;
     private readonly ManualSyncSignal _manualSyncSignal;
@@ -43,6 +44,7 @@ public sealed class Worker : BackgroundService
         PdvOperatorSnapshotClient pdvOperatorSnapshotClient,
         PdvProductSnapshotClient pdvProductSnapshotClient,
         PdvPaymentMethodsSnapshotClient pdvPaymentMethodsSnapshotClient,
+        PdvCustomerSnapshotClient pdvCustomerSnapshotClient,
         PdvSalesPublisher pdvSalesPublisher,
         ErpActivationClient erpActivationClient,
         ManualSyncSignal manualSyncSignal,
@@ -60,6 +62,7 @@ public sealed class Worker : BackgroundService
         _pdvOperatorSnapshotClient = pdvOperatorSnapshotClient;
         _pdvProductSnapshotClient = pdvProductSnapshotClient;
         _pdvPaymentMethodsSnapshotClient = pdvPaymentMethodsSnapshotClient;
+        _pdvCustomerSnapshotClient = pdvCustomerSnapshotClient;
         _pdvSalesPublisher = pdvSalesPublisher;
         _erpActivationClient = erpActivationClient;
         _manualSyncSignal = manualSyncSignal;
@@ -143,6 +146,7 @@ public sealed class Worker : BackgroundService
         var pdvOperatorSnapshotSummary = await _pdvOperatorSnapshotClient.ImportAsync(cancellationToken);
         var pdvProductSnapshotSummary = await _pdvProductSnapshotClient.ImportAsync(cancellationToken);
         var pdvPaymentMethodsSnapshotSummary = await _pdvPaymentMethodsSnapshotClient.ImportAsync(cancellationToken);
+        var pdvCustomerSnapshotSummary = await _pdvCustomerSnapshotClient.ImportAsync(cancellationToken);
         var storeStatus = await _localStore.GetStatusAsync(cancellationToken);
         var connectivity = ResolveConnectivity(dispatchSummary, storeStatus);
         var heartbeatSummary = await _erpHeartbeatClient.SendAsync(
@@ -158,7 +162,7 @@ public sealed class Worker : BackgroundService
         }
 
         _logger.LogInformation(
-            "Sync cycle completed. Trigger={Trigger}; Instance={InstanceId}; Tenant={ErpTenantId}; AgentVersion={AgentVersion}; ERP API={ErpApiBaseUrl}; CollectorEnabled={CollectorEnabled}; Collected={Collected}; Inserted={Inserted}; PdvSalesPublisherEnabled={PdvSalesPublisherEnabled}; PdvSalesPending={PdvSalesPending}; PdvSalesPublished={PdvSalesPublished}; PdvSalesSkipped={PdvSalesSkipped}; DispatcherEnabled={DispatcherEnabled}; Dispatched={Dispatched}; Accepted={Accepted}; Rejected={Rejected}; DispatchFailed={DispatchFailed}; ReconciliationId={ReconciliationId}; ReconciliationStatus={ReconciliationStatus}; RemoteReconciliationEnabled={RemoteReconciliationEnabled}; RemoteReconciliationSucceeded={RemoteReconciliationSucceeded}; RemoteReconciliationMatched={RemoteReconciliationMatched}; PdvOperatorSnapshotEnabled={PdvOperatorSnapshotEnabled}; PdvOperatorsReceived={PdvOperatorsReceived}; PdvOperatorsImported={PdvOperatorsImported}; PdvOperatorSnapshotSucceeded={PdvOperatorSnapshotSucceeded}; PdvProductSnapshotEnabled={PdvProductSnapshotEnabled}; PdvProductsReceived={PdvProductsReceived}; PdvProductsImported={PdvProductsImported}; PdvProductSnapshotSucceeded={PdvProductSnapshotSucceeded}; PdvPaymentMethodsSnapshotEnabled={PdvPaymentMethodsSnapshotEnabled}; PdvPaymentMethodsReceived={PdvPaymentMethodsReceived}; PdvPaymentMethodsImported={PdvPaymentMethodsImported}; PdvPaymentMethodsSnapshotSucceeded={PdvPaymentMethodsSnapshotSucceeded}; HeartbeatEnabled={HeartbeatEnabled}; HeartbeatSucceeded={HeartbeatSucceeded}; Connectivity={Connectivity}; Database={DatabaseName}; pgvector={PgVectorVersion}; Pending={PendingOutboxEvents}; DeadLetter={DeadLetterEvents}; OldestPendingAgeSeconds={OldestPendingAgeSeconds}",
+            "Sync cycle completed. Trigger={Trigger}; Instance={InstanceId}; Tenant={ErpTenantId}; AgentVersion={AgentVersion}; ERP API={ErpApiBaseUrl}; CollectorEnabled={CollectorEnabled}; Collected={Collected}; Inserted={Inserted}; PdvSalesPublisherEnabled={PdvSalesPublisherEnabled}; PdvSalesPending={PdvSalesPending}; PdvSalesPublished={PdvSalesPublished}; PdvSalesSkipped={PdvSalesSkipped}; DispatcherEnabled={DispatcherEnabled}; Dispatched={Dispatched}; Accepted={Accepted}; Rejected={Rejected}; DispatchFailed={DispatchFailed}; ReconciliationId={ReconciliationId}; ReconciliationStatus={ReconciliationStatus}; RemoteReconciliationEnabled={RemoteReconciliationEnabled}; RemoteReconciliationSucceeded={RemoteReconciliationSucceeded}; RemoteReconciliationMatched={RemoteReconciliationMatched}; PdvOperatorSnapshotEnabled={PdvOperatorSnapshotEnabled}; PdvOperatorsReceived={PdvOperatorsReceived}; PdvOperatorsImported={PdvOperatorsImported}; PdvOperatorSnapshotSucceeded={PdvOperatorSnapshotSucceeded}; PdvProductSnapshotEnabled={PdvProductSnapshotEnabled}; PdvProductsReceived={PdvProductsReceived}; PdvProductsImported={PdvProductsImported}; PdvProductSnapshotSucceeded={PdvProductSnapshotSucceeded}; PdvPaymentMethodsSnapshotEnabled={PdvPaymentMethodsSnapshotEnabled}; PdvPaymentMethodsReceived={PdvPaymentMethodsReceived}; PdvPaymentMethodsImported={PdvPaymentMethodsImported}; PdvPaymentMethodsSnapshotSucceeded={PdvPaymentMethodsSnapshotSucceeded}; PdvCustomersReceived={PdvCustomersReceived}; PdvCustomersImported={PdvCustomersImported}; PdvCustomerSnapshotSucceeded={PdvCustomerSnapshotSucceeded}; HeartbeatEnabled={HeartbeatEnabled}; HeartbeatSucceeded={HeartbeatSucceeded}; Connectivity={Connectivity}; Database={DatabaseName}; pgvector={PgVectorVersion}; Pending={PendingOutboxEvents}; DeadLetter={DeadLetterEvents}; OldestPendingAgeSeconds={OldestPendingAgeSeconds}",
             trigger,
             effectiveOptions.InstanceId,
             effectiveOptions.TenantId,
@@ -193,6 +197,9 @@ public sealed class Worker : BackgroundService
             pdvPaymentMethodsSnapshotSummary.Received,
             pdvPaymentMethodsSnapshotSummary.Imported,
             pdvPaymentMethodsSnapshotSummary.Succeeded,
+            pdvCustomerSnapshotSummary.Received,
+            pdvCustomerSnapshotSummary.Imported,
+            pdvCustomerSnapshotSummary.Succeeded,
             heartbeatSummary.Enabled,
             heartbeatSummary.Succeeded,
             connectivity,
@@ -207,6 +214,7 @@ public sealed class Worker : BackgroundService
             ?? pdvOperatorSnapshotSummary.LastError
             ?? pdvProductSnapshotSummary.LastError
             ?? pdvPaymentMethodsSnapshotSummary.LastError
+            ?? pdvCustomerSnapshotSummary.LastError
             ?? pdvSalesPublishSummary.LastError
             ?? heartbeatSummary.LastError;
         if (lastError is null)
