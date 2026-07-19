@@ -1059,18 +1059,18 @@ public partial class MainWindow : Window
 
     private void UpdateSelectedProductTotal()
     {
-        if (SelectedProductTotalValue is null)
+        if (SelectedProductTotalTextBox is null)
         {
             return;
         }
 
         if (_selectedProduct is null || !TryParseMoney(QuantityTextBox.Text, out var quantity) || !TryParseMoney(ItemDiscountTextBox.Text, out var discount))
         {
-            SelectedProductTotalValue.Text = FormatMoney(0);
+            SelectedProductTotalTextBox.Text = FormatMoney(0);
             return;
         }
 
-        SelectedProductTotalValue.Text = FormatMoney(Math.Max(0, quantity * _selectedProduct.Price - discount));
+        SelectedProductTotalTextBox.Text = FormatMoney(Math.Max(0, quantity * _selectedProduct.Price - discount));
     }
 
     private void UpdateTotals()

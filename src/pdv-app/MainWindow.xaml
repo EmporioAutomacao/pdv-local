@@ -162,43 +162,43 @@
                             <Grid Grid.Row="1" Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2*" />
-                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="110" />
                                     <ColumnDefinition Width="120" />
                                     <ColumnDefinition Width="120" />
-                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="130" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Text="Produto: ID, SKU, codigo de barras ou nome" Style="{StaticResource LabelStyle}" />
                                     <TextBox x:Name="ProductEntryTextBox"
-                                             Style="{StaticResource InputStyle}"
-                                             FontSize="18"
+                                             Style="{StaticResource SaleEntryInputStyle}"
                                              KeyDown="ProductEntryTextBox_KeyDown" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="1">
                                     <TextBlock Text="Qtd" Style="{StaticResource LabelStyle}" />
-                                    <TextBox x:Name="QuantityTextBox" Style="{StaticResource InputStyle}" Text="1" TextChanged="SaleInputTextChanged" KeyDown="QuantityTextBox_KeyDown" />
+                                    <TextBox x:Name="QuantityTextBox" Style="{StaticResource SaleEntryInputStyle}" Text="1" TextChanged="SaleInputTextChanged" KeyDown="QuantityTextBox_KeyDown" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="Preco" Style="{StaticResource LabelStyle}" />
-                                    <TextBox x:Name="UnitPriceTextBox" Style="{StaticResource InputStyle}" IsReadOnly="True" IsTabStop="False" Text="0,00" />
+                                    <TextBox x:Name="UnitPriceTextBox" Style="{StaticResource SaleEntryInputStyle}" IsReadOnly="True" IsTabStop="False" Text="0,00" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="3">
                                     <TextBlock Text="Desc. item" Style="{StaticResource LabelStyle}" />
-                                    <TextBox x:Name="ItemDiscountTextBox" Style="{StaticResource InputStyle}" Text="0,00" TextChanged="SaleInputTextChanged" KeyDown="ItemDiscountTextBox_KeyDown" />
+                                    <TextBox x:Name="ItemDiscountTextBox" Style="{StaticResource SaleEntryInputStyle}" Text="0,00" TextChanged="SaleInputTextChanged" KeyDown="ItemDiscountTextBox_KeyDown" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="4">
                                     <TextBlock Text="Total item" Style="{StaticResource LabelStyle}" />
-                                    <TextBlock x:Name="SelectedProductTotalValue"
-                                               Text="R$ 0,00"
-                                               FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextPrimary}"
-                                               Margin="0,8,10,0" />
+                                    <TextBox x:Name="SelectedProductTotalTextBox"
+                                             Style="{StaticResource SaleEntryInputStyle}"
+                                             IsReadOnly="True"
+                                             IsTabStop="False"
+                                             FontWeight="SemiBold"
+                                             Text="R$ 0,00" />
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,8">

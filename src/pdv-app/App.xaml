@@ -85,7 +85,16 @@
                 <Setter Property="Padding"        Value="10,7" />
                 <Setter Property="Margin"         Value="0,0,10,8" />
                 <Setter Property="MinWidth"       Value="120" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="CaretBrush"     Value="{DynamicResource TextPrimary}" />
+            </Style>
+
+            <!-- Input da linha de lancamento da venda: altura unica para todos os
+                 campos (a largura fica por conta das colunas do Grid) -->
+            <Style x:Key="SaleEntryInputStyle" TargetType="TextBox" BasedOn="{StaticResource InputStyle}">
+                <Setter Property="FontSize"  Value="16" />
+                <Setter Property="MinHeight" Value="42" />
+                <Setter Property="MinWidth"  Value="0" />
             </Style>
 
             <!-- Label de campo (CashSessionSalesWindow / FieldLabelStyle) -->
