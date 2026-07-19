@@ -107,6 +107,7 @@ public partial class MainWindow : Window
         await _cashMovementRepository.EnsureSchemaAsync(CancellationToken.None);
         await _saleRepository.EnsureSchemaAsync(CancellationToken.None);
         await _productRepository.EnsureSchemaAsync(CancellationToken.None);
+        ApplyProductGridPreferences();
         await RefreshStatusAsync();
         _statusRefreshTimer.Start();
 
@@ -624,6 +625,14 @@ public partial class MainWindow : Window
     {
         var win = new SettingsWindow { Owner = this };
         win.ShowDialog();
+        ApplyProductGridPreferences();
+    }
+
+    private void ApplyProductGridPreferences()
+    {
+        FactoryCodeColumn.Visibility = UserPreferences.Load().ShowFactoryCode
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void OpenTechnicalDetailsWindow()

@@ -221,7 +221,9 @@
                                       MouseDoubleClick="ProductSearchResultsGrid_MouseDoubleClick"
                                       KeyDown="ProductSearchResultsGrid_KeyDown">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Codigo" Binding="{Binding DisplayCode}" Width="130" />
+                                    <DataGridTextColumn Header="ID" Binding="{Binding ExternalKey}" Width="70" />
+                                    <DataGridTextColumn Header="Cod. Barras" Binding="{Binding BarcodeText}" Width="125" />
+                                    <DataGridTextColumn x:Name="FactoryCodeColumn" Header="Cod. Fabrica" Binding="{Binding FactoryCodeText}" Width="110" Visibility="Collapsed" />
                                     <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*" />
                                     <DataGridTextColumn Header="Un" Binding="{Binding Unit}" Width="55" />
                                     <DataGridTextColumn Header="Preco" Binding="{Binding PriceText}" Width="90" />

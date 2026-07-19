@@ -11,6 +11,8 @@ public sealed class UserPreferences
 
     public string Theme { get; set; } = "Light";
 
+    public bool ShowFactoryCode { get; set; } = false;
+
     public static UserPreferences Load()
     {
         try

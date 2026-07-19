@@ -29,6 +29,9 @@ internal sealed class UiProductSearchResult
 
     public PdvProduct Product { get; }
     public string DisplayCode => PdvUiFormatting.FirstNonEmpty(Product.Barcode, Product.Sku, Product.ExternalKey, Product.ProductId.ToString());
+    public string ExternalKey => Product.ExternalKey;
+    public string BarcodeText => PdvUiFormatting.FirstNonEmpty(Product.Barcode, "-");
+    public string FactoryCodeText => PdvUiFormatting.FirstNonEmpty(Product.FactoryCode, "-");
     public string Name => Product.Name;
     public string Unit => Product.Unit;
     public string PriceText => Product.Price.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));

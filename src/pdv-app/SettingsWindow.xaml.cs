@@ -17,6 +17,7 @@ public partial class SettingsWindow : Window
         _loaded = false;
         LightThemeRadio.IsChecked = ThemeManager.Current == ThemeManager.Light;
         DarkThemeRadio.IsChecked  = ThemeManager.Current == ThemeManager.Dark;
+        ShowFactoryCodeCheckBox.IsChecked = UserPreferences.Load().ShowFactoryCode;
         _loaded = true;
     }
 
@@ -29,6 +30,15 @@ public partial class SettingsWindow : Window
 
         var prefs = UserPreferences.Load();
         prefs.Theme = theme;
+        prefs.Save();
+    }
+
+    private void ShowFactoryCodeCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+
+        var prefs = UserPreferences.Load();
+        prefs.ShowFactoryCode = ShowFactoryCodeCheckBox.IsChecked == true;
         prefs.Save();
     }
 
