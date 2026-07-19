@@ -2,7 +2,7 @@
 # Executar em sessao interativa via schtasks /IT /RU Suporte
 param(
     [string]$OperatorLogin = 'admin',
-    [string]$OperatorPassword = 'Homolog@2026'
+    [string]$OperatorPassword = 'Homolog2026'
 )
 $ErrorActionPreference = 'Continue'
 
@@ -170,15 +170,25 @@ function clickEl {
     Start-Sleep -Milliseconds 500
 }
 
-# Clique assincrono via PostMessage — usar quando o clique abre um dialogo modal
+# PasswordBox do WPF nao expoe ValuePattern (seguranca) — digita por teclas reais
+function setPass {
+    param($e, [string]$v)
+    if ($null -eq $e) { return }
+    if ($script:hwnd -ne 0) { [Win32Kbd]::BringToFront($script:hwnd) | Out-Null; Start-Sleep -Milliseconds 150 }
+    $e.SetFocus(); Start-Sleep -Milliseconds 300
+    foreach ($ch in $v.ToCharArray()) { [Win32Kbd]::TypeChar($ch) }
+    Start-Sleep -Milliseconds 250
+}
+
+# Aciona um botao sem bloquear (para cliques que abrem dialogo modal):
+# foca o elemento e envia SPACE via keybd_event (fire-and-forget)
 function clickElAsync {
     param($e)
-    $r = $e.Current.BoundingRectangle
-    $cx = [int]($r.X + $r.Width / 2); $cy = [int]($r.Y + $r.Height / 2)
-    $h = $e.Current.NativeWindowHandle
-    if ($h -eq 0) { $h = $script:hwnd }
-    [Win32Kbd]::ClickAtInWindow([IntPtr]$h, $cx, $cy)
-    Start-Sleep -Milliseconds 600
+    if ($null -eq $e) { return }
+    if ($script:hwnd -ne 0) { [Win32Kbd]::BringToFront($script:hwnd) | Out-Null; Start-Sleep -Milliseconds 150 }
+    $e.SetFocus(); Start-Sleep -Milliseconds 250
+    [Win32Kbd]::KeyPress(0x20)
+    Start-Sleep -Milliseconds 500
 }
 
 # VK: ENTER=0x0D ESC=0x1B F1=0x70 F2=0x71 F3=0x72 F4=0x73 F8=0x77 F9=0x78 F10=0x79 F11=0x7A F12=0x7B L=0x4C CTRL=0x11
@@ -217,12 +227,28 @@ function closeWnd {
 
 # Autoriza no SupervisorAuthorizationDialog (login + senha + motivo)
 function authorizeSupervisor {
-    param([string]$reason, [int]$sec = 10)
-    $dlg = wWnd 'Autorizacao de supervisor' $sec
+    param([string]$reason, $owner = $null, [int]$sec = 10)
+    $dlg = wWnd 'Autorizacao de supervisor' $sec $owner
+    if (-not $dlg) {
+        # Fallback: procura a janela por AutomationId de um de seus campos
+        $dl = [DateTime]::Now.AddSeconds(3)
+        while ((-not $dlg) -and ([DateTime]::Now -lt $dl)) {
+            $probe = wEl ([System.Windows.Automation.AutomationElement]::RootElement) 'AuthorizeSupervisorButton' 1
+            if ($probe) {
+                $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                $anc = $probe
+                for ($i=0; $i -lt 8 -and $anc; $i++) {
+                    if ($anc.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) { $dlg = $anc; break }
+                    $anc = $walker.GetParent($anc)
+                }
+            }
+            Start-Sleep -Milliseconds 300
+        }
+    }
     if (-not $dlg) { return $false }
     setWnd $dlg
     setVal (wEl $dlg 'SupervisorLoginTextBox' 5) $OperatorLogin
-    setVal (wEl $dlg 'SupervisorPasswordBox' 5) $OperatorPassword
+    setPass (wEl $dlg 'SupervisorPasswordBox' 5) $OperatorPassword
     setVal (wEl $dlg 'SupervisorReasonTextBox' 5) $reason
     clickEl (wEl $dlg 'AuthorizeSupervisorButton' 5)
     Start-Sleep -Seconds 1
@@ -238,7 +264,7 @@ function doLogin {
     if (-not $loginWnd) { return $null }
     setWnd $loginWnd
     setVal (wEl $loginWnd 'LoginTextBox' 5) $OperatorLogin
-    setVal (wEl $loginWnd 'SenhaPasswordBox' 5) $OperatorPassword
+    setPass (wEl $loginWnd 'SenhaPasswordBox' 5) $OperatorPassword
     clickEl (wEl $loginWnd 'EntrarButton' 5)
     Start-Sleep -Seconds 2
     return (wWnd 'PDV Local' 15)
@@ -261,13 +287,31 @@ $main = $null
 if ($loginWnd) {
     setWnd $loginWnd
     setVal (wEl $loginWnd 'LoginTextBox' 5) $OperatorLogin
-    setVal (wEl $loginWnd 'SenhaPasswordBox' 5) $OperatorPassword
+    setPass (wEl $loginWnd 'SenhaPasswordBox' 5) $OperatorPassword
     clickEl (wEl $loginWnd 'EntrarButton' 5)
     Start-Sleep -Seconds 2
     $main = wWnd 'PDV Local' 15
 }
 if (-not $main) {
-    Fail 'T00_main_after_login' 'Janela principal nao apareceu apos login'
+    # Diagnostico: lista janelas top-level visiveis e o erro do login, se houver
+    $wins = @()
+    try {
+        $all = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::Window))
+        foreach ($w in $all) { $wins += $w.Current.Name }
+    } catch {}
+    Log ("T00 DIAG janelas: " + ($wins -join ' | '))
+    $lw = wWnd $loginTitle 3
+    if ($lw) {
+        $err = wEl $lw 'ErrorText' 2
+        if ($err) { Log ("T00 DIAG login erro: '" + (gEl $err) + "'") }
+        $loginVal = wEl $lw 'LoginTextBox' 2
+        if ($loginVal) { Log ("T00 DIAG login digitado: '" + (gEl $loginVal) + "'") }
+    }
+    Fail 'T00_main_after_login' ("Janela principal nao apareceu. Janelas: " + ($wins -join ', '))
     @{ timestamp=(Get-Date -f 'yyyy-MM-dd HH:mm:ss'); pass_count=$passCount; fail_count=$failCount; results=$results } |
         ConvertTo-Json -Depth 5 | Set-Content $outputFile -Encoding UTF8
     exit 1
@@ -421,7 +465,7 @@ if ($itemsBefore -ge 1) {
 # --- T07: F2 NOVA VENDA EXIGE SUPERVISOR (dialogo com senha) ---
 Log "--- T07: F2 nova venda com autorizacao ---"
 sk 0x71
-if (authorizeSupervisor 'Limpeza pre-teste homologacao') {
+if (authorizeSupervisor 'Limpeza pre-teste homologacao' $main) {
     Pass 'T07_supervisor_dialog_ok'
 } else {
     Fail 'T07_supervisor_dialog_ok' 'dialogo de autorizacao nao apareceu/fechou'
@@ -571,7 +615,7 @@ if ($cashWnd) {
     if ($movFld) {
         setVal $movFld '50,00'
         clickElAsync (wEl $cashWnd 'CashSupplyButton' 3)
-        if (authorizeSupervisor 'Suprimento teste homologacao') {
+        if (authorizeSupervisor 'Suprimento teste homologacao' $cashWnd) {
             Start-Sleep -Seconds 2
             $msgEl = wEl $cashWnd 'CashMessageText' 5
             $msgTxt = if ($msgEl) { gEl $msgEl } else { '' }
@@ -617,7 +661,7 @@ $lockWnd = wWnd 'Terminal travado' 8 $main
 if ($lockWnd) {
     Pass 'T13_lock_opens'
     setWnd $lockWnd
-    setVal (wEl $lockWnd 'UnlockPasswordBox' 5) $OperatorPassword
+    setPass (wEl $lockWnd 'UnlockPasswordBox' 5) $OperatorPassword
     clickEl (wEl $lockWnd 'UnlockButton' 5)
     Start-Sleep -Seconds 2
     $still = wWnd 'Terminal travado' 2
