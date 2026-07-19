@@ -769,6 +769,10 @@ public sealed class LocalSyncStore
             return 0;
         }
 
+        const string ensureSchemaSql = """
+            ALTER TABLE pdv.products ADD COLUMN IF NOT EXISTS factory_code text NULL
+            """;
+
         const string sql = """
             INSERT INTO pdv.products (
                 product_id,
@@ -781,6 +785,7 @@ public sealed class LocalSyncStore
                 price,
                 active,
                 payload,
+                factory_code,
                 updated_at_utc
             )
             VALUES (
@@ -794,6 +799,7 @@ public sealed class LocalSyncStore
                 @price,
                 @active,
                 @payload,
+                NULLIF(trim(@payload::jsonb ->> 'codigo_fabrica'), ''),
                 @updated_at_utc
             )
             ON CONFLICT (product_id) DO UPDATE
@@ -807,12 +813,18 @@ public sealed class LocalSyncStore
                 price = EXCLUDED.price,
                 active = EXCLUDED.active,
                 payload = EXCLUDED.payload,
+                factory_code = EXCLUDED.factory_code,
                 updated_at_utc = EXCLUDED.updated_at_utc
             """;
 
         var imported = 0;
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var ensureSchema = new NpgsqlCommand(ensureSchemaSql, connection, transaction))
+        {
+            await ensureSchema.ExecuteNonQueryAsync(cancellationToken);
+        }
 
         foreach (var item in products)
         {

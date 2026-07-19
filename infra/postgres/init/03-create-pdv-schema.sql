@@ -76,12 +76,25 @@ CREATE TABLE IF NOT EXISTS pdv.products (
     UNIQUE (source_system, external_key)
 );
 
+ALTER TABLE pdv.products ADD COLUMN IF NOT EXISTS factory_code text NULL;
+
+-- Backfill para bases que ja receberam snapshots antes da coluna existir:
+-- o snapshot do ERP sempre enviou codigo_fabrica dentro do payload.
+UPDATE pdv.products
+SET factory_code = NULLIF(trim(payload ->> 'codigo_fabrica'), '')
+WHERE factory_code IS NULL
+  AND payload ? 'codigo_fabrica';
+
 CREATE INDEX IF NOT EXISTS ix_products_barcode
     ON pdv.products (barcode)
     WHERE barcode IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_products_name
     ON pdv.products (name);
+
+CREATE INDEX IF NOT EXISTS ix_products_factory_code
+    ON pdv.products (factory_code)
+    WHERE factory_code IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS pdv.payment_species (
     payment_species_id uuid PRIMARY KEY,

@@ -106,6 +106,7 @@ public partial class MainWindow : Window
         await _operationAuditRepository.EnsureSchemaAsync(CancellationToken.None);
         await _cashMovementRepository.EnsureSchemaAsync(CancellationToken.None);
         await _saleRepository.EnsureSchemaAsync(CancellationToken.None);
+        await _productRepository.EnsureSchemaAsync(CancellationToken.None);
         await RefreshStatusAsync();
         _statusRefreshTimer.Start();
 

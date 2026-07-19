@@ -12,6 +12,24 @@ public sealed class PdvProductRepository
         _connectionString = connectionString;
     }
 
+    public async Task EnsureSchemaAsync(CancellationToken cancellationToken)
+    {
+        const string sql = """
+            ALTER TABLE pdv.products ADD COLUMN IF NOT EXISTS factory_code text NULL;
+            UPDATE pdv.products
+            SET factory_code = NULLIF(trim(payload ->> 'codigo_fabrica'), '')
+            WHERE factory_code IS NULL
+              AND payload ? 'codigo_fabrica';
+            CREATE INDEX IF NOT EXISTS ix_products_factory_code
+                ON pdv.products (factory_code)
+                WHERE factory_code IS NOT NULL;
+            """;
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<Guid> UpsertManualProductAsync(
         UpsertManualProductCommand command,
         CancellationToken cancellationToken)
@@ -88,7 +106,8 @@ public sealed class PdvProductRepository
                 name,
                 unit,
                 price,
-                active
+                active,
+                factory_code
             FROM pdv.products
             WHERE active = true
               AND (
@@ -96,6 +115,7 @@ public sealed class PdvProductRepository
                  OR external_key = @query
                  OR sku = @query
                  OR barcode = @query
+                 OR factory_code = @query
                  OR name ILIKE @name_pattern
               )
             ORDER BY
@@ -104,8 +124,9 @@ public sealed class PdvProductRepository
                     WHEN barcode = @query THEN 1
                     WHEN external_key = @query THEN 2
                     WHEN sku = @query THEN 3
-                    WHEN lower(name) = @query_lower THEN 4
-                    ELSE 5
+                    WHEN factory_code = @query THEN 4
+                    WHEN lower(name) = @query_lower THEN 5
+                    ELSE 6
                 END,
                 name
             LIMIT @limit
@@ -133,7 +154,8 @@ public sealed class PdvProductRepository
                 Name: reader.GetString(5),
                 Unit: reader.GetString(6),
                 Price: reader.GetDecimal(7),
-                Active: reader.GetBoolean(8)));
+                Active: reader.GetBoolean(8),
+                FactoryCode: reader.IsDBNull(9) ? null : reader.GetString(9)));
         }
 
         return products;

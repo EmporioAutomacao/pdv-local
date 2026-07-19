@@ -27,7 +27,8 @@ public sealed record PdvProduct(
     string Name,
     string Unit,
     decimal Price,
-    bool Active);
+    bool Active,
+    string? FactoryCode = null);
 
 public sealed record PdvPaymentSpecies(
     Guid PaymentSpeciesId,
