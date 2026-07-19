@@ -113,7 +113,8 @@ public sealed record CompletedSaleCommand(
 public sealed record PdvCustomer(
     Guid CustomerId,
     string Name,
-    string? Document);
+    string? Document,
+    string? ExternalKey = null);
 
 public sealed record CompletedSaleItemCommand(
     Guid ProductId,

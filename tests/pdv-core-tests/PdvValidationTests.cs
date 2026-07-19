@@ -91,6 +91,25 @@ public sealed class PdvValidationTests
         Assert.Same(target, PdvValidation.TryPickExactMatch(new[] { target }, " ab-10 "));
     }
 
+    [Theory]
+    [InlineData("52998224725", CustomerLookupInputKind.Document)]
+    [InlineData("529.982.247-25", CustomerLookupInputKind.Document)]
+    [InlineData("11.222.333/0001-81", CustomerLookupInputKind.Document)]
+    [InlineData("11222333000181", CustomerLookupInputKind.Document)]
+    [InlineData("482", CustomerLookupInputKind.InternalCode)]
+    [InlineData("1", CustomerLookupInputKind.InternalCode)]
+    [InlineData("1234567890", CustomerLookupInputKind.InternalCode)]
+    [InlineData("12a", CustomerLookupInputKind.Invalid)]
+    [InlineData("", CustomerLookupInputKind.Invalid)]
+    [InlineData("   ", CustomerLookupInputKind.Invalid)]
+    [InlineData("123456789012", CustomerLookupInputKind.Invalid)]
+    [InlineData("maria", CustomerLookupInputKind.Invalid)]
+    public void ClassifyCustomerLookupInput_classifies_document_code_and_invalid(
+        string input, CustomerLookupInputKind expected)
+    {
+        Assert.Equal(expected, PdvValidation.ClassifyCustomerLookupInput(input));
+    }
+
     private static PdvProduct BuildProduct(
         string? sku = null,
         string? barcode = null,

@@ -93,6 +93,35 @@ public static class PdvValidation
     }
 
     /// <summary>
+    /// Classifica o texto digitado no campo de cliente do pagamento: 11/14
+    /// digitos (com ou sem pontuacao de CPF/CNPJ) = documento; 1 a 10 digitos
+    /// puros = codigo interno do ERP; qualquer outra coisa = invalido.
+    /// </summary>
+    public static CustomerLookupInputKind ClassifyCustomerLookupInput(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return CustomerLookupInputKind.Invalid;
+        }
+
+        var trimmed = input.Trim();
+        var digits = new string(trimmed.Where(char.IsDigit).ToArray());
+        var punctuationOnly = trimmed.All(ch => char.IsDigit(ch) || ch is '.' or '-' or '/' or ' ');
+
+        if (punctuationOnly && digits.Length is 11 or 14)
+        {
+            return CustomerLookupInputKind.Document;
+        }
+
+        if (trimmed.All(char.IsDigit) && trimmed.Length is >= 1 and <= 10)
+        {
+            return CustomerLookupInputKind.InternalCode;
+        }
+
+        return CustomerLookupInputKind.Invalid;
+    }
+
+    /// <summary>
     /// Normaliza um CPF/CNPJ digitado (aceita pontuacao) para somente digitos e
     /// valida os digitos verificadores. Retorna false para documentos invalidos.
     /// </summary>
@@ -410,4 +439,11 @@ public static class PdvValidation
         var itemDiscounts = command.Items.Sum(item => item.DiscountAmount);
         return subtotal - itemDiscounts - command.DiscountAmount;
     }
+}
+
+public enum CustomerLookupInputKind
+{
+    Document,
+    InternalCode,
+    Invalid
 }
