@@ -39,8 +39,16 @@
                 </StackPanel>
             </Grid>
 
-            <TextBlock Text="CPF/CNPJ na nota (opcional)" Style="{StaticResource FieldLabelStyle}" />
+            <TextBlock Text="Cliente: CPF/CNPJ ou codigo (opcional)" Style="{StaticResource FieldLabelStyle}" />
             <DockPanel Margin="0,0,0,10" LastChildFill="True">
+                <Button x:Name="CustomerSearchButton"
+                        Content="&#x1F50D;"
+                        DockPanel.Dock="Left"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Padding="8,4"
+                        Margin="0,0,8,8"
+                        ToolTip="Pesquisar cliente na lista (nome, documento ou codigo)"
+                        Click="CustomerSearchButton_Click" />
                 <TextBlock x:Name="CustomerNameText"
                            DockPanel.Dock="Right"
                            Text=""
@@ -52,6 +60,7 @@
                            TextTrimming="CharacterEllipsis" />
                 <TextBox x:Name="CustomerDocumentTextBox"
                          Style="{StaticResource InputStyle}"
+                         KeyDown="CustomerDocumentTextBox_KeyDown"
                          LostFocus="CustomerDocumentTextBox_LostFocus" />
             </DockPanel>
 

@@ -19,6 +19,8 @@ public partial class PaymentWindow : Window
     private readonly PdvCustomerRepository _customerRepository;
     private readonly Func<string, SupervisorAuthorization, string, Task> _recordAuditAsync;
 
+    private bool _resolvingCustomer;
+
     public decimal SaleDiscount { get; private set; }
     public string? CustomerDocument { get; private set; }
     public Guid? CustomerId { get; private set; }
@@ -243,31 +245,95 @@ public partial class PaymentWindow : Window
         });
     }
 
-    private async Task ResolveCustomerDocumentAsync()
+    private async void CustomerDocumentTextBox_KeyDown(object sender, KeyEventArgs e)
     {
-        var documentText = CustomerDocumentTextBox.Text.Trim();
-        if (documentText.Length == 0)
+        if (e.Key != Key.Enter)
+            return;
+        e.Handled = true;
+        await RunAsync(async () =>
         {
-            CustomerDocument = null;
-            CustomerId = null;
-            CustomerNameText.Text = "";
+            await ResolveCustomerDocumentAsync();
+        });
+    }
+
+    private void CustomerSearchButton_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new CustomerSearchWindow(_customerRepository) { Owner = this };
+        if (window.ShowDialog() != true || window.SelectedCustomer is not { } customer)
+        {
             return;
         }
 
-        if (!PdvValidation.TryNormalizeCustomerDocument(documentText, out var normalized))
+        ApplyResolvedCustomer(customer);
+        CustomerDocumentTextBox.Text = customer.Document ?? customer.ExternalKey ?? string.Empty;
+        HideMessage();
+    }
+
+    private async Task ResolveCustomerDocumentAsync()
+    {
+        if (_resolvingCustomer)
         {
-            CustomerDocument = null;
-            CustomerId = null;
-            CustomerNameText.Text = "";
-            throw new ArgumentException("CPF/CNPJ invalido.");
+            return;
         }
 
-        CustomerDocument = normalized;
-        var customer = await _customerRepository.FindActiveByDocumentAsync(normalized, CancellationToken.None);
-        CustomerId = customer?.CustomerId;
-        CustomerNameText.Text = customer is null
-            ? "Consumidor nao cadastrado"
-            : $"Cliente: {customer.Name}";
+        _resolvingCustomer = true;
+        try
+        {
+            var inputText = CustomerDocumentTextBox.Text.Trim();
+            if (inputText.Length == 0)
+            {
+                CustomerDocument = null;
+                CustomerId = null;
+                CustomerNameText.Text = "";
+                return;
+            }
+
+            switch (PdvValidation.ClassifyCustomerLookupInput(inputText))
+            {
+                case CustomerLookupInputKind.Document:
+                    if (!PdvValidation.TryNormalizeCustomerDocument(inputText, out var normalized))
+                    {
+                        CustomerDocument = null;
+                        CustomerId = null;
+                        CustomerNameText.Text = "";
+                        throw new ArgumentException("CPF/CNPJ invalido.");
+                    }
+
+                    CustomerDocument = normalized;
+                    var byDocument = await _customerRepository.FindActiveByDocumentAsync(normalized, CancellationToken.None);
+                    CustomerId = byDocument?.CustomerId;
+                    CustomerNameText.Text = byDocument is null
+                        ? "Consumidor nao cadastrado"
+                        : $"Cliente: {byDocument.Name}";
+                    break;
+
+                case CustomerLookupInputKind.InternalCode:
+                    var byCode = await _customerRepository.FindActiveByCodeAsync(inputText, CancellationToken.None)
+                        ?? throw new ArgumentException($"Cliente com codigo {inputText} nao encontrado.");
+                    ApplyResolvedCustomer(byCode);
+                    break;
+
+                default:
+                    CustomerDocument = null;
+                    CustomerId = null;
+                    CustomerNameText.Text = "";
+                    throw new ArgumentException("Informe CPF/CNPJ ou o codigo interno do cliente.");
+            }
+        }
+        finally
+        {
+            _resolvingCustomer = false;
+        }
+    }
+
+    private void ApplyResolvedCustomer(PdvCustomer customer)
+    {
+        CustomerId = customer.CustomerId;
+        CustomerDocument = customer.Document is { } document
+            && PdvValidation.TryNormalizeCustomerDocument(document, out var digits)
+            ? digits
+            : null;
+        CustomerNameText.Text = $"Cliente: {customer.Name}";
     }
 
     private async void CompleteSaleButton_Click(object sender, RoutedEventArgs e)
