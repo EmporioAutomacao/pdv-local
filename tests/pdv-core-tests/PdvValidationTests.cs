@@ -38,6 +38,79 @@ public sealed class PdvValidationTests
         Assert.Equal(expectedQuery, query);
     }
 
+    [Fact]
+    public void TryPickExactMatch_picks_barcode_match_over_partial_name_matches()
+    {
+        var target = BuildProduct(barcode: "7891000000010", name: "Arroz 5kg");
+        var products = new[]
+        {
+            BuildProduct(name: "Produto 7891000000010 similar"),
+            target,
+            BuildProduct(name: "Outro 7891000000010 parecido")
+        };
+
+        Assert.Same(target, PdvValidation.TryPickExactMatch(products, "7891000000010"));
+    }
+
+    [Fact]
+    public void TryPickExactMatch_picks_factory_code_match()
+    {
+        var target = BuildProduct(factoryCode: "ARZ-5001");
+        var products = new[] { BuildProduct(name: "ARZ-5001 generico"), target };
+
+        Assert.Same(target, PdvValidation.TryPickExactMatch(products, "arz-5001"));
+    }
+
+    [Fact]
+    public void TryPickExactMatch_returns_null_when_two_products_match_exactly()
+    {
+        var products = new[]
+        {
+            BuildProduct(barcode: "123"),
+            BuildProduct(sku: "123")
+        };
+
+        Assert.Null(PdvValidation.TryPickExactMatch(products, "123"));
+    }
+
+    [Fact]
+    public void TryPickExactMatch_returns_null_without_exact_match()
+    {
+        var products = new[] { BuildProduct(name: "Arroz Tipo 1") };
+
+        Assert.Null(PdvValidation.TryPickExactMatch(products, "arroz"));
+        Assert.Null(PdvValidation.TryPickExactMatch(products, "  "));
+        Assert.Null(PdvValidation.TryPickExactMatch(Array.Empty<PdvProduct>(), "123"));
+    }
+
+    [Fact]
+    public void TryPickExactMatch_trims_query_and_ignores_case()
+    {
+        var target = BuildProduct(externalKey: "AB-10");
+
+        Assert.Same(target, PdvValidation.TryPickExactMatch(new[] { target }, " ab-10 "));
+    }
+
+    private static PdvProduct BuildProduct(
+        string? sku = null,
+        string? barcode = null,
+        string name = "Produto teste",
+        string? externalKey = null,
+        string? factoryCode = null)
+    {
+        return new PdvProduct(
+            ProductId: Guid.NewGuid(),
+            SourceSystem: "erp",
+            ExternalKey: externalKey ?? Guid.NewGuid().ToString("N"),
+            Sku: sku,
+            Barcode: barcode,
+            Name: name,
+            Unit: "UN",
+            Price: 10m,
+            Active: true,
+            FactoryCode: factoryCode);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

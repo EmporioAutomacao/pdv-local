@@ -667,18 +667,30 @@ public partial class MainWindow : Window
         }
 
         var products = await _productRepository.SearchForSaleAsync(query, limit: 20, CancellationToken.None);
-        _productSearchResults.Clear();
-        foreach (var product in products)
-        {
-            _productSearchResults.Add(new UiProductSearchResult(product));
-        }
 
         if (products.Count == 0)
         {
+            _productSearchResults.Clear();
             _selectedProduct = null;
             UnitPriceTextBox.Text = "0,00";
             UpdateSelectedProductTotal();
             throw new InvalidOperationException("Produto nao encontrado no catalogo local.");
+        }
+
+        // Match exato de codigo com produto unico vende direto, mesmo quando o
+        // texto tambem casa parcialmente com nomes de outros produtos.
+        if (PdvValidation.TryPickExactMatch(products, query) is { } exactMatch)
+        {
+            _productSearchResults.Clear();
+            SelectProduct(exactMatch);
+            SetOperationMessage("Produto encontrado. Pressione Enter ou clique Adicionar.", isError: false);
+            return;
+        }
+
+        _productSearchResults.Clear();
+        foreach (var product in products)
+        {
+            _productSearchResults.Add(new UiProductSearchResult(product));
         }
 
         if (products.Count == 1)

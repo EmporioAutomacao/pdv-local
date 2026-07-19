@@ -50,6 +50,49 @@ public static class PdvValidation
     }
 
     /// <summary>
+    /// Escolhe o produto para venda direta quando a consulta casa EXATAMENTE
+    /// (id, codigo de barras, sku, chave externa ou codigo de fabrica) com um
+    /// unico produto do resultado — mesmo que o texto tambem case parcialmente
+    /// com nomes de outros produtos. Retorna null quando nao ha match exato ou
+    /// quando mais de um produto casa exatamente (ambiguidade → operador decide).
+    /// </summary>
+    public static PdvProduct? TryPickExactMatch(IReadOnlyList<PdvProduct> products, string? query)
+    {
+        if (products.Count == 0 || string.IsNullOrWhiteSpace(query))
+        {
+            return null;
+        }
+
+        var normalized = query.Trim();
+        PdvProduct? exact = null;
+        foreach (var product in products)
+        {
+            if (!IsExactCodeMatch(product, normalized))
+            {
+                continue;
+            }
+
+            if (exact is not null)
+            {
+                return null;
+            }
+
+            exact = product;
+        }
+
+        return exact;
+    }
+
+    private static bool IsExactCodeMatch(PdvProduct product, string query)
+    {
+        return string.Equals(product.ProductId.ToString(), query, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(product.Barcode, query, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(product.Sku, query, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(product.ExternalKey, query, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(product.FactoryCode, query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Normaliza um CPF/CNPJ digitado (aceita pontuacao) para somente digitos e
     /// valida os digitos verificadores. Retorna false para documentos invalidos.
     /// </summary>
