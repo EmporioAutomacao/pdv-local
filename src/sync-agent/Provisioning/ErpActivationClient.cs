@@ -38,7 +38,8 @@ public sealed class ErpActivationClient
         string activationCode,
         CancellationToken cancellationToken)
     {
-        if (_provisioningStore.HasProvisioning())
+        var existingCredentials = _provisioningStore.TryRead();
+        if (existingCredentials is not null && !existingCredentials.NeedsReactivation(DateTimeOffset.UtcNow))
         {
             return new ActivationResult(false, "already_provisioned", "Esta instalacao ja esta ativada.", null);
         }

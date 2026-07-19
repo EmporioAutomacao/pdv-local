@@ -24,6 +24,7 @@ public sealed class EffectiveSyncAgentConfigurationProvider
             return new EffectiveSyncAgentConfiguration(
                 false,
                 true,
+                false,
                 options.InstanceId,
                 options.ErpTenantId,
                 options.ErpApiBaseUrl,
@@ -42,6 +43,7 @@ public sealed class EffectiveSyncAgentConfigurationProvider
             return new EffectiveSyncAgentConfiguration(
                 true,
                 false,
+                false,
                 string.Empty,
                 string.Empty,
                 string.Empty,
@@ -57,6 +59,7 @@ public sealed class EffectiveSyncAgentConfigurationProvider
         return new EffectiveSyncAgentConfiguration(
             true,
             true,
+            credentials.NeedsReactivation(DateTimeOffset.UtcNow),
             credentials.InstanceId,
             credentials.TenantId,
             credentials.ErpApiBaseUrl,

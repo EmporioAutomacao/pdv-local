@@ -23,12 +23,6 @@ public sealed class ProvisioningStore
 
     public bool IsEnabled => _options.CurrentValue.Enabled;
 
-    public bool HasProvisioning()
-    {
-        var path = _options.CurrentValue.ProtectedFile;
-        return !string.IsNullOrWhiteSpace(path) && File.Exists(path);
-    }
-
     public ProvisionedAgentCredentials? TryRead()
     {
         var options = _options.CurrentValue;

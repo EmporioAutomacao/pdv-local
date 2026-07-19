@@ -195,6 +195,7 @@ public sealed class LocalStatusServer : BackgroundService
                 timestamp_utc = DateTimeOffset.UtcNow,
                 provisioning_enabled = effectiveOptions.IsProvisioningEnabled,
                 provisioned = effectiveOptions.IsProvisioned,
+                needs_reactivation = effectiveOptions.NeedsReactivation,
                 instance_id = effectiveOptions.InstanceId,
                 erp_tenant_id = effectiveOptions.TenantId,
                 erp_api_base_url = effectiveOptions.ErpApiBaseUrl,
@@ -226,8 +227,10 @@ public sealed class LocalStatusServer : BackgroundService
         var storeStatus = await _localStore.GetStatusAsync(cancellationToken);
         var rejectedSales = await _localStore.GetRejectedPdvSalesAsync(20, cancellationToken);
         var runtimeState = _runtimeState.Snapshot;
-        var activationStatus = effectiveOptions.IsProvisioned ? "provisioned" : "not_provisioned";
-        var activationClass = effectiveOptions.IsProvisioned ? "ok" : "warn";
+        var activationStatus = effectiveOptions.NeedsReactivation
+            ? "reconexao_necessaria"
+            : effectiveOptions.IsProvisioned ? "provisioned" : "not_provisioned";
+        var activationClass = effectiveOptions.IsProvisioned && !effectiveOptions.NeedsReactivation ? "ok" : "warn";
         var rejectedSalesHtml = BuildRejectedSalesHtml(rejectedSales);
 
         var html = $$"""
@@ -606,7 +609,19 @@ public sealed class LocalStatusServer : BackgroundService
             ? string.Empty
             : $"""<div class="message {(activationResult.Succeeded ? "okbox" : "warnbox")}">{Html(activationResult.Message)}</div>""";
 
-        var formHtml = effectiveOptions.IsProvisioned
+        var reactivationNoticeHtml = effectiveOptions.IsProvisioned && effectiveOptions.NeedsReactivation
+            ? $$"""
+                <div class="message warnbox">
+                  A conexao desta instalacao com o ERP expirou (token de renovacao vencido) e a sincronizacao esta parada
+                  desde entao — operadores, produtos e vendas nao sao mais atualizados automaticamente.
+                  Peca a um administrador do ERP para gerar um novo codigo em
+                  <strong>API de Sincronizacao &gt; Codigos de Ativacao &gt; Gerar codigo de ativacao</strong>
+                  e informe-o abaixo para reconectar esta instalacao (instancia anterior: <code>{{Html(effectiveOptions.InstanceId)}}</code>).
+                </div>
+                """
+            : string.Empty;
+
+        var formHtml = effectiveOptions.IsProvisioned && !effectiveOptions.NeedsReactivation
             ? $$"""
                 <section class="panel">
                   <h2>Instalacao ativada</h2>
@@ -618,15 +633,15 @@ public sealed class LocalStatusServer : BackgroundService
                   </div>
                 </section>
                 """
-            : """
+            : $$"""
                 <section class="panel">
-                  <h2>Ativar conexao com o ERP</h2>
+                  <h2>{{(effectiveOptions.IsProvisioned ? "Reconectar ao ERP" : "Ativar conexao com o ERP")}}</h2>
                   <form method="post" action="/setup/activate">
                     <label for="erp_api_base_url">URL do ERP</label>
-                    <input id="erp_api_base_url" name="erp_api_base_url" type="url" required placeholder="https://erp.exemplo.com">
+                    <input id="erp_api_base_url" name="erp_api_base_url" type="url" required placeholder="https://erp.exemplo.com" value="{{Html(effectiveOptions.ErpApiBaseUrl)}}">
                     <label for="activation_code">Codigo de ativacao</label>
                     <input id="activation_code" name="activation_code" type="text" required autocomplete="off">
-                    <button type="submit">Conectar</button>
+                    <button type="submit">{{(effectiveOptions.IsProvisioned ? "Reconectar" : "Conectar")}}</button>
                   </form>
                 </section>
                 """;
@@ -664,11 +679,12 @@ public sealed class LocalStatusServer : BackgroundService
                 <p class="muted">Conecte esta instalacao ao ERP usando um codigo de ativacao.</p>
                 {{LocalNavHtml(SetupPath)}}
                 {{messageHtml}}
+                {{reactivationNoticeHtml}}
                 {{formHtml}}
                 <section class="panel">
                   <h2>Regra de seguranca</h2>
                   <p>O SyncAgent nao armazena usuario e senha do ERP. O codigo de ativacao e usado uma unica vez para emitir credenciais tecnicas desta maquina.</p>
-                  <p>Enquanto a instalacao estiver <code>not_provisioned</code>, a sincronizacao permanece bloqueada.</p>
+                  <p>Enquanto a instalacao estiver <code>not_provisioned</code> ou precisar de reconexao, a sincronizacao permanece bloqueada.</p>
                 </section>
               </main>
             </body>

@@ -95,7 +95,9 @@ public partial class TechnicalDetailsWindow : Window
 
     private void ApplyStatus(SyncAgentStatusResponse status)
     {
-        ProvisioningValue.Text = status.Provisioned ? "Ativado" : "Nao ativado";
+        ProvisioningValue.Text = status.NeedsReactivation
+            ? "Reconexao necessaria (token expirado)"
+            : status.Provisioned ? "Ativado" : "Nao ativado";
         RuntimeValue.Text = EmptyAsDash(status.RuntimeStatus);
         HeartbeatValue.Text = status.LastHeartbeatSucceeded == true
             ? $"Online / {status.LastHeartbeatConnectivity ?? "-"}"

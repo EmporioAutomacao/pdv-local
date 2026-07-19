@@ -1151,22 +1151,36 @@ public partial class MainWindow : Window
 
     private void ApplyStatus(SyncAgentStatusResponse status)
     {
-        if (!status.Provisioned)
+        if (status.NeedsReactivation)
         {
             SetBanner(
-                "Esta instalacao ainda nao esta ativada. Abra Configuracoes > Diagnostico e ativacao para conectar ao ERP.",
+                "A conexao com o ERP expirou e a sincronizacao esta parada (operadores, produtos e vendas nao " +
+                "atualizam mais sozinhos). Clique em Reconectar para gerar acesso novo.",
+                "#FEE2E2",
+                "#FCA5A5",
+                "#991B1B",
+                showActions: true);
+            SyncStatusText.Text = "Sync: reconexao necessaria";
+        }
+        else if (!status.Provisioned)
+        {
+            SetBanner(
+                "Esta instalacao ainda nao esta ativada. Clique em Reconectar para conectar ao ERP.",
                 "#FEF3C7",
                 "#F59E0B",
-                "#92400E");
+                "#92400E",
+                showActions: true);
             SyncStatusText.Text = "Sync: nao ativado";
         }
         else if (status.LastHeartbeatSucceeded != true)
         {
             SetBanner(
-                "Instalacao ativada, mas o ultimo heartbeat nao confirmou conectividade com o ERP.",
+                "Instalacao ativada, mas o ultimo heartbeat nao confirmou conectividade com o ERP. " +
+                "Se persistir, verifique a internet desta maquina.",
                 "#FEF3C7",
                 "#F59E0B",
-                "#92400E");
+                "#92400E",
+                showActions: false);
             SyncStatusText.Text = "Sync: sem heartbeat";
         }
         else if (status.PendingOutboxEvents > 0 || status.DeadLetterEvents > 0)
@@ -1193,17 +1207,47 @@ public partial class MainWindow : Window
     private void ApplyOfflineState(string message)
     {
         OperatorsImportPanel.Visibility = Visibility.Collapsed;
-        SetBanner(message, "#FEE2E2", "#FCA5A5", "#991B1B");
+        SetBanner(message, "#FEE2E2", "#FCA5A5", "#991B1B", showActions: false);
         SyncStatusText.Text = "Sync: offline";
     }
 
-    private void SetBanner(string message, string background, string border, string foreground)
+    private void SetBanner(string message, string background, string border, string foreground, bool showActions)
     {
         BannerBorder.Visibility = Visibility.Visible;
         BannerText.Text = message;
         BannerBorder.Background = BrushFromHex(background);
         BannerBorder.BorderBrush = BrushFromHex(border);
         BannerText.Foreground = BrushFromHex(foreground);
+        BannerActionsPanel.Visibility = showActions ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void BannerReconnectButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenLocalSyncAgentPage("/setup");
+    }
+
+    private void BannerHelpButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenLocalSyncAgentPage("/help");
+    }
+
+    private void OpenLocalSyncAgentPage(string relativePath)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(new Uri(_configuration.SyncAgentLocalApiBaseUrl, relativePath).ToString())
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            MessageBox.Show(
+                $"Nao foi possivel abrir o navegador. Acesse manualmente: {new Uri(_configuration.SyncAgentLocalApiBaseUrl, relativePath)}",
+                "Sync Agent",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
     }
 
     private void FocusProductEntry()

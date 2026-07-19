@@ -11,11 +11,19 @@ public sealed record ProvisionedAgentCredentials(
     [property: JsonPropertyName("refresh_token")] string RefreshToken,
     [property: JsonPropertyName("refresh_token_expires_at_utc")] DateTimeOffset? RefreshTokenExpiresAtUtc,
     [property: JsonPropertyName("required_mtls")] bool RequiredMtls,
-    [property: JsonPropertyName("activated_at_utc")] DateTimeOffset ActivatedAtUtc);
+    [property: JsonPropertyName("activated_at_utc")] DateTimeOffset ActivatedAtUtc)
+{
+    // O refresh token nunca sera renovado sozinho depois deste ponto: sem ele (ou expirado),
+    // RunSyncCycleAsync falha todo ciclo e a instalacao fica presa ate uma nova ativacao manual.
+    public bool NeedsReactivation(DateTimeOffset now) =>
+        string.IsNullOrWhiteSpace(RefreshToken)
+        || (RefreshTokenExpiresAtUtc is not null && RefreshTokenExpiresAtUtc <= now);
+}
 
 public sealed record EffectiveSyncAgentConfiguration(
     bool IsProvisioningEnabled,
     bool IsProvisioned,
+    bool NeedsReactivation,
     string InstanceId,
     string TenantId,
     string ErpApiBaseUrl,

@@ -7,6 +7,7 @@ namespace PdvLocal.App;
 internal sealed record SyncAgentStatusResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("provisioned")] bool Provisioned,
+    [property: JsonPropertyName("needs_reactivation")] bool NeedsReactivation,
     [property: JsonPropertyName("instance_id")] string? InstanceId,
     [property: JsonPropertyName("erp_tenant_id")] string? ErpTenantId,
     [property: JsonPropertyName("erp_api_base_url")] string? ErpApiBaseUrl,
