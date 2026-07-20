@@ -1271,6 +1271,7 @@ public sealed class LocalSyncStore
                             'payment_species_kind', payments.payload ->> 'payment_species_kind',
                             'payment_condition_external_key', payments.payload ->> 'payment_condition_external_key',
                             'installments', payments.payload -> 'installments',
+                            'installments_plan', payments.payload -> 'installments_plan',
                             'requires_tef', payments.payload -> 'requires_tef',
                             'allows_change', payments.payload -> 'allows_change',
                             'tef_metadata', CASE
