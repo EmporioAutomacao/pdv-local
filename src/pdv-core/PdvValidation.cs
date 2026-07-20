@@ -93,6 +93,16 @@ public static class PdvValidation
     }
 
     /// <summary>
+    /// Regra de negocio: condicao a prazo (mais de uma parcela ou primeiro
+    /// vencimento futuro) exige cliente CADASTRADO na venda — nao basta o
+    /// CPF/CNPJ digitado de um consumidor sem cadastro.
+    /// </summary>
+    public static bool RequiresRegisteredCustomer(int installments, int firstDueDays)
+    {
+        return installments > 1 || firstDueDays > 0;
+    }
+
+    /// <summary>
     /// Classifica o texto digitado no campo de cliente do pagamento: 11/14
     /// digitos (com ou sem pontuacao de CPF/CNPJ) = documento; 1 a 10 digitos
     /// puros = codigo interno do ERP; qualquer outra coisa = invalido.

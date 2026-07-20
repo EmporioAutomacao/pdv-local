@@ -110,7 +110,7 @@
                          GotFocus="PaymentReceivedTextBox_GotFocus" />
             </DockPanel>
 
-            <DataGrid x:Name="PaymentsGrid" MaxHeight="160" Margin="0,0,0,10" KeyDown="PaymentsGrid_KeyDown">
+            <DataGrid x:Name="PaymentsGrid" MaxHeight="160" Margin="0,0,0,10" KeyDown="PaymentsGrid_KeyDown" SelectionChanged="PaymentsGrid_SelectionChanged">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Especie" Binding="{Binding Method}" Width="*" />
                     <DataGridTextColumn Header="Condicao" Binding="{Binding Condition}" Width="95" />
@@ -118,6 +118,20 @@
                     <DataGridTextColumn Header="Troco" Binding="{Binding ChangeAmountText}" Width="72" />
                 </DataGrid.Columns>
             </DataGrid>
+
+            <StackPanel x:Name="InstallmentsPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                <TextBlock Text="Parcelas do pagamento selecionado (vencimento editavel, dd/mm/aaaa)"
+                           Style="{StaticResource FieldLabelStyle}" />
+                <DataGrid x:Name="InstallmentsGrid"
+                          MaxHeight="140"
+                          IsReadOnly="False">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Parcela" Binding="{Binding Number}" Width="70" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Vencimento" Binding="{Binding DueDateText, UpdateSourceTrigger=PropertyChanged}" Width="130" IsReadOnly="False" />
+                        <DataGridTextColumn Header="Valor" Binding="{Binding AmountText}" Width="*" IsReadOnly="True" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </StackPanel>
 
             <Grid Margin="0,0,0,12">
                 <Grid.ColumnDefinitions>

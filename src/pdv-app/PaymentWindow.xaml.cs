@@ -160,6 +160,18 @@ public partial class PaymentWindow : Window
                 throw new ArgumentException("Valor recebido deve ser maior que zero.");
             }
 
+            var requiresRegisteredCustomer = PdvValidation.RequiresRegisteredCustomer(
+                condition.Installments, condition.FirstDueDays);
+            if (requiresRegisteredCustomer)
+            {
+                await ResolveCustomerDocumentAsync();
+                if (CustomerId is null)
+                {
+                    throw new InvalidOperationException(
+                        "Venda a prazo exige cliente cadastrado. Informe o codigo do cliente ou use a lupa para selecionar.");
+                }
+            }
+
             var isCash = method.AllowsChange || IsCashPayment(method.Name);
             var isTef = method.RequiresTef || IsTefPayment(method.Name);
             var appliedAmount = receivedAmount;
@@ -190,7 +202,7 @@ public partial class PaymentWindow : Window
                     CancellationToken.None);
             }
 
-            _payments.Add(new UiPayment
+            var payment = new UiPayment
             {
                 Method = method.Name,
                 Condition = condition.Name,
@@ -206,16 +218,118 @@ public partial class PaymentWindow : Window
                 Installments = condition.Installments,
                 RequiresTef = isTef,
                 AllowsChange = method.AllowsChange,
-                TefMetadataJson = tefAuthorization?.MetadataJson
-            });
+                TefMetadataJson = tefAuthorization?.MetadataJson,
+                RequiresRegisteredCustomer = requiresRegisteredCustomer
+            };
+
+            if (requiresRegisteredCustomer)
+            {
+                payment.InstallmentsPlan = PdvInstallmentCalculator.BuildPlan(
+                    appliedAmount,
+                    condition.Installments,
+                    condition.FirstDueDays,
+                    condition.IntervalDays,
+                    DateOnly.FromDateTime(DateTime.Today));
+            }
+
+            _payments.Add(payment);
+            PaymentsGrid.SelectedItem = payment;
 
             PaymentReceivedTextBox.Text = FormatDecimal(CalculateRemainingAmount());
             UpdateTotals();
             ShowMessage(isTef
                 ? $"Pagamento TEF {tefAuthorization?.Status ?? "capturado"} registrado pelo provider {_tefProviderName}."
-                : "Pagamento registrado.",
+                : payment.InstallmentsPlan is not null
+                    ? "Pagamento a prazo registrado. Confira as datas das parcelas abaixo (editaveis)."
+                    : "Pagamento registrado.",
                 isError: false);
         });
+    }
+
+    private UiPayment? _installmentsPaymentBeingEdited;
+
+    private void PaymentsGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        SaveDisplayedInstallmentEdits();
+        ShowInstallmentsForSelectedPayment();
+    }
+
+    private void SaveDisplayedInstallmentEdits()
+    {
+        if (_installmentsPaymentBeingEdited is not { InstallmentsPlan: not null } payment
+            || InstallmentsGrid.ItemsSource is not IReadOnlyList<UiInstallmentRow> rows)
+        {
+            return;
+        }
+
+        InstallmentsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true);
+        try
+        {
+            payment.InstallmentsPlan = ParseInstallmentRows(rows);
+        }
+        catch (ArgumentException)
+        {
+            // Data invalida digitada: mantem o plano anterior; a validacao
+            // definitiva acontece ao concluir a venda.
+        }
+    }
+
+    private void ShowInstallmentsForSelectedPayment()
+    {
+        if (PaymentsGrid.SelectedItem is not UiPayment { InstallmentsPlan: { Count: > 0 } plan } selected)
+        {
+            _installmentsPaymentBeingEdited = null;
+            InstallmentsPanel.Visibility = Visibility.Collapsed;
+            InstallmentsGrid.ItemsSource = null;
+            return;
+        }
+
+        _installmentsPaymentBeingEdited = selected;
+        InstallmentsGrid.ItemsSource = plan
+            .Select(entry => new UiInstallmentRow
+            {
+                Number = entry.Number,
+                DueDateText = entry.DueDate.ToString("dd/MM/yyyy"),
+                Amount = entry.Amount
+            })
+            .ToList();
+        InstallmentsPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ApplyEditedInstallmentPlans()
+    {
+        // Persiste (com validacao estrita de formato) o plano em edicao.
+        if (_installmentsPaymentBeingEdited is { InstallmentsPlan: not null } editing
+            && InstallmentsGrid.ItemsSource is IReadOnlyList<UiInstallmentRow> rows)
+        {
+            InstallmentsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true);
+            editing.InstallmentsPlan = ParseInstallmentRows(rows);
+        }
+
+        foreach (var payment in _payments)
+        {
+            if (payment.InstallmentsPlan is { Count: > 0 } plan)
+            {
+                PdvInstallmentCalculator.ValidatePlan(plan, payment.Amount);
+            }
+        }
+    }
+
+    private static IReadOnlyList<PdvInstallmentPlanEntry> ParseInstallmentRows(IReadOnlyList<UiInstallmentRow> rows)
+    {
+        var entries = new List<PdvInstallmentPlanEntry>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (!DateOnly.TryParseExact(row.DueDateText.Trim(), "dd/MM/yyyy", out var dueDate))
+            {
+                throw new ArgumentException(
+                    $"Vencimento da parcela {row.Number} invalido: use o formato dd/mm/aaaa.");
+            }
+
+            entries.Add(new PdvInstallmentPlanEntry(row.Number, dueDate, row.Amount));
+        }
+
+        return entries;
     }
 
     private async void RemovePaymentButton_Click(object sender, RoutedEventArgs e)
@@ -347,6 +461,14 @@ public partial class PaymentWindow : Window
             }
 
             await ResolveCustomerDocumentAsync();
+
+            if (_payments.Any(payment => payment.RequiresRegisteredCustomer) && CustomerId is null)
+            {
+                throw new InvalidOperationException(
+                    "Venda a prazo exige cliente cadastrado. Informe o codigo do cliente ou use a lupa para selecionar.");
+            }
+
+            ApplyEditedInstallmentPlans();
             DialogResult = true;
         });
     }

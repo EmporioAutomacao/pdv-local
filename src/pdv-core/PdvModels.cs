@@ -135,7 +135,8 @@ public sealed record CompletedSalePaymentCommand(
     int? Installments = null,
     bool RequiresTef = false,
     bool AllowsChange = false,
-    string? TefMetadataJson = null);
+    string? TefMetadataJson = null,
+    IReadOnlyList<PdvInstallmentPlanEntry>? InstallmentsPlan = null);
 
 public sealed record CompletedSaleAuditCommand(
     string OperationType,

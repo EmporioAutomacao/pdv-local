@@ -450,6 +450,22 @@ public sealed class PdvSaleRepository
                 payloadObject["tef_metadata"] = JsonNode.Parse(tefMetadataJson);
             }
 
+            if (payment.InstallmentsPlan is { Count: > 0 } plan)
+            {
+                var planArray = new JsonArray();
+                foreach (var entry in plan)
+                {
+                    planArray.Add(new JsonObject
+                    {
+                        ["number"] = entry.Number,
+                        ["due_date"] = entry.DueDate.ToString("yyyy-MM-dd"),
+                        ["amount"] = entry.Amount
+                    });
+                }
+
+                payloadObject["installments_plan"] = planArray;
+            }
+
             var payload = payloadObject.ToJsonString(JsonOptions);
 
             await using var insertCommand = new NpgsqlCommand(sql, connection, transaction);

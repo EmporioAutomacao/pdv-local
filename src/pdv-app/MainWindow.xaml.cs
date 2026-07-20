@@ -543,7 +543,8 @@ public partial class MainWindow : Window
                             payment.Installments,
                             payment.RequiresTef,
                             payment.AllowsChange,
-                            payment.TefMetadataJson))
+                            payment.TefMetadataJson,
+                            payment.InstallmentsPlan))
                         .ToArray(),
                     DiscountAmount: saleDiscount,
                     AuditEvents: auditEvents,

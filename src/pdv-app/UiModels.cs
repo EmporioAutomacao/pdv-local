@@ -80,8 +80,22 @@ internal sealed class UiPayment
     public bool RequiresTef { get; init; }
     public bool AllowsChange { get; init; }
     public string? TefMetadataJson { get; init; }
+
+    // Preenchidos apenas em pagamentos a prazo (condicao com parcelas ou
+    // primeiro vencimento futuro); o plano pode ser editado pelo operador.
+    public bool RequiresRegisteredCustomer { get; init; }
+    public IReadOnlyList<PdvInstallmentPlanEntry>? InstallmentsPlan { get; set; }
+
     public string AmountText => Amount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
     public string ChangeAmountText => ChangeAmount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
+}
+
+internal sealed class UiInstallmentRow
+{
+    public int Number { get; init; }
+    public string DueDateText { get; set; } = string.Empty;
+    public decimal Amount { get; init; }
+    public string AmountText => Amount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
 }
 
 internal sealed record UiPaymentSpecies(
