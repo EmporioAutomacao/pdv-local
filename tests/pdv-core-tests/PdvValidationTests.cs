@@ -110,6 +110,17 @@ public sealed class PdvValidationTests
         Assert.Equal(expected, PdvValidation.ClassifyCustomerLookupInput(input));
     }
 
+    [Fact]
+    public void ResolveUnitPrice_uses_unit_price_with_product_fallback()
+    {
+        var product = BuildProduct() with { Price = 10m };
+        var boxUnit = new PdvProductUnit(Guid.NewGuid(), "7", "CX", "Caixa", 6m, 55m, false, false);
+        var nativeUnit = new PdvProductUnit(Guid.NewGuid(), "1", "UN", "Unidade", 1m, null, false, true);
+
+        Assert.Equal(55m, PdvProductRepository.ResolveUnitPrice(product, boxUnit));
+        Assert.Equal(10m, PdvProductRepository.ResolveUnitPrice(product, nativeUnit));
+    }
+
     private static PdvProduct BuildProduct(
         string? sku = null,
         string? barcode = null,

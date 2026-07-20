@@ -169,6 +169,55 @@ public sealed class PdvProductRepository
         return products.Count == 0 ? null : products[0];
     }
 
+    /// <summary>
+    /// Unidades de medida ativas do produto (nativa primeiro). Lista vazia
+    /// significa que o ERP nao enviou unidades (contrato antigo) — o PDV usa a
+    /// unidade escalar do produto.
+    /// </summary>
+    public async Task<IReadOnlyList<PdvProductUnit>> GetActiveUnitsAsync(
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT product_unit_id, external_key, label, name, factor, price, fractional, is_native
+            FROM pdv.product_units
+            WHERE product_id = @product_id
+              AND active
+            ORDER BY is_native DESC, factor, label
+            """;
+
+        var units = new List<PdvProductUnit>();
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("product_id", productId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            units.Add(new PdvProductUnit(
+                ProductUnitId: reader.GetGuid(0),
+                ExternalKey: reader.GetString(1),
+                Label: reader.GetString(2),
+                Name: reader.IsDBNull(3) ? null : reader.GetString(3),
+                Factor: reader.GetDecimal(4),
+                Price: reader.IsDBNull(5) ? null : reader.GetDecimal(5),
+                Fractional: reader.GetBoolean(6),
+                IsNative: reader.GetBoolean(7)));
+        }
+
+        return units;
+    }
+
+    /// <summary>
+    /// Preco de venda ao escolher uma unidade: o preco proprio da unidade
+    /// quando cadastrado; senao o preco do produto (unidade nativa).
+    /// </summary>
+    public static decimal ResolveUnitPrice(PdvProduct product, PdvProductUnit unit)
+    {
+        return unit.Price ?? product.Price;
+    }
+
     public static void ValidateManualProduct(UpsertManualProductCommand command)
     {
         if (string.IsNullOrWhiteSpace(command.ExternalKey))

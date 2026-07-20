@@ -22,7 +22,13 @@ public sealed class PdvSaleRepository
 
     public async Task EnsureSchemaAsync(CancellationToken cancellationToken)
     {
-        const string sql = "ALTER TABLE pdv.sales ADD COLUMN IF NOT EXISTS customer_document text NULL";
+        const string sql = """
+            ALTER TABLE pdv.sales ADD COLUMN IF NOT EXISTS customer_document text NULL;
+            ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_label text NULL;
+            ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_external_key text NULL;
+            ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_factor numeric(14, 6) NULL;
+            ALTER TABLE pdv.cash_sessions ADD COLUMN IF NOT EXISTS closing_counts jsonb NULL
+            """;
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand(sql, connection);
@@ -104,7 +110,9 @@ public sealed class PdvSaleRepository
         await insertCmd.ExecuteNonQueryAsync(cancellationToken);
 
         await InsertItemsAsync(connection, transaction, draftId,
-            items.Select(i => new CompletedSaleItemCommand(i.ProductId, i.LineNumber, i.Quantity, i.UnitPrice, i.DiscountAmount)).ToArray(),
+            items.Select(i => new CompletedSaleItemCommand(
+                i.ProductId, i.LineNumber, i.Quantity, i.UnitPrice, i.DiscountAmount,
+                i.UnitLabel, i.UnitExternalKey, i.UnitFactor)).ToArray(),
             cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
@@ -116,7 +124,8 @@ public sealed class PdvSaleRepository
             SELECT s.sale_id, s.discount_amount AS sale_discount,
                    si.product_id, p.external_key, p.sku, p.barcode, p.name, p.unit,
                    si.line_number, si.quantity, si.unit_price,
-                   si.discount_amount AS item_discount
+                   si.discount_amount AS item_discount,
+                   si.unit_label, si.unit_external_key, si.unit_factor
             FROM pdv.sales s
             JOIN pdv.sale_items si ON si.sale_id = s.sale_id
             JOIN pdv.products   p  ON p.product_id = si.product_id
@@ -149,7 +158,10 @@ public sealed class PdvSaleRepository
                 LineNumber: reader.GetInt32(reader.GetOrdinal("line_number")),
                 Quantity: reader.GetDecimal(reader.GetOrdinal("quantity")),
                 UnitPrice: reader.GetDecimal(reader.GetOrdinal("unit_price")),
-                DiscountAmount: reader.GetDecimal(reader.GetOrdinal("item_discount"))));
+                DiscountAmount: reader.GetDecimal(reader.GetOrdinal("item_discount")),
+                UnitLabel: reader.IsDBNull(reader.GetOrdinal("unit_label")) ? null : reader.GetString(reader.GetOrdinal("unit_label")),
+                UnitExternalKey: reader.IsDBNull(reader.GetOrdinal("unit_external_key")) ? null : reader.GetString(reader.GetOrdinal("unit_external_key")),
+                UnitFactor: reader.IsDBNull(reader.GetOrdinal("unit_factor")) ? null : reader.GetDecimal(reader.GetOrdinal("unit_factor"))));
         }
 
         return saleId.HasValue ? new PdvDraftSale(saleId.Value, saleDiscount, items) : null;
@@ -374,7 +386,10 @@ public sealed class PdvSaleRepository
                 quantity,
                 unit_price,
                 discount_amount,
-                total_amount
+                total_amount,
+                unit_label,
+                unit_external_key,
+                unit_factor
             )
             VALUES (
                 @sale_item_id,
@@ -384,7 +399,10 @@ public sealed class PdvSaleRepository
                 @quantity,
                 @unit_price,
                 @discount_amount,
-                @total_amount
+                @total_amount,
+                @unit_label,
+                @unit_external_key,
+                @unit_factor
             )
             """;
 
@@ -399,6 +417,9 @@ public sealed class PdvSaleRepository
             insertCommand.Parameters.AddWithValue("unit_price", item.UnitPrice);
             insertCommand.Parameters.AddWithValue("discount_amount", item.DiscountAmount);
             insertCommand.Parameters.AddWithValue("total_amount", (item.Quantity * item.UnitPrice) - item.DiscountAmount);
+            insertCommand.Parameters.AddWithValue("unit_label", (object?)item.UnitLabel ?? DBNull.Value);
+            insertCommand.Parameters.AddWithValue("unit_external_key", (object?)item.UnitExternalKey ?? DBNull.Value);
+            insertCommand.Parameters.AddWithValue("unit_factor", (object?)item.UnitFactor ?? DBNull.Value);
             await insertCommand.ExecuteNonQueryAsync(cancellationToken);
         }
     }

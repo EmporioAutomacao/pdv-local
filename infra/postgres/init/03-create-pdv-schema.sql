@@ -31,11 +31,15 @@ CREATE TABLE IF NOT EXISTS pdv.cash_sessions (
     closed_at_utc timestamptz NULL,
     opening_amount numeric(14, 2) NOT NULL DEFAULT 0,
     closing_amount numeric(14, 2) NULL,
+    closing_counts jsonb NULL,
     notes text NULL,
     created_at_utc timestamptz NOT NULL DEFAULT now(),
     updated_at_utc timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT cash_sessions_status_check CHECK (status IN ('open', 'closed', 'cancelled'))
 );
+
+-- Contagem cega por especie no fechamento (bases criadas antes do 1.2.0):
+ALTER TABLE pdv.cash_sessions ADD COLUMN IF NOT EXISTS closing_counts jsonb NULL;
 
 CREATE INDEX IF NOT EXISTS ix_cash_sessions_status
     ON pdv.cash_sessions (status, opened_at_utc DESC);
@@ -211,9 +215,17 @@ CREATE TABLE IF NOT EXISTS pdv.sale_items (
     unit_price numeric(14, 4) NOT NULL,
     discount_amount numeric(14, 2) NOT NULL DEFAULT 0,
     total_amount numeric(14, 2) NOT NULL,
+    unit_label text NULL,
+    unit_external_key text NULL,
+    unit_factor numeric(14, 6) NULL,
     created_at_utc timestamptz NOT NULL DEFAULT now(),
     UNIQUE (sale_id, line_number)
 );
+
+-- Colunas de unidade congelada por item (bases criadas antes do 1.2.0):
+ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_label text NULL;
+ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_external_key text NULL;
+ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_factor numeric(14, 6) NULL;
 
 CREATE TABLE IF NOT EXISTS pdv.payments (
     payment_id uuid PRIMARY KEY,

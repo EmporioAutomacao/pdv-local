@@ -121,7 +121,20 @@ public sealed record CompletedSaleItemCommand(
     int LineNumber,
     decimal Quantity,
     decimal UnitPrice,
-    decimal DiscountAmount = 0);
+    decimal DiscountAmount = 0,
+    string? UnitLabel = null,
+    string? UnitExternalKey = null,
+    decimal? UnitFactor = null);
+
+public sealed record PdvProductUnit(
+    Guid ProductUnitId,
+    string ExternalKey,
+    string Label,
+    string? Name,
+    decimal Factor,
+    decimal? Price,
+    bool Fractional,
+    bool IsNative);
 
 public sealed record CompletedSalePaymentCommand(
     string PaymentMethod,
@@ -149,7 +162,10 @@ public sealed record PdvDraftItemCommand(
     int LineNumber,
     decimal Quantity,
     decimal UnitPrice,
-    decimal DiscountAmount);
+    decimal DiscountAmount,
+    string? UnitLabel = null,
+    string? UnitExternalKey = null,
+    decimal? UnitFactor = null);
 
 public sealed record PdvDraftItem(
     Guid ProductId,
@@ -161,7 +177,10 @@ public sealed record PdvDraftItem(
     int LineNumber,
     decimal Quantity,
     decimal UnitPrice,
-    decimal DiscountAmount);
+    decimal DiscountAmount,
+    string? UnitLabel = null,
+    string? UnitExternalKey = null,
+    decimal? UnitFactor = null);
 
 public sealed record PdvDraftSale(
     Guid SaleId,
