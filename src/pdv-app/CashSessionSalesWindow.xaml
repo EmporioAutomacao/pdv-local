@@ -16,7 +16,6 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Cabeçalho -->
@@ -150,63 +149,8 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <!-- Painel de cancelamento (oculto por padrão) -->
-        <Border Grid.Row="2"
-                x:Name="CancellationPanel"
-                Background="{DynamicResource WarningPanelBg}"
-                BorderBrush="{DynamicResource WarningPanelBorder}"
-                BorderThickness="0,2,0,0"
-                Padding="18,14"
-                Visibility="Collapsed">
-            <StackPanel AutomationProperties.AutomationId="CancellationPanel">
-                <TextBlock x:Name="CancelTitleText"
-                           FontSize="14"
-                           FontWeight="SemiBold"
-                           Foreground="{DynamicResource WarningText}"
-                           Margin="0,0,0,10" />
-
-                <StackPanel Orientation="Horizontal">
-                    <StackPanel Margin="0,0,12,0">
-                        <TextBlock Text="LOGIN SUPERVISOR" Style="{StaticResource FieldLabelStyle}" />
-                        <TextBox x:Name="CancelSupervisorTextBox"
-                                 Style="{StaticResource FieldInputStyle}"
-                                 Width="160"
-                                 KeyDown="CancelSupervisorTextBox_KeyDown" />
-                    </StackPanel>
-
-                    <StackPanel Margin="0,0,12,0">
-                        <TextBlock Text="MOTIVO" Style="{StaticResource FieldLabelStyle}" />
-                        <TextBox x:Name="CancelReasonTextBox"
-                                 Style="{StaticResource FieldInputStyle}"
-                                 Width="220"
-                                 KeyDown="CancelReasonTextBox_KeyDown" />
-                    </StackPanel>
-
-                    <StackPanel VerticalAlignment="Bottom" Margin="0,0,8,0">
-                        <Button x:Name="ConfirmCancelButton"
-                                Content="Confirmar cancelamento"
-                                Style="{StaticResource DangerButtonStyle}"
-                                Click="ConfirmCancelButton_Click" />
-                    </StackPanel>
-
-                    <StackPanel VerticalAlignment="Bottom">
-                        <Button Content="Descartar"
-                                Style="{StaticResource SecondaryButtonStyle}"
-                                Click="DiscardCancelButton_Click" />
-                    </StackPanel>
-                </StackPanel>
-
-                <TextBlock x:Name="CancelErrorText"
-                           Foreground="{DynamicResource ErrorText}"
-                           FontSize="12"
-                           Margin="0,8,0,0"
-                           Visibility="Collapsed"
-                           TextWrapping="Wrap" />
-            </StackPanel>
-        </Border>
-
         <!-- Rodapé com totais -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Background="{DynamicResource SurfaceTertiary}"
                 BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,1,0,0"
@@ -234,7 +178,7 @@
         </Border>
 
         <!-- Botão fechar -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="3"
                 Background="{DynamicResource SurfacePrimary}"
                 BorderBrush="{DynamicResource BorderPrimary}"
                 BorderThickness="0,1,0,0"

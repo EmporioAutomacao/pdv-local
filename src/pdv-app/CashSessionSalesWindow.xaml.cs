@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Media;
 using PdvLocal.Core;
 
@@ -14,8 +13,7 @@ public partial class CashSessionSalesWindow : Window
     private readonly PdvOperatorRepository _operatorRepository;
     private readonly PdvOperator _currentOperator;
     private readonly Guid _cashSessionId;
-
-    private SaleSummaryRow? _pendingCancelRow;
+    private bool _openingDetail;
 
     internal CashSessionSalesWindow(
         PdvSaleRepository saleRepository,
@@ -37,7 +35,6 @@ public partial class CashSessionSalesWindow : Window
     private async void RefreshSalesButton_Click(object sender, RoutedEventArgs e)
     {
         RefreshSalesButton.IsEnabled = false;
-        HideCancellationPanel();
         try
         {
             await LoadSalesAsync();
@@ -82,120 +79,38 @@ public partial class CashSessionSalesWindow : Window
         }
     }
 
-    private void SalesGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void SalesGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (SalesGrid.SelectedItem is SaleSummaryRow row && row.IsCompleted)
+        // Clicar/selecionar a venda abre o detalhe (itens, pagamentos,
+        // reimpressao e cancelamento). Guard evita reentrancia quando a
+        // selecao e limpa apos fechar o dialogo.
+        if (_openingDetail || SalesGrid.SelectedItem is not SaleSummaryRow row)
         {
-            _pendingCancelRow = row;
-            CancelTitleText.Text = $"Cancelar venda {row.SaleNumber}";
-            CancelSupervisorTextBox.Clear();
-            CancelReasonTextBox.Clear();
-            CancelErrorText.Visibility = Visibility.Collapsed;
-            CancellationPanel.Visibility = Visibility.Visible;
-            CancelSupervisorTextBox.Focus();
-        }
-        else
-        {
-            HideCancellationPanel();
-        }
-    }
-
-    private async void ConfirmCancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        await ExecuteCancellationAsync();
-    }
-
-    private void CancelSupervisorTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            e.Handled = true;
-            CancelReasonTextBox.Focus();
-        }
-    }
-
-    private async void CancelReasonTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            e.Handled = true;
-            await ExecuteCancellationAsync();
-        }
-    }
-
-    private async Task ExecuteCancellationAsync()
-    {
-        if (_pendingCancelRow is null)
-            return;
-
-        var supervisorLogin = CancelSupervisorTextBox.Text.Trim();
-        var reason = CancelReasonTextBox.Text.Trim();
-
-        if (string.IsNullOrWhiteSpace(supervisorLogin))
-        {
-            ShowCancelError("Informe o login do supervisor.");
-            CancelSupervisorTextBox.Focus();
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            ShowCancelError("Informe o motivo do cancelamento.");
-            CancelReasonTextBox.Focus();
-            return;
-        }
-
+        _openingDetail = true;
         try
         {
-            var supervisor = await _operatorRepository.FindActiveByLoginAsync(supervisorLogin, CancellationToken.None);
-            if (supervisor is null)
-            {
-                ShowCancelError($"Supervisor ativo nao encontrado: {supervisorLogin}.");
-                CancelSupervisorTextBox.Focus();
-                return;
-            }
-
-            if (!PdvValidation.IsSupervisorRole(supervisor.Role))
-            {
-                ShowCancelError($"Operador '{supervisorLogin}' nao possui papel de supervisor/admin.");
-                CancelSupervisorTextBox.Focus();
-                return;
-            }
-
-            await _saleRepository.CancelSaleAsync(
-                _pendingCancelRow.SaleId,
+            var detailWindow = new SaleDetailWindow(
+                _saleRepository,
+                _operatorRepository,
+                _currentOperator,
                 _cashSessionId,
-                _currentOperator.OperatorId,
-                supervisor.OperatorId,
-                reason,
-                CancellationToken.None);
+                row.SaleId)
+            { Owner = this };
+            detailWindow.ShowDialog();
 
-            HideCancellationPanel();
-            await LoadSalesAsync();
+            SalesGrid.SelectedItem = null;
+            if (detailWindow.SaleChanged)
+            {
+                await LoadSalesAsync();
+            }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or Npgsql.NpgsqlException)
+        finally
         {
-            ShowCancelError(ex.Message);
+            _openingDetail = false;
         }
-    }
-
-    private void DiscardCancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        HideCancellationPanel();
-        SalesGrid.SelectedItem = null;
-    }
-
-    private void HideCancellationPanel()
-    {
-        _pendingCancelRow = null;
-        CancellationPanel.Visibility = Visibility.Collapsed;
-        CancelErrorText.Visibility = Visibility.Collapsed;
-    }
-
-    private void ShowCancelError(string message)
-    {
-        CancelErrorText.Text = message;
-        CancelErrorText.Visibility = Visibility.Visible;
     }
 
     private void AutoSelectFirstSaleBtn_Click(object sender, RoutedEventArgs e)
