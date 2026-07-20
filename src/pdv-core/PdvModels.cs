@@ -63,7 +63,24 @@ public sealed record OpenCashSessionCommand(
 public sealed record CloseCashSessionCommand(
     Guid CashSessionId,
     decimal ClosingAmount,
-    string? Notes);
+    string? Notes,
+    IReadOnlyList<PdvClosingCountEntry>? ClosingCounts = null);
+
+// Contagem cega de fechamento: o operador informa o contado por especie sem
+// ver o esperado; esperado e diferenca sao resolvidos no fechamento.
+public sealed record PdvClosingCount(
+    string SpeciesName,
+    string Kind,
+    decimal CountedAmount);
+
+public sealed record PdvClosingCountEntry(
+    string SpeciesName,
+    string Kind,
+    decimal CountedAmount,
+    decimal ExpectedAmount)
+{
+    public decimal Difference => CountedAmount - ExpectedAmount;
+}
 
 public sealed record PdvCashMovement(
     Guid MovementId,
@@ -81,7 +98,15 @@ public sealed record PdvCashMovementCommand(
     Guid SupervisorOperatorId,
     string MovementType,
     decimal Amount,
-    string Reason);
+    string Reason,
+    string? Observation = null);
+
+public sealed record PdvCashMovementRecord(
+    Guid MovementId,
+    string MovementType,
+    decimal Amount,
+    string Reason,
+    DateTimeOffset OccurredAtUtc);
 
 public sealed record PdvPaymentSpeciesSummary(
     string SpeciesName,

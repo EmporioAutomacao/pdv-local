@@ -169,6 +169,7 @@ public partial class MainWindow : Window
             _cashSessionRepository,
             _cashMovementRepository,
             _operatorRepository,
+            _paymentCatalogRepository,
             hasPendingSale: _saleItems.Count > 0 || _payments.Count > 0)
         { Owner = this };
         window.ShowDialog();

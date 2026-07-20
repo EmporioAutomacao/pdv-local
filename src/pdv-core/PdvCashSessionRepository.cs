@@ -134,6 +134,7 @@ public sealed class PdvCashSessionRepository
                 status = 'closed',
                 closed_at_utc = @closed_at_utc,
                 closing_amount = @closing_amount,
+                closing_counts = @closing_counts,
                 notes = COALESCE(@notes, notes),
                 updated_at_utc = now()
             WHERE cash_session_id = @cash_session_id
@@ -146,6 +147,10 @@ public sealed class PdvCashSessionRepository
         updateCommand.Parameters.AddWithValue("cash_session_id", command.CashSessionId);
         updateCommand.Parameters.AddWithValue("closed_at_utc", DateTimeOffset.UtcNow);
         updateCommand.Parameters.AddWithValue("closing_amount", command.ClosingAmount);
+        updateCommand.Parameters.AddWithValue(
+            "closing_counts",
+            NpgsqlTypes.NpgsqlDbType.Jsonb,
+            (object?)SerializeClosingCounts(command.ClosingCounts) ?? DBNull.Value);
         updateCommand.Parameters.AddWithValue("notes", (object?)command.Notes ?? DBNull.Value);
 
         var affected = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
@@ -153,5 +158,26 @@ public sealed class PdvCashSessionRepository
         {
             throw new InvalidOperationException("Caixa aberto nao encontrado.");
         }
+    }
+
+    private static string? SerializeClosingCounts(IReadOnlyList<PdvClosingCountEntry>? entries)
+    {
+        if (entries is null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            counted_at_utc = DateTimeOffset.UtcNow,
+            entries = entries.Select(entry => new
+            {
+                species_name = entry.SpeciesName,
+                kind = entry.Kind,
+                counted_amount = entry.CountedAmount,
+                expected_amount = entry.ExpectedAmount,
+                difference = entry.Difference
+            })
+        });
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
 using PdvLocal.Core;
@@ -11,7 +12,11 @@ public partial class CashSessionWindow : Window
     private readonly PdvCashSessionRepository _cashSessionRepository;
     private readonly PdvCashMovementRepository _cashMovementRepository;
     private readonly PdvOperatorRepository _operatorRepository;
+    private readonly PdvPaymentCatalogRepository _paymentCatalogRepository;
     private readonly bool _hasPendingSale;
+    private readonly ObservableCollection<CashSummaryRow> _summaryRows = [];
+    private readonly ObservableCollection<ClosingCountRow> _closingCountRows = [];
+    private bool _closingCountsLoaded;
 
     public PdvCashSession? CurrentSession { get; private set; }
 
@@ -21,6 +26,7 @@ public partial class CashSessionWindow : Window
         PdvCashSessionRepository cashSessionRepository,
         PdvCashMovementRepository cashMovementRepository,
         PdvOperatorRepository operatorRepository,
+        PdvPaymentCatalogRepository paymentCatalogRepository,
         bool hasPendingSale)
     {
         _operator = @operator;
@@ -28,9 +34,12 @@ public partial class CashSessionWindow : Window
         _cashSessionRepository = cashSessionRepository;
         _cashMovementRepository = cashMovementRepository;
         _operatorRepository = operatorRepository;
+        _paymentCatalogRepository = paymentCatalogRepository;
         _hasPendingSale = hasPendingSale;
         InitializeComponent();
         CashOperatorText.Text = $"Operador: {@operator.DisplayName} ({@operator.Login})";
+        CashSummaryGrid.ItemsSource = _summaryRows;
+        ClosingCountsGrid.ItemsSource = _closingCountRows;
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -56,12 +65,14 @@ public partial class CashSessionWindow : Window
 
         CurrentCashSessionValue.Text = $"{CurrentSession!.CashSessionId} / {CurrentSession.Status}";
         await RefreshCashSummaryAsync();
+        await LoadClosingCountRowsAsync();
 
         var operationsAllowed = !_hasPendingSale;
         CashMovementAmountTextBox.IsEnabled = operationsAllowed;
+        CashMovementObservationTextBox.IsEnabled = operationsAllowed;
         CashSupplyButton.IsEnabled = operationsAllowed;
         CashWithdrawalButton.IsEnabled = operationsAllowed;
-        ClosingAmountTextBox.IsEnabled = operationsAllowed;
+        ClosingCountsGrid.IsEnabled = operationsAllowed;
         CloseCashButton.IsEnabled = operationsAllowed;
         if (_hasPendingSale)
         {
@@ -79,8 +90,42 @@ public partial class CashSessionWindow : Window
         var summary = await _cashMovementRepository.GetSummaryAsync(
             CurrentSession.CashSessionId,
             CancellationToken.None);
-        CashSummaryValue.Text = FormatCashSummary(summary);
-        ClosingAmountTextBox.Text = FormatDecimal(summary.ExpectedCashAmount);
+
+        // Fechamento cego: o resumo visivel nao revela dinheiro esperado nem o
+        // vendido por especie — esses valores so aparecem no relatorio final.
+        _summaryRows.Clear();
+        _summaryRows.Add(new CashSummaryRow("Abertura (fundo de troco)", FormatMoney(summary.OpeningAmount)));
+        _summaryRows.Add(new CashSummaryRow($"Vendas ({summary.SaleCount})", FormatMoney(summary.TotalSalesAmount)));
+        _summaryRows.Add(new CashSummaryRow("Suprimentos", FormatMoney(summary.SupplyAmount)));
+        _summaryRows.Add(new CashSummaryRow("Sangrias", FormatMoney(summary.WithdrawalAmount)));
+    }
+
+    private async Task LoadClosingCountRowsAsync()
+    {
+        if (_closingCountsLoaded)
+        {
+            return;
+        }
+
+        var species = await _paymentCatalogRepository.GetActiveSpeciesAsync(CancellationToken.None);
+        _closingCountRows.Clear();
+
+        foreach (var item in species.OrderByDescending(s => s.Kind == "cash").ThenBy(s => s.Name))
+        {
+            _closingCountRows.Add(new ClosingCountRow
+            {
+                SpeciesName = item.Name,
+                Kind = item.Kind,
+                CountedText = "0,00"
+            });
+        }
+
+        if (_closingCountRows.Count == 0)
+        {
+            _closingCountRows.Add(new ClosingCountRow { SpeciesName = "Dinheiro", Kind = "cash", CountedText = "0,00" });
+        }
+
+        _closingCountsLoaded = true;
     }
 
     private void OpeningAmountTextBox_KeyDown(object sender, KeyEventArgs e)
@@ -89,14 +134,6 @@ public partial class CashSessionWindow : Window
             return;
         e.Handled = true;
         OpenCashButton_Click(OpenCashButton, e);
-    }
-
-    private void ClosingAmountTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-        e.Handled = true;
-        CloseCashButton_Click(CloseCashButton, e);
     }
 
     private async void OpenCashButton_Click(object sender, RoutedEventArgs e)
@@ -129,21 +166,47 @@ public partial class CashSessionWindow : Window
         await RunAsync(async () =>
         {
             EnsureSession();
-            var closingAmount = ParseMoney(ClosingAmountTextBox.Text, "Valor de fechamento");
-            var summary = await _cashMovementRepository.GetSummaryAsync(
-                CurrentSession!.CashSessionId,
-                CancellationToken.None);
-            var difference = closingAmount - summary.ExpectedCashAmount;
+            ClosingCountsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true);
+
+            var counted = _closingCountRows
+                .Select(row => new PdvClosingCount(
+                    row.SpeciesName,
+                    row.Kind,
+                    ParseMoney(row.CountedText, $"Contagem de {row.SpeciesName}")))
+                .ToList();
+
+            var session = CurrentSession!;
+            var summary = await _cashMovementRepository.GetSummaryAsync(session.CashSessionId, CancellationToken.None);
+            var movements = await _cashMovementRepository.GetMovementsAsync(session.CashSessionId, CancellationToken.None);
+            var entries = PdvCashClosing.BuildClosingCounts(counted, summary);
+            var closingAmount = entries.FirstOrDefault(entry => entry.Kind == "cash")?.CountedAmount ?? 0;
+
             await _cashSessionRepository.CloseAsync(
                 new CloseCashSessionCommand(
-                    CurrentSession.CashSessionId,
+                    session.CashSessionId,
                     closingAmount,
-                    BuildCloseCashNotes(summary, closingAmount)),
+                    BuildCloseCashNotes(summary, closingAmount),
+                    entries),
                 CancellationToken.None);
+
             CurrentSession = null;
+            _closingCountsLoaded = false;
             await ApplyStateAsync();
             OpeningAmountTextBox.Text = "0,00";
-            ShowMessage($"Caixa fechado. Diferenca: {FormatMoney(difference)}.", isError: false);
+
+            var cashDifference = entries.FirstOrDefault(entry => entry.Kind == "cash")?.Difference ?? 0;
+            ShowMessage($"Caixa fechado. Diferenca em dinheiro: {FormatMoney(cashDifference)}.", isError: false);
+
+            new CashCloseReportWindow(
+                new CashCloseReportData(
+                    session.CashSessionId,
+                    _operator.DisplayName,
+                    session.OpenedAtUtc,
+                    DateTimeOffset.Now,
+                    summary,
+                    entries,
+                    movements))
+            { Owner = this }.ShowDialog();
         });
     }
 
@@ -164,6 +227,12 @@ public partial class CashSessionWindow : Window
             EnsureSession();
             var movementName = movementType == "supply" ? "suprimento" : "sangria";
             var amount = ParseMoney(CashMovementAmountTextBox.Text, $"Valor de {movementName}");
+            var observation = CashMovementObservationTextBox.Text.Trim();
+            if (observation.Length == 0)
+            {
+                throw new ArgumentException($"Informe a observacao do {movementName} (ex.: motivo do reforco ou retirada).");
+            }
+
             var authorization = SupervisorAuthorizationDialog.Request(this, _operatorRepository, $"registrar {movementName}")
                 ?? throw new InvalidOperationException($"Autorizacao de supervisor cancelada para registrar {movementName}.");
 
@@ -185,32 +254,15 @@ public partial class CashSessionWindow : Window
                     authorization.Supervisor.OperatorId,
                     movementType,
                     amount,
-                    authorization.Reason),
+                    authorization.Reason,
+                    observation),
                 CancellationToken.None);
 
             CashMovementAmountTextBox.Text = "0,00";
+            CashMovementObservationTextBox.Text = "";
             await RefreshCashSummaryAsync();
             ShowMessage($"{Capitalize(movementName)} registrado com auditoria. ID: {movementId}.", isError: false);
         });
-    }
-
-    private static string FormatCashSummary(PdvCashSessionSummary summary)
-    {
-        var speciesText = summary.PaymentSpecies.Count == 0
-            ? "-"
-            : Environment.NewLine + string.Join(
-                Environment.NewLine,
-                summary.PaymentSpecies.Select(item => $"  {item.SpeciesName}: {FormatMoney(item.Amount)}"));
-
-        return string.Join(
-            Environment.NewLine,
-            $"Abertura: {FormatMoney(summary.OpeningAmount)}",
-            $"Vendas: {FormatMoney(summary.TotalSalesAmount)} ({summary.SaleCount})",
-            $"Dinheiro em vendas: {FormatMoney(summary.CashSalesAmount)}",
-            $"Suprimentos: {FormatMoney(summary.SupplyAmount)}",
-            $"Sangrias: {FormatMoney(summary.WithdrawalAmount)}",
-            $"Dinheiro esperado: {FormatMoney(summary.ExpectedCashAmount)}",
-            $"Por especie: {speciesText}");
     }
 
     private static string BuildCloseCashNotes(
@@ -271,4 +323,13 @@ public partial class CashSessionWindow : Window
     {
         CashMessageText.Visibility = Visibility.Collapsed;
     }
+}
+
+internal sealed record CashSummaryRow(string Label, string ValueText);
+
+internal sealed class ClosingCountRow
+{
+    public string SpeciesName { get; init; } = string.Empty;
+    public string Kind { get; init; } = "other";
+    public string CountedText { get; set; } = "0,00";
 }

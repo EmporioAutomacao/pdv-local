@@ -100,6 +100,41 @@ public sealed class PdvCashMovementRepository
             paymentSpecies);
     }
 
+    /// <summary>
+    /// Movimentos (suprimentos/sangrias) da sessao, com observacao, para o
+    /// relatorio de fechamento.
+    /// </summary>
+    public async Task<IReadOnlyList<PdvCashMovementRecord>> GetMovementsAsync(
+        Guid cashSessionId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT movement_id, movement_type, amount, reason, occurred_at_utc
+            FROM pdv.cash_movements
+            WHERE cash_session_id = @cash_session_id
+            ORDER BY occurred_at_utc, movement_id
+            """;
+
+        var movements = new List<PdvCashMovementRecord>();
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("cash_session_id", cashSessionId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            movements.Add(new PdvCashMovementRecord(
+                MovementId: reader.GetGuid(0),
+                MovementType: reader.GetString(1),
+                Amount: reader.GetDecimal(2),
+                Reason: reader.GetString(3),
+                OccurredAtUtc: reader.GetFieldValue<DateTimeOffset>(4)));
+        }
+
+        return movements;
+    }
+
     private static async Task EnsureOpenCashSessionAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -158,6 +193,12 @@ public sealed class PdvCashMovementRepository
             )
             """;
 
+        // A observacao do operador e o motivo registrado no movimento; o motivo
+        // da autorizacao do supervisor fica na auditoria.
+        var movementReason = string.IsNullOrWhiteSpace(movement.Observation)
+            ? movement.Reason.Trim()
+            : movement.Observation.Trim();
+
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("movement_id", movementId);
         command.Parameters.AddWithValue("cash_session_id", movement.CashSessionId);
@@ -165,7 +206,7 @@ public sealed class PdvCashMovementRepository
         command.Parameters.AddWithValue("supervisor_operator_id", movement.SupervisorOperatorId);
         command.Parameters.AddWithValue("movement_type", movement.MovementType);
         command.Parameters.AddWithValue("amount", movement.Amount);
-        command.Parameters.AddWithValue("reason", movement.Reason.Trim());
+        command.Parameters.AddWithValue("reason", movementReason);
         command.Parameters.AddWithValue("occurred_at_utc", occurredAt);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -207,7 +248,8 @@ public sealed class PdvCashMovementRepository
         {
             movement_id = movementId,
             movement_type = movement.MovementType,
-            amount = movement.Amount
+            amount = movement.Amount,
+            observation = string.IsNullOrWhiteSpace(movement.Observation) ? null : movement.Observation.Trim()
         });
 
         await using var command = new NpgsqlCommand(sql, connection, transaction);
