@@ -239,6 +239,7 @@
                                     <DataGridTextColumn Header="#" Binding="{Binding LineNumber}" Width="45" />
                                     <DataGridTextColumn Header="Codigo" Binding="{Binding DisplayCode}" Width="120" />
                                     <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Un" Binding="{Binding UnitText}" Width="55" />
                                     <DataGridTextColumn Header="Qtd" Binding="{Binding QuantityText}" Width="70" />
                                     <DataGridTextColumn Header="Unit." Binding="{Binding UnitPriceText}" Width="85" />
                                     <DataGridTextColumn Header="Desc." Binding="{Binding DiscountAmountText}" Width="85" />

@@ -51,8 +51,17 @@ internal sealed class UiSaleItem
     public Guid? DiscountSupervisorOperatorId { get; init; }
     public string? DiscountSupervisorLogin { get; init; }
     public string? DiscountReason { get; init; }
+
+    // Unidade de medida vendida: UnitLabel sempre preenchido para exibicao;
+    // UnitExternalKey/UnitFactor apenas quando o operador escolheu uma unidade
+    // alternativa (null = nativa, semantica do contrato 1.11.0).
+    public string? UnitLabel { get; init; }
+    public string? UnitExternalKey { get; init; }
+    public decimal? UnitFactor { get; init; }
+
     public decimal TotalAmount => Quantity * UnitPrice - DiscountAmount;
     public string DisplayCode => PdvUiFormatting.FirstNonEmpty(Barcode, Sku, ExternalKey, ProductId.ToString());
+    public string UnitText => PdvUiFormatting.FirstNonEmpty(UnitLabel, "-");
     public string QuantityText => Quantity.ToString("0.####", CultureInfo.GetCultureInfo("pt-BR"));
     public string UnitPriceText => UnitPrice.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));
     public string DiscountAmountText => DiscountAmount.ToString("C", CultureInfo.GetCultureInfo("pt-BR"));

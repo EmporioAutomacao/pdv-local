@@ -275,7 +275,7 @@ public partial class MainWindow : Window
 
             if (_selectedProduct is not null)
             {
-                AddSelectedProductToCart();
+                await AddSelectedProductToCartAsync();
             }
         });
     }
@@ -298,7 +298,7 @@ public partial class MainWindow : Window
                 await SearchProductsAsync();
             }
 
-            AddSelectedProductToCart();
+            await AddSelectedProductToCartAsync();
         });
     }
 
@@ -417,11 +417,10 @@ public partial class MainWindow : Window
         if (e.Key != Key.Enter)
             return;
         e.Handled = true;
-        await RunPdvOperationAsync(() =>
+        await RunPdvOperationAsync(async () =>
         {
             EnsureCashSession();
-            AddSelectedProductToCart();
-            return Task.CompletedTask;
+            await AddSelectedProductToCartAsync();
         });
     }
 
@@ -441,11 +440,10 @@ public partial class MainWindow : Window
         if (e.Key != Key.Enter)
             return;
         e.Handled = true;
-        await RunPdvOperationAsync(() =>
+        await RunPdvOperationAsync(async () =>
         {
             EnsureCashSession();
-            AddSelectedProductToCart();
-            return Task.CompletedTask;
+            await AddSelectedProductToCartAsync();
         });
     }
 
@@ -528,7 +526,10 @@ public partial class MainWindow : Window
                             item.LineNumber,
                             item.Quantity,
                             item.UnitPrice,
-                            item.DiscountAmount))
+                            item.DiscountAmount,
+                            item.UnitLabel,
+                            item.UnitExternalKey,
+                            item.UnitFactor))
                         .ToArray(),
                     Payments: _payments
                         .Select(payment => new CompletedSalePaymentCommand(
@@ -726,7 +727,7 @@ public partial class MainWindow : Window
         QuantityTextBox.SelectAll();
     }
 
-    private void AddSelectedProductToCart()
+    private async Task AddSelectedProductToCartAsync()
     {
         if (_selectedProduct is null)
         {
@@ -734,13 +735,39 @@ public partial class MainWindow : Window
         }
 
         var quantity = ParseMoney(QuantityTextBox.Text, "Quantidade");
-        var discount = ParseMoney(ItemDiscountTextBox.Text, "Desconto do item");
         if (quantity <= 0)
         {
             throw new ArgumentException("Quantidade deve ser maior que zero.");
         }
 
-        if (discount > quantity * _selectedProduct.Price)
+        // Produto com mais de uma unidade de venda: o operador escolhe a
+        // unidade (e o preco correspondente) antes do lancamento.
+        var units = await _productRepository.GetActiveUnitsAsync(_selectedProduct.ProductId, CancellationToken.None);
+        var unitLabel = _selectedProduct.Unit;
+        string? unitExternalKey = null;
+        decimal? unitFactor = null;
+        var unitPrice = _selectedProduct.Price;
+
+        if (units.Count > 1)
+        {
+            var chosenUnit = UnitSelectionDialog.Request(this, _selectedProduct, units);
+            if (chosenUnit is null)
+            {
+                SetOperationMessage("Lancamento cancelado: unidade nao selecionada.", isError: false);
+                return;
+            }
+
+            unitLabel = chosenUnit.Label;
+            unitPrice = PdvProductRepository.ResolveUnitPrice(_selectedProduct, chosenUnit);
+            if (!chosenUnit.IsNative)
+            {
+                unitExternalKey = chosenUnit.ExternalKey;
+                unitFactor = chosenUnit.Factor;
+            }
+        }
+
+        var discount = ParseMoney(ItemDiscountTextBox.Text, "Desconto do item");
+        if (discount > quantity * unitPrice)
         {
             throw new ArgumentException("Desconto do item nao pode ser maior que o total bruto do item.");
         }
@@ -760,11 +787,14 @@ public partial class MainWindow : Window
             Name = _selectedProduct.Name,
             LineNumber = _saleItems.Count + 1,
             Quantity = quantity,
-            UnitPrice = _selectedProduct.Price,
+            UnitPrice = unitPrice,
             DiscountAmount = discount,
             DiscountSupervisorOperatorId = discountAuthorization?.Supervisor.OperatorId,
             DiscountSupervisorLogin = discountAuthorization?.Supervisor.Login,
-            DiscountReason = discountAuthorization?.Reason
+            DiscountReason = discountAuthorization?.Reason,
+            UnitLabel = unitLabel,
+            UnitExternalKey = unitExternalKey,
+            UnitFactor = unitFactor
         });
 
         CartItemsGrid.UpdateLayout();
@@ -825,7 +855,10 @@ public partial class MainWindow : Window
                     LineNumber = item.LineNumber,
                     Quantity = item.Quantity,
                     UnitPrice = item.UnitPrice,
-                    DiscountAmount = item.DiscountAmount
+                    DiscountAmount = item.DiscountAmount,
+                    UnitLabel = item.UnitLabel ?? item.Unit,
+                    UnitExternalKey = item.UnitExternalKey,
+                    UnitFactor = item.UnitFactor
                 });
             }
 
@@ -849,7 +882,9 @@ public partial class MainWindow : Window
             return;
 
         var items = _saleItems
-            .Select(i => new PdvDraftItemCommand(i.ProductId, i.LineNumber, i.Quantity, i.UnitPrice, i.DiscountAmount))
+            .Select(i => new PdvDraftItemCommand(
+                i.ProductId, i.LineNumber, i.Quantity, i.UnitPrice, i.DiscountAmount,
+                i.UnitLabel, i.UnitExternalKey, i.UnitFactor))
             .ToList();
         var cashSessionId = _currentCashSession.CashSessionId;
         var operatorId = _currentOperator.OperatorId;

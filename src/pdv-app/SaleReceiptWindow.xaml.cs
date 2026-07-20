@@ -113,7 +113,9 @@ internal sealed class ReceiptItemRow
     public ReceiptItemRow(UiSaleItem item)
     {
         Name = item.Name;
-        QuantityText = item.Quantity.ToString("0.####", BrazilianCulture);
+        QuantityText = string.IsNullOrWhiteSpace(item.UnitLabel)
+            ? item.Quantity.ToString("0.####", BrazilianCulture)
+            : $"{item.Quantity.ToString("0.####", BrazilianCulture)} {item.UnitLabel}";
         UnitPriceText = item.UnitPrice.ToString("C", BrazilianCulture);
         TotalAmountText = item.TotalAmount.ToString("C", BrazilianCulture);
         HasDiscount = item.DiscountAmount > 0 ? Visibility.Visible : Visibility.Collapsed;

@@ -70,6 +70,12 @@
                                FontSize="34"
                                FontWeight="Bold"
                                Foreground="{DynamicResource TextPrimary}" />
+                    <TextBlock x:Name="UnitPricesText"
+                               Text=""
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondary}"
+                               TextWrapping="Wrap" />
                 </StackPanel>
             </DockPanel>
         </Grid>

@@ -36,12 +36,29 @@ public partial class PriceCheckWindow : Window
         await SearchAsync();
     }
 
-    private void PriceResultsGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void PriceResultsGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (PriceResultsGrid.SelectedItem is UiProductSearchResult selected)
+        if (PriceResultsGrid.SelectedItem is not UiProductSearchResult selected)
         {
-            PriceProductNameText.Text = selected.Name;
-            PriceValueText.Text = FormatMoney(selected.Product.Price);
+            return;
+        }
+
+        PriceProductNameText.Text = selected.Name;
+        PriceValueText.Text = FormatMoney(selected.Product.Price);
+        UnitPricesText.Text = string.Empty;
+
+        try
+        {
+            var units = await _productRepository.GetActiveUnitsAsync(selected.Product.ProductId, CancellationToken.None);
+            if (units.Count > 1)
+            {
+                UnitPricesText.Text = string.Join("   ", units.Select(unit =>
+                    $"{unit.Label}: {FormatMoney(PdvProductRepository.ResolveUnitPrice(selected.Product, unit))}"));
+            }
+        }
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException or InvalidOperationException or TimeoutException)
+        {
+            // Consulta de unidades e opcional; o preco principal ja esta exibido.
         }
     }
 
