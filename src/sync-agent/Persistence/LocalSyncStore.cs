@@ -1312,10 +1312,33 @@ public sealed class LocalSyncStore
         return new OutboxEnqueueResult(draft.EventId, payloadHash, insertedRows == 1);
     }
 
+    private bool _saleItemUnitColumnsEnsured;
+
+    private async Task EnsureSaleItemUnitColumnsAsync(CancellationToken cancellationToken)
+    {
+        // Bases atualizadas por auto-update nao rodam o init SQL; o pdv-app faz
+        // os ALTERs no startup, mas o servico pode publicar vendas antes disso.
+        if (_saleItemUnitColumnsEnsured)
+        {
+            return;
+        }
+
+        const string sql = """
+            ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_label text NULL;
+            ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_external_key text NULL;
+            ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_factor numeric(14, 6) NULL
+            """;
+        await using var command = _dataSource.CreateCommand(sql);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        _saleItemUnitColumnsEnsured = true;
+    }
+
     public async Task<IReadOnlyList<PdvSalePendingPublishRecord>> GetPendingPdvSalesAsync(
         int batchSize,
         CancellationToken cancellationToken)
     {
+        await EnsureSaleItemUnitColumnsAsync(cancellationToken);
+
         const string sql = """
             SELECT
                 sales.sale_id,
@@ -1344,7 +1367,10 @@ public sealed class LocalSyncStore
                             'quantity', items.quantity,
                             'unit_price', items.unit_price,
                             'discount_amount', items.discount_amount,
-                            'total_amount', items.total_amount
+                            'total_amount', items.total_amount,
+                            'unit_label', items.unit_label,
+                            'unit_external_key', items.unit_external_key,
+                            'unit_factor', items.unit_factor
                         )
                         ORDER BY items.line_number
                     )
