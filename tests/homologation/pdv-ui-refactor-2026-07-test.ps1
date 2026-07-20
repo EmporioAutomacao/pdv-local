@@ -565,38 +565,27 @@ if ($salesWnd) {
             catch { Log "T10 ERR Invoke: $_" }
             Start-Sleep -Milliseconds 700
         }
-        $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
-        $nextEl = $walker.GetNextSibling($salesGrid)
-        $panelId  = if ($nextEl) { $nextEl.Current.AutomationId } else { 'null' }
-        $panelOff = if ($nextEl) { $nextEl.Current.IsOffscreen  } else { $true  }
-        $panelVisible = ($panelId -eq 'CancelTitleText') -and (-not $panelOff)
-        if ($cnt -gt 0 -and $panelVisible) {
-            Pass 'T10_cancel_panel_visible'
-            $supTb = $null; $reasTb = $null; $confirmBtn = $null
-            $el = $nextEl
-            for ($i = 0; $i -lt 20 -and $el -ne $null; $i++) {
-                $el = $walker.GetNextSibling($el)
-                if ($el -eq $null) { break }
-                $eid = $el.Current.AutomationId
-                if ($eid -eq 'CancelSupervisorTextBox') { $supTb = $el }
-                elseif ($eid -eq 'CancelReasonTextBox') { $reasTb = $el }
-                elseif ($eid -eq 'ConfirmCancelButton')  { $confirmBtn = $el }
-                elseif ($eid -eq 'SummaryCountText')     { break }
-                if ($supTb -and $reasTb -and $confirmBtn) { break }
-            }
-            if ($supTb -and $reasTb -and $confirmBtn) {
-                setVal $supTb $OperatorLogin
-                Start-Sleep -Milliseconds 400
-                setVal $reasTb 'Teste cancelamento homologacao UI refactor'
-                clickEl $confirmBtn
-                Start-Sleep -Seconds 3
-                $nextEl2  = $walker.GetNextSibling($salesGrid)
-                $afterId  = if ($nextEl2) { $nextEl2.Current.AutomationId } else { 'null' }
-                $afterOff = if ($nextEl2) { $nextEl2.Current.IsOffscreen  } else { $true  }
-                if ($afterId -ne 'CancelTitleText' -or $afterOff) { Pass 'T10_cancellation_ok' }
-                else { Fail 'T10_cancellation_ok' "painel ainda visivel (id=$afterId off=$afterOff)" }
-            } else { Fail 'T10_cancel_fields' "sup=$($null -ne $supTb) reas=$($null -ne $reasTb) btn=$($null -ne $confirmBtn)" }
-        } elseif ($cnt -gt 0) { Fail 'T10_cancel_panel_visible' "painel nao abriu (id=$panelId off=$panelOff)" }
+        # Selecionar a venda agora abre a SaleDetailWindow (modal) com o botao
+        # de cancelamento dentro (fluxo novo do 1.2.0).
+        $detailWnd = wWnd 'Detalhe da venda' 8 $salesWnd
+        if ($cnt -gt 0 -and $detailWnd) {
+            Pass 'T10_detail_opens'
+            setWnd $detailWnd
+            $cancelBtn = wEl $detailWnd 'CancelSaleButton' 5
+            if ($cancelBtn) {
+                clickElAsync $cancelBtn
+                if (authorizeSupervisor 'Teste cancelamento homologacao UI refactor' $detailWnd) {
+                    Start-Sleep -Seconds 3
+                    $statusEl = wEl $detailWnd 'SaleStatusText' 5
+                    $statusTxt = if ($statusEl) { gEl $statusEl } else { '' }
+                    if ($statusTxt -like '*CANCELADA*') { Pass 'T10_cancellation_ok' $statusTxt }
+                    else { Fail 'T10_cancellation_ok' "Status: '$statusTxt'" }
+                } else { Fail 'T10_cancel_authorization' 'dialogo de autorizacao nao apareceu/fechou' }
+            } else { Fail 'T10_cancel_button' 'CancelSaleButton nao encontrado no detalhe' }
+            $db = wName $detailWnd 'Fechar (Esc)' 3
+            if ($db) { clickEl $db } else { closeWnd $detailWnd }
+            Start-Sleep -Seconds 1
+        } elseif ($cnt -gt 0) { Fail 'T10_detail_opens' 'SaleDetailWindow nao abriu na selecao' }
         else { Fail 'T10_select_row' 'nenhuma linha no SalesGrid' }
     } else { Fail 'T10_sales_grid' 'SalesGrid nao encontrado' }
     $cb = wName $salesWnd 'Fechar' 3; if ($cb) { clickEl $cb } else { closeWnd $salesWnd }
@@ -614,6 +603,9 @@ if ($cashWnd) {
     $movFld = wEl $cashWnd 'CashMovementAmountTextBox' 5
     if ($movFld) {
         setVal $movFld '50,00'
+        # Observacao do movimento e obrigatoria desde o 1.2.0
+        $obsFld = wEl $cashWnd 'CashMovementObservationTextBox' 3
+        if ($obsFld) { setVal $obsFld 'Suprimento teste homologacao' }
         clickElAsync (wEl $cashWnd 'CashSupplyButton' 3)
         if (authorizeSupervisor 'Suprimento teste homologacao' $cashWnd) {
             Start-Sleep -Seconds 2
@@ -632,9 +624,16 @@ $cashWnd = wWnd 'Caixa' 4 $main
 if (-not $cashWnd) { sk 0x73; $cashWnd = wWnd 'Caixa' 8 $main }
 if ($cashWnd) {
     setWnd $cashWnd
-    # ClosingAmountTextBox ja vem preenchido com o dinheiro esperado
-    clickEl (wEl $cashWnd 'CloseCashButton' 5)
-    Start-Sleep -Seconds 2
+    # Fechamento cego (1.2.0): grid de contagem por especie com valores 0,00 por
+    # padrao; apos fechar abre o relatorio modal 'Fechamento de caixa'.
+    clickElAsync (wEl $cashWnd 'CloseCashButton' 5)
+    $reportWnd = wWnd 'Fechamento de caixa' 8 $cashWnd
+    if ($reportWnd) {
+        Pass 'T12_close_report_opens'
+        $rb = wName $reportWnd 'Fechar (Esc)' 3
+        if ($rb) { clickEl $rb } else { closeWnd $reportWnd }
+        Start-Sleep -Seconds 1
+    } else { Fail 'T12_close_report_opens' 'relatorio de fechamento nao abriu' }
     $msgEl = wEl $cashWnd 'CashMessageText' 5
     $msgTxt = if ($msgEl) { gEl $msgEl } else { '' }
     if ($msgTxt -like '*Caixa fechado*') { Pass 'T12_close_message' $msgTxt }
