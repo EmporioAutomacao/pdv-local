@@ -66,15 +66,34 @@ Digite a quantidade, um asterisco e o código no campo **Produto**:
 1. Digite parte do nome do produto no campo **Produto** e pressione **Enter** ou
    clique **Buscar**.
 2. Se houver **um único resultado**, o produto é selecionado automaticamente.
-3. Se houver **múltiplos resultados**, o grid de busca exibe as opções:
-   - Use **↑** e **↓** para navegar; **Enter** ou **duplo clique** para selecionar.
-4. O foco vai para o campo **Qtd** — ajuste se necessário e pressione **Enter**.
+3. Se o código digitado casar **exatamente** com o ID, código de barras, SKU
+   ou código de fábrica de um único produto, ele é lançado direto — mesmo que
+   o texto também apareça no nome de outros produtos.
+4. Se houver **múltiplos resultados** sem match exato, o grid de busca exibe
+   as opções: use **↑** e **↓** para navegar; **Enter** ou **duplo clique**
+   para selecionar.
+5. O foco vai para o campo **Qtd** — ajuste se necessário e pressione **Enter**.
+
+### Produto com mais de uma unidade de venda
+
+Quando o produto tem mais de uma unidade cadastrada no ERP (ex.: **UN** e
+**CX** — caixa fechada com 6, 12...), ao selecioná-lo abre o diálogo
+**Unidade de venda**:
+
+1. As opções aparecem numeradas, com a descrição e o preço de cada unidade.
+2. Escolha pelo **número** (1, 2, 3...) ou por **setas + Enter**; duplo clique
+   também seleciona.
+3. O item entra no carrinho com a unidade escolhida (coluna **Un**) e o
+   preço correspondente.
+
+> Produtos com uma única unidade seguem lançando direto, sem diálogo.
 
 ### Consulta de preço (F3)
 
 Pressione **F3** para consultar o preço de um produto **sem lançar** na venda.
 Busque por código, código de barras ou nome; o preço aparece em destaque.
-Feche com **Esc**.
+Se o produto tiver mais de uma unidade, os preços de cada uma aparecem
+abaixo do preço principal. Feche com **Esc**.
 
 ### Adicionar com desconto no item
 
@@ -115,10 +134,16 @@ Com os itens no carrinho, pressione **F10** (ou **F12**, ou clique
 
 1. **Total da venda** em destaque; o **Desconto total** pode ser informado aqui
    (na conclusão, o sistema pedirá autorização de supervisor).
-2. **CPF/CNPJ na nota (opcional)**: digite o documento do cliente. O sistema
-   valida os dígitos e, se o cliente estiver cadastrado, exibe o nome. O
-   documento é gravado na venda e enviado ao ERP.
+2. **Cliente** (opcional para venda à vista): digite o **CPF/CNPJ** ou o
+   **código interno** do cliente no ERP e pressione **Enter** — ou clique na
+   **lupa** para pesquisar por nome, documento ou código. Se o cliente
+   estiver cadastrado, o nome aparece ao lado do campo; o documento é
+   gravado na venda e enviado ao ERP.
 3. Selecione a **Espécie** (dinheiro, Pix, cartão...) e a **Condição**.
+   - A condição padrão é **À vista**.
+   - Se a condição tiver **mais de 1 parcela** ou **primeiro vencimento
+     futuro**, o pagamento **exige cliente cadastrado** — não basta digitar
+     um CPF/CNPJ avulso; é preciso que o cliente já exista no ERP.
 4. O campo **Valor recebido** é preenchido automaticamente com o restante —
    confirme ou ajuste, e pressione **Enter** (ou clique **Adicionar**).
 5. Para **pagamento misto**, repita com outras espécies até o **Restante** zerar.
@@ -127,6 +152,22 @@ Com os itens no carrinho, pressione **F10** (ou **F12**, ou clique
 
 - **Esc** volta à tela de venda **preservando** os pagamentos já lançados.
 - Para remover um pagamento: selecione na grade e **Delete** (requer supervisor).
+
+### Parcelas (pagamento a prazo)
+
+Ao adicionar um pagamento numa condição parcelada, o sistema calcula as
+datas de vencimento automaticamente (a partir da condição de pagamento
+cadastrada no ERP) e mostra a grade de **parcelas** abaixo da lista de
+pagamentos, com o pagamento selecionado:
+
+1. Cada linha mostra o **número**, o **vencimento** e o **valor** da parcela.
+2. O **vencimento é editável**: clique na célula e digite a nova data no
+   formato `dd/mm/aaaa`.
+3. Ao **concluir a venda**, o sistema valida que a soma das parcelas bate com
+   o valor do pagamento e que as datas não retrocedem.
+
+> As parcelas são enviadas ao ERP junto com a venda e viram títulos
+> financeiros (parcelas a receber) automaticamente.
 
 Após concluir:
 
@@ -154,11 +195,18 @@ O botão **F8 Vendas** (habilitado com caixa aberto) abre a consulta de vendas d
 sessão, com status de sincronização por venda (Sincronizado, Enviado, Pendente,
 Rejeitado, Cancelado) e totais no rodapé.
 
-### Cancelar uma venda finalizada
+### Detalhe da venda, reimpressão e cancelamento
 
-1. Em **Vendas do caixa** (F8), selecione a venda finalizada.
-2. O painel de cancelamento abre abaixo da lista.
-3. Preencha o **login do supervisor** e o **motivo**, e confirme.
+Clicar em qualquer venda da lista (F8) abre a tela de **Detalhe da venda**:
+
+- **Itens**: produto, unidade, quantidade, preço e desconto de cada linha.
+- **Pagamentos**: espécie, valor e, se houver, as **parcelas** (datas e valores).
+- **Reimprimir**: monta o comprovante a partir do banco e abre a janela de
+  impressão — funciona para qualquer venda da sessão, não só a última.
+  > O troco não fica gravado no banco; a reimprimissão de vendas antigas não
+  > mostra a linha de troco.
+- **Cancelar venda** (só aparece em vendas finalizadas): pede **login, senha
+  e motivo** do supervisor, igual às demais operações sensíveis.
 
 > O cancelamento é irreversível no PDV Local. Para anulação fiscal, consulte o
 > fluxo do ERP.
@@ -168,27 +216,41 @@ Rejeitado, Cancelado) e totais no rodapé.
 ## Caixa (F4): movimentos e fechamento
 
 Pressione **F4** para abrir o diálogo **Caixa**. Com o caixa aberto ele mostra o
-**resumo em tempo real** (abertura, vendas, dinheiro esperado, por espécie).
+**resumo do turno** em uma lista (abertura, vendas, suprimentos, sangrias) —
+o dinheiro esperado e as vendas por espécie **não aparecem aqui**: eles só são
+revelados no relatório, depois do fechamento (ver abaixo).
 
 ### Suprimento (entrada de dinheiro)
 
 1. Informe o valor no campo **Movimento de caixa**.
-2. Clique **Suprimento** — abre a autorização de supervisor (login + senha + motivo).
+2. Preencha a **Observação** (obrigatória — ex.: "reforço de troco").
+3. Clique **Suprimento** — abre a autorização de supervisor (login + senha + motivo).
 
 ### Sangria (retirada de dinheiro)
 
 1. Informe o valor no campo **Movimento de caixa**.
-2. Clique **Sangria** — abre a autorização de supervisor.
+2. Preencha a **Observação** (obrigatória — ex.: "retirada para depósito").
+3. Clique **Sangria** — abre a autorização de supervisor.
 
 > A sangria não pode ultrapassar o dinheiro esperado em caixa.
+> A observação fica gravada no histórico do movimento; o motivo dado ao
+> supervisor fica na auditoria.
 
-### Fechar o caixa
+### Fechar o caixa (contagem cega por espécie)
+
+O fechamento é **cego**: o operador informa o valor contado de cada espécie
+**sem ver o esperado** — a diferença só aparece depois, no relatório.
 
 1. Certifique-se de que não há venda em andamento (carrinho vazio).
-2. No diálogo Caixa (F4), confira o **Valor contado no fechamento** (pré-preenchido
-   com o dinheiro esperado) e ajuste para o valor realmente contado.
-3. Pressione **Enter** ou clique **Fechar caixa**.
-4. O sistema mostra a **diferença** entre o contado e o esperado.
+2. No diálogo Caixa (F4), preencha a grade **Fechamento** com o valor contado
+   de cada espécie (Dinheiro, Pix, Cartão...). Clique na célula **Contado**
+   para editar.
+3. Clique **Fechar caixa**.
+4. Abre automaticamente o **relatório de fechamento**, mostrando esperado,
+   contado e diferença por espécie, os suprimentos/sangrias com observação, e
+   a diferença total.
+   - Escolha o formato **A4** ou **Térmica (72mm)** e clique **Imprimir**.
+   - Feche com **Esc** ou o botão **Fechar**.
 
 ---
 
@@ -229,7 +291,7 @@ local (pgvector, schema, contagens), ativação da instalação e o botão
 A **barra de status** na parte inferior mostra, em tempo integral:
 
 ```
-Operador: Nome (login)  |  Caixa: aberto desde 18/07 08:02  |  Sync: OK  |  Versao 1.1.0  |  18/07/2026 14:32:05
+Operador: Nome (login)  |  Caixa: aberto desde 20/07 08:02  |  Sync: OK  |  Versao 1.2.0  |  20/07/2026 14:32:05
 ```
 
 O **banner** no topo só aparece quando algo precisa de atenção:
@@ -259,8 +321,10 @@ O **banner** no topo só aparece quando algo precisa de atenção:
 | `qtd*código` | Campo Produto | Lançar quantidade de uma vez (ex.: `3*1187`) |
 | `Enter` | Campo Produto | Buscar produto / adicionar ao carrinho |
 | `↑` `↓` | Grid de resultados | Navegar entre produtos |
+| `1`-`9` / `↑↓`+`Enter` | Diálogo Unidade de venda | Selecionar a unidade (produto com mais de uma) |
 | `Enter` | Quantidade / Desc. item | Adicionar item ao carrinho |
 | `Delete` | Item no carrinho | Remover item (autorização) |
+| `Enter` | Campo Cliente (Pagamento) | Resolver CPF/CNPJ ou código interno |
 | `Enter` | Valor recebido (Pagamento) | Adicionar pagamento |
 | `Delete` | Pagamento na grade | Remover pagamento (autorização) |
 | `Esc` | Diálogos | Fechar / voltar preservando o estado |
@@ -277,6 +341,12 @@ O **banner** no topo só aparece quando algo precisa de atenção:
   Concluir, pronto.
 - **CPF na nota**: digite no campo próprio da janela de Pagamento; o sistema
   valida e reconhece clientes cadastrados.
+- **Não lembra o CPF do cliente?** Clique na lupa ao lado do campo e busque por
+  nome ou código interno.
+- **Venda a prazo**: garanta que o cliente está cadastrado *antes* de escolher
+  a condição parcelada — senão o pagamento é recusado.
+- **Reimprimir venda antiga**: F8 → clique na venda → Reimprimir (não precisa
+  ser a última venda do turno).
 - **Ausentou-se do caixa?** Ctrl+L trava o terminal na hora.
 - **Tudo pelo teclado**: do login ao fechamento de caixa, nenhuma ação obriga o
   uso do mouse.

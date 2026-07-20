@@ -24,19 +24,22 @@ public partial class HelpWindow : Window
     [
         new("Enter", "Tela de login",           "Entrar"),
         new("Enter", "Fundo de troco (Caixa)",  "Abrir caixa"),
-        new("Enter", "Valor contado (Caixa)",   "Fechar caixa"),
         new("Enter", "Campo Produto",           "Buscar produto / adicionar ao carrinho"),
         new("qtd*código", "Campo Produto",      "Ex.: 3*1187 lança 3 unidades do código 1187"),
         new("↑  ↓",  "Grid de resultados",     "Navegar entre produtos encontrados"),
         new("Enter", "Grid de resultados",      "Selecionar produto destacado"),
+        new("1-9 ou ↑↓+Enter", "Diálogo Unidade de venda", "Selecionar a unidade quando o produto vende em mais de uma (ex.: UN/CX)"),
         new("Enter", "Quantidade",              "Adicionar item ao carrinho"),
         new("Enter", "Desconto do item",        "Adicionar item ao carrinho"),
         new("Delete","Item no carrinho",        "Remover item (exige supervisor e motivo)"),
+        new("Enter", "Campo Cliente (Pagamento)","Resolver CPF/CNPJ ou código interno digitado"),
+        new("🔍",     "Campo Cliente (Pagamento)","Abrir pesquisa de cliente por nome, documento ou código"),
         new("Enter", "Valor recebido (Pagamento)","Adicionar pagamento"),
         new("Delete","Pagamento na grade",      "Remover pagamento (exige supervisor e motivo)"),
-        new("Enter", "Diálogo de autorização",  "Confirmar autorização do supervisor (login + senha)"),
-        new("Enter", "Login supervisor (cancel.)","Avançar para campo Motivo"),
-        new("Enter", "Motivo (cancelamento)",   "Confirmar cancelamento de venda"),
+        new("clique na célula","Grid de parcelas (Pagamento)","Editar a data de vencimento de uma parcela (dd/mm/aaaa)"),
+        new("Enter", "Diálogo de autorização",  "Confirmar autorização do supervisor (login + senha + motivo)"),
+        new("clique na venda", "Vendas do caixa (F8)", "Abrir detalhe da venda (itens, pagamentos, reimprimir, cancelar)"),
+        new("clique na célula","Fechamento de caixa (F4)","Informar o valor contado de cada espécie (contagem cega)"),
     ];
 
     private static readonly List<HelpRow> VisualCues =
@@ -50,7 +53,9 @@ public partial class HelpWindow : Window
         new("Barra de status",       "Operador, caixa, sync, versão e relógio na parte inferior"),
         new("Comprovante sync",      "Atualiza a cada 8 s: Pendente → Enviado → Sincronizado"),
         new("Vendas canceladas",     "Itálico cinza na lista de vendas do caixa"),
+        new("Status na tela de detalhe","Verde \"Finalizada\" | Vermelho \"CANCELADA\""),
         new("Botão F9 Reimprimir",   "Aparece no cabeçalho após a 1ª venda finalizada"),
+        new("Diferença do fechamento","Só aparece no relatório após \"Fechar caixa\" — a contagem por espécie é cega"),
     ];
 
     public HelpWindow()

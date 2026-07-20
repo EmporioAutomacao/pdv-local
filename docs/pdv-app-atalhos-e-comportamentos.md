@@ -4,6 +4,30 @@ Documento técnico de referência para construção do sistema de ajuda integrad
 PDV App. Descreve cada atalho, o comportamento esperado, a implementação no código
 e as regras de negócio associadas.
 
+> **Atualizado em 2026-07-20** (sprint 1.2.0). Onde o comportamento mudou em
+> relação a uma versão anterior deste documento, isso é marcado explicitamente
+> no texto — não presuma que uma seção sem essa marca está correta sem
+> conferir a data da última alteração no git (`git log -- <arquivo>`).
+
+## Novidades da sprint 1.2.0 (2026-07-19/20)
+
+- **Layout**: linha de lançamento com alturas uniformes (`SaleEntryInputStyle`).
+- **Venda direta por match exato**: `PdvValidation.TryPickExactMatch` (id,
+  barras, sku, chave externa, código de fábrica).
+- **Cliente no pagamento**: CPF/CNPJ, código interno ou lupa
+  (`CustomerSearchWindow`) — ver seção "Campo Cliente" abaixo.
+- **Parcelas**: `PdvInstallmentCalculator` + grade editável no `PaymentWindow`
+  — ver seção "Grade de parcelas" abaixo.
+- **Unidades de medida**: `UnitSelectionDialog` quando o produto vende em mais
+  de uma unidade; preço por unidade no F3.
+- **Caixa**: resumo em grid, observação obrigatória em sangria/suprimento,
+  fechamento cego por espécie, relatório A4/térmica.
+- **F8 → SaleDetailWindow**: substitui o painel de cancelamento inline por uma
+  tela de detalhe com reimpressão e cancelamento.
+- Contrato de sincronização em `1.11.0` (`../sync`): snapshot de clientes,
+  `units[]` no produto, `installments_plan` e unidade nos itens do evento de
+  venda.
+
 ---
 
 ## Atalhos de teclado globais (Window.KeyDown)
@@ -57,12 +81,13 @@ Disparam de qualquer campo da janela.
 
 ## Atalhos por campo
 
-### Login do operador (`OperatorLoginTextBox`)
-
-- **Enter** → equivalente a clicar "Carregar".
-- Busca operador ativo em `pdv.operators` pelo login informado.
-- Se encontrado: carrega sessão aberta existente (se houver) ou aguarda abertura.
-- Se não encontrado: mensagem de erro em vermelho, campos limpos.
+> **Nota (2026-07-20):** o login por `OperatorLoginTextBox` e a autorização de
+> supervisor "por turno" descritos nas versões anteriores deste documento
+> foram removidos na sprint de 2026-07-18. O login agora acontece em
+> `LoginWindow`, antes da `MainWindow` existir (ver `App.xaml.cs`), e cada
+> operação sensível abre `SupervisorAuthorizationDialog` (login + senha +
+> motivo) sob demanda — não existe mais autorização válida para o turno
+> inteiro. Ver seção "Autorização de supervisor" mais abaixo, já atualizada.
 
 ### Valor de abertura (`OpeningAmountTextBox`)
 
@@ -70,12 +95,21 @@ Disparam de qualquer campo da janela.
 - Cria nova `pdv.cash_sessions` com `status='open'` e `opening_amount` informado.
 - Se já existe sessão aberta para o operador: reutiliza sem criar nova.
 
-### Valor de fechamento (`ClosingAmountTextBox`)
+### Fechamento do caixa (`ClosingCountsGrid`) — contagem cega por espécie
 
-- **Enter** → equivalente a clicar "Fechar caixa".
-- Proibido com venda em andamento (carrinho não vazio).
-- Calcula diferença entre valor informado e `expected_cash_amount` do resumo.
-- Grava `status='closed'` com notas de fechamento em formato auditável.
+*(substituiu o antigo `ClosingAmountTextBox` único na sprint 1.2.0, 2026-07-19)*
+
+- Grid carregado com uma linha por espécie de pagamento ativa
+  (`PdvPaymentCatalogRepository.GetActiveSpeciesAsync`, "Dinheiro" primeiro).
+- Coluna **Contado** é editável; as demais (nome, esperado) **não aparecem**
+  na tela — o fechamento é intencionalmente cego.
+- Ao clicar **Fechar caixa**: `PdvCashClosing.BuildClosingCounts` (puro,
+  `PdvLocal.Core`) casa a contagem com o resumo da sessão e resolve
+  esperado/diferença por espécie; `closing_amount` = contado da espécie
+  `kind == "cash"`; tudo persistido em `pdv.cash_sessions.closing_counts`
+  (jsonb).
+- Abre `CashCloseReportWindow` automaticamente após fechar, com os valores
+  esperado/contado/diferença revelados.
 
 ### Campo de produto (`ProductEntryTextBox`)
 
@@ -116,12 +150,47 @@ resultados, o operador deve confirmar explicitamente qual produto deseja.
 - Sempre exige autorização de supervisor e motivo.
 - Após remoção: itens são renumerados e totais recalculados.
 
-### Login do supervisor (`SupervisorLoginTextBox`)
+### Diálogo de autorização (`SupervisorAuthorizationDialog`)
 
-- **Enter** → equivalente a clicar "Autorizar".
-- Valida que o operador existe, está ativo e tem papel `supervisor` ou `admin`.
-- Autorização fica ativa durante toda a sessão do caixa.
-- Limpa apenas quando um novo operador é carregado (`LoadOperatorAsync`).
+- Aberto sob demanda por `SupervisorAuthorizationDialog.Request(owner, operatorRepository, descrição)`
+  a partir de qualquer operação sensível (desconto, remoção de item/pagamento,
+  cancelamento de venda, sangria/suprimento).
+- Campos: **login + senha** (validados via `AuthenticateAsync`, mesmo hash
+  pbkdf2 do login principal) **+ motivo**.
+- Retorna `SupervisorAuthorization(Supervisor, Reason)` ou `null` se cancelado.
+- **Não persiste entre operações** — cada chamada exige login+senha+motivo de
+  novo, mesmo para o mesmo supervisor na mesma sessão.
+
+### Campo Cliente (`CustomerDocumentTextBox`, `PaymentWindow`)
+
+*(sprint 1.2.0)*
+
+- **Enter** ou **perda de foco** → `ResolveCustomerDocumentAsync`.
+- `PdvValidation.ClassifyCustomerLookupInput` decide o tratamento:
+  - 11/14 dígitos (com ou sem pontuação) → CPF/CNPJ →
+    `PdvCustomerRepository.FindActiveByDocumentAsync`.
+  - 1 a 10 dígitos → código interno do ERP →
+    `PdvCustomerRepository.FindActiveByCodeAsync`; não encontrado lança erro
+    explícito ("Cliente com código X não encontrado").
+  - Qualquer outra coisa → erro "Informe CPF/CNPJ ou o código interno".
+- Botão **lupa** (`CustomerSearchButton`) abre `CustomerSearchWindow`
+  (busca por nome/documento/código, Enter ou duplo clique seleciona).
+- Guard `_resolvingCustomer` evita reentrância entre o LostFocus e o Enter.
+
+### Grade de parcelas (`InstallmentsGrid`, `PaymentWindow`)
+
+*(sprint 1.2.0)*
+
+- Visível apenas quando o pagamento selecionado em `PaymentsGrid` tem
+  `InstallmentsPlan` (condição com `installments > 1` ou `first_due_days > 0`).
+- Coluna **Vencimento** editável (`dd/MM/yyyy`); coluna **Valor** somente
+  leitura.
+- Trocar a seleção em `PaymentsGrid` salva a edição em memória
+  (`SaveDisplayedInstallmentEdits`) antes de trocar a grade exibida.
+- Ao concluir a venda, `ApplyEditedInstallmentPlans` reconfirma a edição
+  aberta e valida todos os planos com `PdvInstallmentCalculator.ValidatePlan`
+  (numeração 1..N, soma bate com o valor do pagamento, datas não
+  decrescentes).
 
 ### Valor recebido (`PaymentReceivedTextBox`)
 
@@ -348,38 +417,37 @@ Para vendas ativas, o mapeamento é:
 - Contagem: `"N vendas"` (ou `"Nenhuma venda nesta sessao."`)
 - Total: soma de `TotalAmount` formatada como `"Total: R$ X.XXX,XX"`
 
-### Cancelamento de venda
+### Seleção de venda → SaleDetailWindow
 
-Ativado quando o usuário seleciona uma linha com `Status == "completed"` no DataGrid.
+*(sprint 1.2.0 — substituiu o painel de cancelamento inline descrito nas
+versões anteriores deste documento)*
 
-**Painel de cancelamento (`CancellationPanel`):**
-- Aparece em `Grid.Row="2"` (entre o DataGrid e o rodapé), fundo âmbar.
-- Campos: Login supervisor + Motivo.
-- Enter no campo Login → foco vai para Motivo.
-- Enter no campo Motivo → executa `ExecuteCancellationAsync`.
-- "Confirmar cancelamento" (vermelho) → `ExecuteCancellationAsync`.
-- "Descartar" → oculta painel, deseleciona linha.
-
-**Fluxo de `ExecuteCancellationAsync`:**
-1. Valida campos não vazios.
-2. `_operatorRepository.FindActiveByLoginAsync(login)` → supervisor existe e está ativo.
-3. `PdvValidation.IsSupervisorRole(supervisor.Role)` → papel válido.
-4. `_saleRepository.CancelSaleAsync(saleId, cashSessionId, operatorId, supervisorId, reason)`.
-5. Oculta painel e recarrega a lista.
-
-**`CancelSaleAsync` (SQL):**
-```sql
-UPDATE pdv.sales
-SET status = 'cancelled', cancelled_at_utc = now(), sync_status = 'pending_sync', updated_at_utc = now()
-WHERE sale_id = @sale_id AND status = 'completed'
--- + INSERT INTO pdv.operation_audits (operation_type = 'cancel_sale')
-```
-- Transação atômica: UPDATE + INSERT auditoria.
-- Lança `InvalidOperationException` se `UPDATE` não afetar nenhuma linha.
+- `SalesGrid_SelectionChanged` abre `SaleDetailWindow` (`ShowDialog`) para
+  qualquer linha selecionada, independente do status.
+- Guard `_openingDetail` evita reentrância quando a seleção é limpa
+  (`SalesGrid.SelectedItem = null`) ao fechar o diálogo.
+- Se `SaleDetailWindow.SaleChanged == true` (venda foi cancelada), a lista é
+  recarregada (`LoadSalesAsync`).
 
 **Linhas canceladas:** exibidas com `Foreground="#94A3B8"` e `FontStyle="Italic"` via `DataTrigger` em `DataGrid.RowStyle` quando `IsCancelled == true`.
 
 **Totais do rodapé:** somam apenas vendas com `Status == "completed"` (canceladas são excluídas da contagem e do total).
+
+### SaleDetailWindow (detalhe, reimpressão e cancelamento)
+
+*(sprint 1.2.0)*
+
+- Carrega `PdvSaleRepository.GetCompletedSaleDetailAsync(saleId)` — 3 SELECTs
+  (cabeçalho com operador/cliente, itens com unidade congelada, pagamentos
+  com `installments_plan` do payload).
+- **Reimprimir**: reconstrói `SaleReceiptData` a partir do detalhe (não do
+  estado em memória da venda) e abre `SaleReceiptWindow`. Troco não é
+  persistido em `pdv.payments` → sempre sai como zero na reimpressão.
+- **Cancelar venda**: só visível quando `Status == "completed"`; abre
+  `SupervisorAuthorizationDialog` e chama `CancelSaleAsync` (mesma lógica de
+  antes: UPDATE + INSERT auditoria, transação atômica). Após cancelar,
+  recarrega o detalhe (mostra "CANCELADA" em vermelho) e marca
+  `SaleChanged = true` para a janela de origem recarregar a lista.
 
 ### SQL utilizado
 
@@ -414,27 +482,24 @@ ORDER BY s.completed_at_utc DESC
 
 ### Estrutura de dados
 
-Arquivo `HelpWindow.xaml.cs` — três listas estáticas:
+Arquivo `HelpWindow.xaml.cs` — três listas estáticas (atualizadas na sprint
+1.2.0; conteúdo completo direto no código-fonte, não duplicado aqui para não
+ficar dessincronizado de novo):
 
-**GlobalShortcuts** — `List<HelpRow>` com colunas Key / Condition / Action:
+- **GlobalShortcuts** — `List<HelpRow>` (Key/Condition/Action): F1-F4, F8-F11,
+  Ctrl+D, Ctrl+L, Esc.
+- **FieldShortcuts** — inclui, desde 1.2.0: seleção de unidade (1-9 ou
+  setas+Enter), campo Cliente (Enter resolve, lupa pesquisa), edição de
+  parcela na grade, abertura do detalhe de venda a partir do F8, e a grade de
+  fechamento cego do caixa. As linhas antigas de "Login supervisor
+  (cancel.)"/"Motivo (cancelamento)" (painel inline removido) foram retiradas.
+- **VisualCues** — inclui, desde 1.2.0: status "Finalizada"/"CANCELADA" na
+  tela de detalhe e o aviso de que a diferença do fechamento só aparece no
+  relatório (contagem cega).
 
-| Key | Condition | Action |
-|-----|-----------|--------|
-| F1 | Qualquer tela | Abrir esta janela de ajuda |
-| F2 | Qualquer tela | Nova venda (exige supervisor se houver itens) |
-| F8 | Caixa aberto | Abrir consulta de vendas do caixa |
-| F9 | Após 1ª venda | Reimprimir último comprovante de venda |
-| F12 | Qualquer tela | Finalizar venda |
-| Esc | Produto selecionado | Cancelar seleção de produto e limpar campos |
-
-**FieldShortcuts** — mesmas colunas, inclui atalhos da `CashSessionSalesWindow`:
-
-| Key | Campo | Action |
-|-----|-------|--------|
-| Enter | Login supervisor (cancel.) | Avançar para campo Motivo |
-| Enter | Motivo (cancelamento) | Confirmar cancelamento de venda |
-
-**VisualCues** — `List<HelpRow>` com duas colunas (Key = elemento, Action = sinal visual); Condition vazio via sobrecarga do construtor.
+**Dica do rodapé:** corrigida na 1.2.0 — não existe mais autorização de
+supervisor "por turno" (ver seção de autorização abaixo); foi acrescentada
+uma segunda dica sobre venda a prazo exigir cliente cadastrado.
 
 ### `HelpRow` record
 
@@ -461,32 +526,30 @@ Arquivo `HelpWindow.xaml` — janela 640×560, três `DataGrid` em `ScrollViewer
 
 ---
 
-## Autorização de supervisor — escopo de sessão
+## Autorização de supervisor — por operação (desde 2026-07-18)
 
-### Fluxo único no início do turno
+> Substitui o modelo antigo "uma autorização por turno" (removido na sprint
+> de login/caixa/pagamento de 2026-07-18). Descrito aqui porque várias
+> versões anteriores deste documento ainda traziam o modelo antigo.
+
+### Fluxo atual
 
 ```
-Supervisor: digita login → Enter → autorizado para a sessão
-Operador: para cada desconto, preenche apenas o Motivo
+Cada operação sensível → SupervisorAuthorizationDialog.Request(owner, operatorRepository, descrição)
+  → supervisor digita login + senha + motivo
+  → validado (AuthenticateAsync + IsSupervisorRole) a cada chamada
+  → autorização vale só para aquela operação; não fica guardada em memória
 ```
 
-### O que limpa a autorização
-
-| Evento | Limpa autorização? |
-|--------|-------------------|
-| Nova venda (F2 ou botão) | Não — apenas limpa o Motivo |
-| Finalizar venda (F12) | Não — persiste para a próxima venda |
-| Novo operador carregado | **Sim** — autorização pertence à sessão do operador anterior |
-| Fechar e reabrir o app | **Sim** — estado em memória é perdido |
-
-### O que a autorização permite
+### O que exige autorização (uma por operação, sempre)
 
 - Desconto no item (campo Desc. item > 0)
-- Desconto total na venda (campo Desc. total > 0)
 - Remoção de item do carrinho
 - Remoção de pagamento
-- Limpeza de venda em andamento (Nova venda com itens)
-- Suprimento e sangria de caixa
+- Suprimento e sangria de caixa (desde 1.2.0, além do motivo do supervisor, o
+  operador preenche uma **Observação** própria, gravada no `reason` do
+  movimento)
+- Cancelamento de venda finalizada (desde 1.2.0, via `SaleDetailWindow`)
 
 ---
 
@@ -516,3 +579,9 @@ ProductEntryTextBox
 | "Finalize ou limpe a venda em andamento antes de fechar o caixa." | Carrinho não vazio ao fechar caixa | Finalizar ou cancelar a venda atual |
 | "Desconto total não pode deixar a venda negativa." | Desconto maior que o subtotal | Reduzir o desconto total |
 | "Sangria não pode ser maior que o dinheiro esperado no caixa." | Valor de sangria acima do saldo | Reduzir o valor da sangria |
+| "Informe a observação do suprimento/sangria..." *(1.2.0)* | Campo Observação vazio | Preencher a observação antes de confirmar |
+| "Venda a prazo exige cliente cadastrado..." *(1.2.0)* | Condição com parcelas/vencimento futuro sem cliente resolvido | Resolver o cliente (documento, código ou lupa) antes de adicionar o pagamento |
+| "Cliente com código X não encontrado." *(1.2.0)* | Código interno digitado não existe em `pdv.customers` | Conferir o código ou usar a lupa |
+| "Informe CPF/CNPJ ou o código interno do cliente." *(1.2.0)* | Texto no campo Cliente não é documento nem código válido | Corrigir a entrada |
+| "Vencimento da parcela N inválido: use o formato dd/mm/aaaa." *(1.2.0)* | Data digitada na grade de parcelas em formato errado | Corrigir a data |
+| "Soma das parcelas (...) difere do valor do pagamento (...)." *(1.2.0)* | Edição manual do plano de parcelas quebrou o total | Ajustar os valores das parcelas |

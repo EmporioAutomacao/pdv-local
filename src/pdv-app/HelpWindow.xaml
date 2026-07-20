@@ -165,7 +165,11 @@
                 <TextBlock Margin="0,14,0,4"
                            Foreground="{DynamicResource TextTertiary}"
                            FontSize="11"
-                           Text="Dica: o supervisor pode ser autorizado uma única vez por turno. Após autorizado, informe apenas o Motivo em cada operação." />
+                           Text="Dica: cada operação sensível (desconto, remoção, cancelamento, sangria/suprimento) pede login, senha e motivo do supervisor — não existe autorização válida para o turno inteiro." />
+                <TextBlock Margin="0,4,0,4"
+                           Foreground="{DynamicResource TextTertiary}"
+                           FontSize="11"
+                           Text="Dica: venda a prazo (mais de 1 parcela ou 1º vencimento futuro) exige cliente cadastrado — resolva pelo CPF/CNPJ, código interno ou pela lupa antes de adicionar o pagamento." />
 
             </StackPanel>
         </ScrollViewer>
