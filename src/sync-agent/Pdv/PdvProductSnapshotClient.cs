@@ -208,4 +208,13 @@ public sealed record PdvProductSnapshotItem(
     [property: JsonPropertyName("active")] bool Active,
     [property: JsonPropertyName("updated_at_utc")] DateTimeOffset UpdatedAtUtc,
     [property: JsonPropertyName("deleted_at_utc")] DateTimeOffset? DeletedAtUtc,
-    [property: JsonPropertyName("payload")] JsonElement? Payload);
+    [property: JsonPropertyName("payload")] JsonElement? Payload,
+    [property: JsonPropertyName("units")] IReadOnlyList<PdvProductUnitSnapshotItem>? Units = null);
+
+public sealed record PdvProductUnitSnapshotItem(
+    [property: JsonPropertyName("unit_id")] string UnitId,
+    [property: JsonPropertyName("sigla")] string Sigla,
+    [property: JsonPropertyName("nome")] string? Nome,
+    [property: JsonPropertyName("factor")] decimal Factor,
+    [property: JsonPropertyName("price")] decimal? Price,
+    [property: JsonPropertyName("fractional")] bool? Fractional);

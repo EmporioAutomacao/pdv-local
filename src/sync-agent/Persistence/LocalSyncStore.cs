@@ -770,7 +770,66 @@ public sealed class LocalSyncStore
         }
 
         const string ensureSchemaSql = """
-            ALTER TABLE pdv.products ADD COLUMN IF NOT EXISTS factory_code text NULL
+            ALTER TABLE pdv.products ADD COLUMN IF NOT EXISTS factory_code text NULL;
+            CREATE TABLE IF NOT EXISTS pdv.product_units (
+                product_unit_id uuid PRIMARY KEY,
+                product_id uuid NOT NULL REFERENCES pdv.products (product_id) ON DELETE CASCADE,
+                external_key text NOT NULL,
+                label text NOT NULL,
+                name text NULL,
+                factor numeric(14, 6) NOT NULL CHECK (factor > 0),
+                price numeric(14, 4) NULL CHECK (price IS NULL OR price >= 0),
+                fractional boolean NOT NULL DEFAULT false,
+                is_native boolean NOT NULL DEFAULT false,
+                active boolean NOT NULL DEFAULT true,
+                updated_at_utc timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (product_id, external_key)
+            );
+            CREATE INDEX IF NOT EXISTS ix_product_units_product
+                ON pdv.product_units (product_id)
+            """;
+
+        const string deleteUnitsSql = """
+            DELETE FROM pdv.product_units WHERE product_id = @product_id
+            """;
+
+        const string insertUnitSql = """
+            INSERT INTO pdv.product_units (
+                product_unit_id,
+                product_id,
+                external_key,
+                label,
+                name,
+                factor,
+                price,
+                fractional,
+                is_native,
+                active,
+                updated_at_utc
+            )
+            VALUES (
+                @product_unit_id,
+                @product_id,
+                @external_key,
+                @label,
+                @name,
+                @factor,
+                @price,
+                @fractional,
+                @is_native,
+                true,
+                @updated_at_utc
+            )
+            ON CONFLICT (product_id, external_key) DO UPDATE
+            SET
+                label = EXCLUDED.label,
+                name = EXCLUDED.name,
+                factor = EXCLUDED.factor,
+                price = EXCLUDED.price,
+                fractional = EXCLUDED.fractional,
+                is_native = EXCLUDED.is_native,
+                active = true,
+                updated_at_utc = EXCLUDED.updated_at_utc
             """;
 
         const string sql = """
@@ -844,6 +903,45 @@ public sealed class LocalSyncStore
             command.Parameters.AddWithValue("payload", NpgsqlDbType.Jsonb, payload);
             command.Parameters.AddWithValue("updated_at_utc", item.UpdatedAtUtc);
             imported += await command.ExecuteNonQueryAsync(cancellationToken);
+
+            // Snapshot com units e autoritativo para o produto; sem units
+            // (ERP antigo, contrato < 1.11.0) a tabela local fica intocada.
+            if (item.Units is not null)
+            {
+                await using (var deleteUnits = new NpgsqlCommand(deleteUnitsSql, connection, transaction))
+                {
+                    deleteUnits.Parameters.AddWithValue("product_id", productId);
+                    await deleteUnits.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                var isFirstUnit = true;
+                foreach (var unit in item.Units)
+                {
+                    if (unit.Factor <= 0 || string.IsNullOrWhiteSpace(unit.UnitId))
+                    {
+                        continue;
+                    }
+
+                    var productUnitId = DeterministicGuid.Create(
+                        "erp-pdv-product-unit",
+                        item.ProductId,
+                        unit.UnitId);
+
+                    await using var insertUnit = new NpgsqlCommand(insertUnitSql, connection, transaction);
+                    insertUnit.Parameters.AddWithValue("product_unit_id", productUnitId);
+                    insertUnit.Parameters.AddWithValue("product_id", productId);
+                    insertUnit.Parameters.AddWithValue("external_key", unit.UnitId.Trim());
+                    insertUnit.Parameters.AddWithValue("label", FirstNonEmpty(unit.Sigla, "UN"));
+                    insertUnit.Parameters.AddWithValue("name", (object?)NormalizeOptionalText(unit.Nome) ?? DBNull.Value);
+                    insertUnit.Parameters.AddWithValue("factor", unit.Factor);
+                    insertUnit.Parameters.AddWithValue("price", (object?)unit.Price ?? DBNull.Value);
+                    insertUnit.Parameters.AddWithValue("fractional", unit.Fractional ?? false);
+                    insertUnit.Parameters.AddWithValue("is_native", isFirstUnit);
+                    insertUnit.Parameters.AddWithValue("updated_at_utc", item.UpdatedAtUtc);
+                    await insertUnit.ExecuteNonQueryAsync(cancellationToken);
+                    isFirstUnit = false;
+                }
+            }
         }
 
         await transaction.CommitAsync(cancellationToken);
