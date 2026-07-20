@@ -23,6 +23,22 @@ public sealed class PdvProductRepository
             CREATE INDEX IF NOT EXISTS ix_products_factory_code
                 ON pdv.products (factory_code)
                 WHERE factory_code IS NOT NULL;
+            CREATE TABLE IF NOT EXISTS pdv.product_units (
+                product_unit_id uuid PRIMARY KEY,
+                product_id uuid NOT NULL REFERENCES pdv.products (product_id) ON DELETE CASCADE,
+                external_key text NOT NULL,
+                label text NOT NULL,
+                name text NULL,
+                factor numeric(14, 6) NOT NULL CHECK (factor > 0),
+                price numeric(14, 4) NULL CHECK (price IS NULL OR price >= 0),
+                fractional boolean NOT NULL DEFAULT false,
+                is_native boolean NOT NULL DEFAULT false,
+                active boolean NOT NULL DEFAULT true,
+                updated_at_utc timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (product_id, external_key)
+            );
+            CREATE INDEX IF NOT EXISTS ix_product_units_product
+                ON pdv.product_units (product_id);
             """;
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
