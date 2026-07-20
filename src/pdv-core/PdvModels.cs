@@ -222,6 +222,44 @@ public sealed record PdvSaleSummary(
     string SyncStatus,
     string Status);
 
+public sealed record PdvSaleDetail(
+    Guid SaleId,
+    string SaleNumber,
+    string Status,
+    string SyncStatus,
+    DateTimeOffset? CompletedAtUtc,
+    DateTimeOffset? CancelledAtUtc,
+    string OperatorName,
+    string? CustomerName,
+    string? CustomerDocument,
+    decimal SubtotalAmount,
+    decimal DiscountAmount,
+    decimal TotalAmount,
+    IReadOnlyList<PdvSaleDetailItem> Items,
+    IReadOnlyList<PdvSaleDetailPayment> Payments);
+
+public sealed record PdvSaleDetailItem(
+    Guid ProductId,
+    string ExternalKey,
+    string? Sku,
+    string? Barcode,
+    string Name,
+    string Unit,
+    int LineNumber,
+    decimal Quantity,
+    decimal UnitPrice,
+    decimal DiscountAmount,
+    decimal TotalAmount,
+    string? UnitLabel);
+
+public sealed record PdvSaleDetailPayment(
+    string PaymentMethod,
+    decimal Amount,
+    string Status,
+    string? AuthorizationCode,
+    int? Installments,
+    string? InstallmentsPlanJson);
+
 public sealed record PdvOperationAuditCommand(
     string OperationType,
     Guid? CashSessionId,

@@ -179,6 +179,145 @@ public sealed class PdvSaleRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Venda completa (cabecalho + itens + pagamentos) para a tela de detalhe
+    /// e reimpressao a partir do banco.
+    /// </summary>
+    public async Task<PdvSaleDetail?> GetCompletedSaleDetailAsync(
+        Guid saleId,
+        CancellationToken cancellationToken)
+    {
+        const string headerSql = """
+            SELECT
+                s.sale_id,
+                s.sale_number,
+                s.status,
+                s.sync_status,
+                s.completed_at_utc,
+                s.cancelled_at_utc,
+                o.display_name AS operator_name,
+                c.name AS customer_name,
+                s.customer_document,
+                s.subtotal_amount,
+                s.discount_amount,
+                s.total_amount
+            FROM pdv.sales s
+            JOIN pdv.operators o ON o.operator_id = s.operator_id
+            LEFT JOIN pdv.customers c ON c.customer_id = s.customer_id
+            WHERE s.sale_id = @sale_id
+              AND s.status IN ('completed', 'cancelled')
+            """;
+
+        const string itemsSql = """
+            SELECT
+                si.product_id, p.external_key, p.sku, p.barcode, p.name, p.unit,
+                si.line_number, si.quantity, si.unit_price, si.discount_amount,
+                si.total_amount, si.unit_label
+            FROM pdv.sale_items si
+            JOIN pdv.products p ON p.product_id = si.product_id
+            WHERE si.sale_id = @sale_id
+            ORDER BY si.line_number
+            """;
+
+        const string paymentsSql = """
+            SELECT
+                payment_method, amount, status, authorization_code,
+                (payload ->> 'installments')::int AS installments,
+                payload ->> 'installments_plan' AS installments_plan
+            FROM pdv.payments
+            WHERE sale_id = @sale_id
+            ORDER BY created_at_utc, payment_id
+            """;
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        Guid detailSaleId;
+        string saleNumber, status, syncStatus, operatorName;
+        string? customerName, customerDocument;
+        DateTimeOffset? completedAt, cancelledAt;
+        decimal subtotal, discount, total;
+
+        await using (var headerCommand = new NpgsqlCommand(headerSql, connection))
+        {
+            headerCommand.Parameters.AddWithValue("sale_id", saleId);
+            await using var reader = await headerCommand.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            detailSaleId = reader.GetGuid(0);
+            saleNumber = reader.GetString(1);
+            status = reader.GetString(2);
+            syncStatus = reader.GetString(3);
+            completedAt = reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4);
+            cancelledAt = reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5);
+            operatorName = reader.GetString(6);
+            customerName = reader.IsDBNull(7) ? null : reader.GetString(7);
+            customerDocument = reader.IsDBNull(8) ? null : reader.GetString(8);
+            subtotal = reader.GetDecimal(9);
+            discount = reader.GetDecimal(10);
+            total = reader.GetDecimal(11);
+        }
+
+        var items = new List<PdvSaleDetailItem>();
+        await using (var itemsCommand = new NpgsqlCommand(itemsSql, connection))
+        {
+            itemsCommand.Parameters.AddWithValue("sale_id", saleId);
+            await using var reader = await itemsCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new PdvSaleDetailItem(
+                    ProductId: reader.GetGuid(0),
+                    ExternalKey: reader.GetString(1),
+                    Sku: reader.IsDBNull(2) ? null : reader.GetString(2),
+                    Barcode: reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Name: reader.GetString(4),
+                    Unit: reader.GetString(5),
+                    LineNumber: reader.GetInt32(6),
+                    Quantity: reader.GetDecimal(7),
+                    UnitPrice: reader.GetDecimal(8),
+                    DiscountAmount: reader.GetDecimal(9),
+                    TotalAmount: reader.GetDecimal(10),
+                    UnitLabel: reader.IsDBNull(11) ? null : reader.GetString(11)));
+            }
+        }
+
+        var payments = new List<PdvSaleDetailPayment>();
+        await using (var paymentsCommand = new NpgsqlCommand(paymentsSql, connection))
+        {
+            paymentsCommand.Parameters.AddWithValue("sale_id", saleId);
+            await using var reader = await paymentsCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                payments.Add(new PdvSaleDetailPayment(
+                    PaymentMethod: reader.GetString(0),
+                    Amount: reader.GetDecimal(1),
+                    Status: reader.GetString(2),
+                    AuthorizationCode: reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Installments: reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                    InstallmentsPlanJson: reader.IsDBNull(5) ? null : reader.GetString(5)));
+            }
+        }
+
+        return new PdvSaleDetail(
+            detailSaleId,
+            saleNumber,
+            status,
+            syncStatus,
+            completedAt,
+            cancelledAt,
+            operatorName,
+            customerName,
+            customerDocument,
+            subtotal,
+            discount,
+            total,
+            items,
+            payments);
+    }
+
     public async Task<string?> GetSyncStatusAsync(Guid saleId, CancellationToken cancellationToken)
     {
         const string sql = "SELECT sync_status FROM pdv.sales WHERE sale_id = @sale_id";
