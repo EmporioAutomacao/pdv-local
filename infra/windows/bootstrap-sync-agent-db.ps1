@@ -3,8 +3,8 @@ param(
     [int]$PostgresPort = 5432,
     [string]$AdminUser = "postgres",
     [securestring]$AdminPassword,
-    [string]$DatabaseName = "pdv_sync",
-    [string]$DatabaseUser = "pdv_sync",
+    [string]$DatabaseName = "pdv",
+    [string]$DatabaseUser = "araras",
     [string]$DatabasePassword = "pdv_sync",
     [string]$PsqlPath = "psql",
     [string]$PgVectorVersion = "0.8.0"

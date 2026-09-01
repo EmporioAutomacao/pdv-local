@@ -292,7 +292,7 @@ Configuracao principal:
 {
   "Provisioning": {
     "Enabled": true,
-    "ProtectedFile": "C:\\Program Files\\PDVLocal\\Secrets\\sync-agent-provisioning.dpapi",
+    "ProtectedFile": "C:\\Program Files\\AraraSuite.com.br\\Sync\\Secrets\\sync-agent-provisioning.dpapi",
     "ActivationTimeoutSeconds": 30
   }
 }
@@ -436,3 +436,26 @@ Objetivo:
 - validar servico, banco, dashboard, logs, fila, dead-letter e ERP;
 - reiniciar servico/Windows;
 - testar rollback preservando banco local.
+
+## Melhorias na tela `/setup` (01/09/2026)
+
+Para reduzir retrabalho na ativacao:
+
+- **URL do ERP fica salva.** Depois do primeiro envio, a URL informada e
+  guardada em `Provisioning:SetupHintFile` (padrao:
+  `.secrets/sync-agent/setup-hint.json`) e tambem em memoria, e volta
+  pre-preenchida no formulario mesmo apos reiniciar o servico. A URL nao e
+  segredo (hostname publico), entao fica em texto puro.
+- **Codigo de ativacao persiste entre tentativas na mesma sessao.** Se a
+  ativacao falha por um motivo corrigivel (URL errada, ERP fora do ar, timeout),
+  o codigo continua no campo para o operador so ajustar e reenviar. Ele e
+  descartado no sucesso e nos erros terminais de codigo (`activation_code_used`,
+  `_expired`, `_revoked`, `_not_found`, `already_provisioned`). O codigo **nunca**
+  e gravado em disco.
+- **Erro de rede nao vira mais HTTP 500.** `ErpActivationClient` trata
+  `HttpRequestException` e timeout, devolvendo `erp_unreachable` /
+  `activation_timeout` com mensagem legivel na propria tela.
+- **Feedback mais claro.** A tela mostra o `code` do erro, uma dica por tipo,
+  a linha "Estado atual" (aguardando ativacao / ativado / reconexao necessaria)
+  e, no sucesso, a caixa verde "Ativacao aceita pelo ERP" alem do painel com
+  instancia/tenant/URL/expiracao do token.

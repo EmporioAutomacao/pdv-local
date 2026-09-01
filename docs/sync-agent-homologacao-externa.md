@@ -26,7 +26,7 @@ Incluido:
 - PostgreSQL 17 local com pgvector 0.8.0;
 - banco local `pdv_sync`;
 - timezone `America/Sao_Paulo`;
-- Windows Service `PDV Local Sync Agent`;
+- Windows Service `AraraSuiteSync` (AraraSuite Sync);
 - Tray na inicializacao do usuario;
 - ativacao pelo dashboard local `/setup`;
 - validacao de reinicio do servico e do Windows;
@@ -406,7 +406,7 @@ Resultado esperado:
 ### 6. Reiniciar servico
 
 ```powershell
-Restart-Service "PDV Local Sync Agent"
+Restart-Service "AraraSuiteSync"
 Start-Sleep -Seconds 15
 Invoke-RestMethod http://127.0.0.1:47891/status
 ```
@@ -423,7 +423,7 @@ Resultado esperado:
 Apos reiniciar:
 
 ```powershell
-Get-Service "PDV Local Sync Agent"
+Get-Service "AraraSuiteSync"
 Invoke-RestMethod http://127.0.0.1:47891/status
 ```
 
@@ -451,8 +451,8 @@ Resultado esperado:
 Validar:
 
 ```powershell
-Get-Service "PDV Local Sync Agent" -ErrorAction SilentlyContinue
-Test-Path "C:\Program Files\PDVLocal"
+Get-Service "AraraSuiteSync" -ErrorAction SilentlyContinue
+Test-Path "C:\Program Files\AraraSuite.com.br"
 ```
 
 ## GO

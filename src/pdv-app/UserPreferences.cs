@@ -7,7 +7,7 @@ public sealed class UserPreferences
 {
     private static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PDVLocal", "prefs.json");
+        "AraraSuite.com.br", "prefs.json");
 
     public string Theme { get; set; } = "Light";
 

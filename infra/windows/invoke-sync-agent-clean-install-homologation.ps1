@@ -1,14 +1,14 @@
 param(
-    [string]$InstallRoot = "C:\Program Files\PDVLocal",
-    [string]$ServiceName = "PDV Local Sync Agent",
+    [string]$InstallRoot = "C:\Program Files\AraraSuite.com.br",
+    [string]$ServiceName = "AraraSuiteSync",
     [string]$PostgresInstallRoot = "C:\Program Files\PostgreSQL\17",
     [string]$PostgresDataDirectory = "C:\ProgramData\PDVLocal\PostgreSQL17\data",
     [string]$PostgresServiceName = "postgresql-x64-17-pdvlocal",
     [int]$PostgresPort = 5432,
     [string]$PostgresAdminUser = "postgres",
     [securestring]$PostgresAdminPassword,
-    [string]$DatabaseName = "pdv_sync",
-    [string]$DatabaseUser = "pdv_sync",
+    [string]$DatabaseName = "pdv",
+    [string]$DatabaseUser = "araras",
     [string]$DatabasePassword,
     [switch]$EnableArpaCollector,
     [string]$ArpaHost = "192.168.0.4",
@@ -60,7 +60,7 @@ function Assert-CleanTarget {
 
 function Resolve-PackageRoot {
     $candidate = Resolve-Path (Join-Path $PSScriptRoot "..") -ErrorAction Stop
-    if (-not (Test-Path -LiteralPath (Join-Path $candidate.Path "payload\SyncAgent\SyncAgent.exe"))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $candidate.Path "payload\Sync\Agent\SyncAgent.exe"))) {
         throw "Execute este script a partir do pacote artifacts\sync-agent-installer ou do bundle extraido."
     }
 

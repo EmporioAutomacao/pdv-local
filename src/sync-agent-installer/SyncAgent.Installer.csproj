@@ -8,4 +8,13 @@
     <RootNamespace>SyncAgent.Installer</RootNamespace>
     <AssemblyName>SyncAgent.Installer</AssemblyName>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Gerado por infra\windows\build-sync-agent-single-file-installer.ps1. Ausente em builds normais de desenvolvimento. -->
+    <EmbeddedResource Include="EmbeddedPayload\*.zip" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+  </ItemGroup>
 </Project>

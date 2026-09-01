@@ -83,12 +83,20 @@ public sealed class ErpActivationClient
                 "application/json")
         };
 
-        using var validateResponse = await client.SendAsync(validateHttpRequest, timeout.Token);
-
-        if (!validateResponse.IsSuccessStatusCode)
+        var (validateResponse, validateNetworkError) = await SendActivationRequestAsync(
+            client, validateHttpRequest, timeout.Token, cancellationToken);
+        if (validateNetworkError is not null)
         {
-            var error = await ReadErrorAsync(validateResponse, timeout.Token);
-            return new ActivationResult(false, error.Error, error.Message, null);
+            return validateNetworkError;
+        }
+
+        using (validateResponse)
+        {
+            if (!validateResponse!.IsSuccessStatusCode)
+            {
+                var error = await ReadErrorAsync(validateResponse, timeout.Token);
+                return new ActivationResult(false, error.Error, error.Message, null);
+            }
         }
 
         var completeRequest = new ActivationCompleteRequest(
@@ -106,8 +114,15 @@ public sealed class ErpActivationClient
                 "application/json")
         };
 
-        using var completeResponse = await client.SendAsync(completeHttpRequest, timeout.Token);
-        if (completeResponse.StatusCode != System.Net.HttpStatusCode.Created)
+        var (completeResponse, completeNetworkError) = await SendActivationRequestAsync(
+            client, completeHttpRequest, timeout.Token, cancellationToken);
+        if (completeNetworkError is not null)
+        {
+            return completeNetworkError;
+        }
+
+        using var completeResponseScope = completeResponse;
+        if (completeResponse!.StatusCode != System.Net.HttpStatusCode.Created)
         {
             var error = await ReadErrorAsync(completeResponse, timeout.Token);
             return new ActivationResult(false, error.Error, error.Message, null);
@@ -221,6 +236,38 @@ public sealed class ErpActivationClient
 
         await _provisioningStore.SaveAsync(updatedCredentials, timeout.Token);
         return new TokenRefreshResult(true, true, null);
+    }
+
+    private static async Task<(HttpResponseMessage? Response, ActivationResult? Error)> SendActivationRequestAsync(
+        HttpClient client,
+        HttpRequestMessage request,
+        CancellationToken timeoutToken,
+        CancellationToken userCancellationToken)
+    {
+        try
+        {
+            return (await client.SendAsync(request, timeoutToken), null);
+        }
+        catch (OperationCanceledException) when (userCancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return (null, new ActivationResult(
+                false,
+                "activation_timeout",
+                "O ERP nao respondeu a tempo. Verifique a conexao com o ERP e tente de novo.",
+                null));
+        }
+        catch (HttpRequestException ex)
+        {
+            return (null, new ActivationResult(
+                false,
+                "erp_unreachable",
+                $"Nao foi possivel conectar ao ERP nesta URL. Detalhe: {ex.Message}",
+                null));
+        }
     }
 
     private static async Task<ActivationError> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)

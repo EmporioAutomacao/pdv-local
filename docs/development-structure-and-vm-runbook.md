@@ -128,6 +128,17 @@ D:\GitHub\erp\venv\Scripts\python.exe D:\GitHub\erp\manage.py test sync_api.test
 
 ## VM Windows de homologacao
 
+> **Nomenclatura (2026-08):** o instalador/empacotamento passaram a usar
+> `C:\Program Files\AraraSuite.com.br\` (`PDV\` e `Sync\Agent\`/`Sync\Tray\`
+> como subpastas) e o servico Windows `AraraSuiteSync` (nome de exibicao
+> `AraraSuite Sync`) como padrao para **instalacoes novas**. A VM abaixo foi
+> instalada antes dessa mudanca e nao foi migrada (decisao explicita — sem
+> migracao automatica de instalacoes existentes), entao continua em
+> `C:\Program Files\PDVLocal\` com o servico `PDV Local Sync Agent` ate ser
+> reinstalada. Os comandos desta secao refletem o estado real dessa VM
+> especifica; para uma instalacao nova, troque os caminhos/nome do servico
+> pelos novos.
+
 | Item | Valor atual |
 | --- | --- |
 | Nome observado | `ERP` |
@@ -135,8 +146,8 @@ D:\GitHub\erp\venv\Scripts\python.exe D:\GitHub\erp\manage.py test sync_api.test
 | Protocolo | WinRM HTTP |
 | Porta | `5985` |
 | Usuario operacional | `codex_sync` |
-| Servico SyncAgent | `PDV Local Sync Agent` |
-| Instalacao SyncAgent | `C:\Program Files\PDVLocal\SyncAgent` |
+| Servico SyncAgent (nesta VM) | `PDV Local Sync Agent` |
+| Instalacao SyncAgent (nesta VM) | `C:\Program Files\PDVLocal\SyncAgent` |
 | Dashboard local na VM | `http://127.0.0.1:47891/` |
 | Banco local SyncAgent | PostgreSQL 17 + pgvector 0.8.0 |
 

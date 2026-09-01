@@ -8,7 +8,7 @@ public partial class App : Application
 {
     private static readonly string CrashLogPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "PDVLocal", "pdvapp-crash.log");
+            "AraraSuite.com.br", "pdvapp-crash.log");
 
     protected override void OnStartup(StartupEventArgs e)
     {

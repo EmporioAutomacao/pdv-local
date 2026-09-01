@@ -27,6 +27,8 @@ public sealed class ArpaProdutoPayloadNormalizer : IArpaPayloadNormalizer
             "codigo_barras",
             JsonPayloadReader.ReadFirstString(sourcePayload, "codigodebarras", "codigo_barras", "ean", "gtin"));
         JsonPayloadReader.AddIfPresent(normalized, "ativo", JsonPayloadReader.ReadBoolean(sourcePayload, "ativo"));
+        JsonPayloadReader.AddIfPresent(normalized, "custo", JsonPayloadReader.ReadDecimal(sourcePayload, "precocusto"));
+        JsonPayloadReader.AddIfPresent(normalized, "preco_venda", JsonPayloadReader.ReadDecimal(sourcePayload, "precovenda"));
 
         return normalized;
     }

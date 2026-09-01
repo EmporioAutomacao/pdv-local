@@ -179,7 +179,7 @@ Git. Nao colar o token em chamados, prints ou logs.
 5. Validar servico:
 
 ```powershell
-Get-Service "PDV Local Sync Agent"
+Get-Service "AraraSuiteSync"
 Invoke-RestMethod http://127.0.0.1:47891/status
 ```
 
@@ -262,8 +262,8 @@ Rollback padrao preserva o banco local.
 Validar apos rollback:
 
 ```powershell
-Get-Service "PDV Local Sync Agent" -ErrorAction SilentlyContinue
-Test-Path "C:\Program Files\PDVLocal"
+Get-Service "AraraSuiteSync" -ErrorAction SilentlyContinue
+Test-Path "C:\Program Files\AraraSuite.com.br"
 ```
 
 O banco `pdv_sync` deve ser preservado ate a engenharia autorizar remocao ou

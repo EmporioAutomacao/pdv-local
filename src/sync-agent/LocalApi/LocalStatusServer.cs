@@ -8,6 +8,7 @@ using SyncAgent.Configuration;
 using SyncAgent.Persistence;
 using SyncAgent.Provisioning;
 using SyncAgent.Runtime;
+using SyncAgent.Update;
 
 namespace SyncAgent.LocalApi;
 
@@ -24,30 +25,64 @@ public sealed class LocalStatusServer : BackgroundService
     private const string HelpPath = "/help";
     private const string StatusPath = "/status";
 
+    private static readonly string[] PlaceholderErpUrls =
+    {
+        "https://localhost:5001",
+        "http://127.0.0.1",
+        "http://localhost",
+    };
+
+    private static readonly HashSet<string> TerminalActivationErrorCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "activation_code_used",
+        "activation_code_expired",
+        "activation_code_revoked",
+        "activation_code_not_found",
+        "already_provisioned",
+        "activation_code_required",
+        "tenant_invalid",
+    };
+
     private readonly ILogger<LocalStatusServer> _logger;
     private readonly IOptionsMonitor<SyncAgentOptions> _options;
+    private readonly IOptionsMonitor<SyncAgentProvisioningOptions> _provisioningOptions;
     private readonly EffectiveSyncAgentConfigurationProvider _effectiveConfigProvider;
     private readonly ErpActivationClient _erpActivationClient;
     private readonly LocalSyncStore _localStore;
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
+    private readonly SelfUpdater _selfUpdater;
+    private readonly UpdateProgressState _updateProgress;
+
+    // Pre-preenchimento da tela /setup entre tentativas. A URL do ERP nao e segredo
+    // e tambem e persistida em disco; o codigo de ativacao fica apenas aqui em
+    // memoria e some no sucesso ou em erro terminal de codigo.
+    private readonly object _setupHintLock = new();
+    private string? _lastErpApiBaseUrlHint;
+    private string? _pendingActivationCodeHint;
 
     public LocalStatusServer(
         ILogger<LocalStatusServer> logger,
         IOptionsMonitor<SyncAgentOptions> options,
+        IOptionsMonitor<SyncAgentProvisioningOptions> provisioningOptions,
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
         ErpActivationClient erpActivationClient,
         LocalSyncStore localStore,
         ManualSyncSignal manualSyncSignal,
-        SyncAgentRuntimeState runtimeState)
+        SyncAgentRuntimeState runtimeState,
+        SelfUpdater selfUpdater,
+        UpdateProgressState updateProgress)
     {
         _logger = logger;
         _options = options;
+        _provisioningOptions = provisioningOptions;
         _effectiveConfigProvider = effectiveConfigProvider;
         _erpActivationClient = erpActivationClient;
         _localStore = localStore;
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
+        _selfUpdater = selfUpdater;
+        _updateProgress = updateProgress;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -153,6 +188,47 @@ public sealed class LocalStatusServer : BackgroundService
                 return;
             }
 
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/update-now")
+            {
+                if (_updateProgress.IsInProgress)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.Conflict,
+                        new { accepted = false, message = "Ja existe uma atualizacao em andamento." },
+                        cancellationToken);
+                    return;
+                }
+
+                _ = Task.Run(() => _selfUpdater.CheckAndApplyLatestAsync(CancellationToken.None));
+
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.Accepted,
+                    new { accepted = true, message = "Busca pela versao mais recente iniciada." },
+                    cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == "/update-status")
+            {
+                var snapshot = _updateProgress.Snapshot();
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    new
+                    {
+                        status = snapshot.Status.ToString(),
+                        percent = snapshot.Percent,
+                        message = snapshot.Message,
+                        target_version = snapshot.TargetVersion,
+                        error = snapshot.Error,
+                        updated_at_utc = snapshot.UpdatedAtUtc
+                    },
+                    cancellationToken);
+                return;
+            }
+
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/pdv-sales/reprocess")
             {
                 await HandlePdvSaleReprocessAsync(context, cancellationToken);
@@ -240,7 +316,7 @@ public sealed class LocalStatusServer : BackgroundService
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
               <meta http-equiv="refresh" content="15">
-              <title>PDV Local Sync Agent</title>
+              <title>AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
                 main { max-width: 960px; margin: 0 auto; }
@@ -264,7 +340,7 @@ public sealed class LocalStatusServer : BackgroundService
             </head>
             <body>
               <main>
-                <h1>PDV Local Sync Agent</h1>
+                <h1>AraraSuite Sync</h1>
                 <p class="muted">Dashboard local. Atualiza automaticamente a cada 15 segundos.</p>
                 {{LocalNavHtml(DashboardPath)}}
                 <div class="grid">
@@ -318,7 +394,7 @@ public sealed class LocalStatusServer : BackgroundService
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>Ajuda - PDV Local Sync Agent</title>
+              <title>Ajuda - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; line-height: 1.5; }
                 main { max-width: 980px; margin: 0 auto; }
@@ -368,7 +444,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/status" -Method Get
             Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/sync-now" -Method Post
             Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/check-update" -Method Post
-            Get-Service "PDV Local Sync Agent"</pre>
+            Get-Service "AraraSuiteSync"</pre>
                 </section>
 
                 <section class="panel">
@@ -409,8 +485,25 @@ public sealed class LocalStatusServer : BackgroundService
                 </section>
 
                 <section class="panel">
-                  <h2>Atualizacao automatica</h2>
-                  <p>O operador do ERP pode enviar uma atualizacao remota sem acesso direto a esta maquina.</p>
+                  <h2>Atualizacao self-service (botao na bandeja)</h2>
+                  <p>O usuario pode atualizar a maquina para a versao mais recente publicada a qualquer momento, sem depender do ERP agendar nada.</p>
+                  <table>
+                    <tr><th>Etapa</th><th>Descricao</th></tr>
+                    <tr><td>1. Bandeja</td><td>Clique com o botao direito no icone da bandeja e escolha <strong>Atualizar App</strong>.</td></tr>
+                    <tr><td>2. Busca</td><td>O agente consulta o ERP pela versao mais recente publicada (<code>is_current</code>), independente de qualquer agendamento administrativo pendente.</td></tr>
+                    <tr><td>3. Progresso</td><td>Uma janela com barra de progresso acompanha download, verificacao de SHA256 e aplicacao em tempo real.</td></tr>
+                    <tr><td>4. Aplicacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico (mesmo mecanismo do fluxo administrativo, incluindo rollback automatico).</td></tr>
+                    <tr><td>5. Retorno</td><td>Ao concluir, a bandeja reabre sozinha e mostra um aviso "Atualizacao concluida".</td></tr>
+                  </table>
+                  <p style="margin-top:10px;">Se a versao instalada ja for a mais recente, o agente informa e nao baixa nada.</p>
+                  <p>Endpoints locais usados por esse fluxo:</p>
+                  <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-now" -Method Post
+            Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-status" -Method Get</pre>
+                </section>
+
+                <section class="panel">
+                  <h2>Atualizacao administrativa (agendada pelo ERP)</h2>
+                  <p>O operador do ERP pode enviar uma atualizacao remota para uma versao especifica, sem acesso direto a esta maquina.</p>
                   <table>
                     <tr><th>Etapa</th><th>Descricao</th></tr>
                     <tr><td>1. Pacote</td><td>O build script registra o pacote automaticamente em <strong>API de Sincronizacao &gt; Pacotes de atualizacao</strong> ao gerar o ZIP.</td></tr>
@@ -420,24 +513,29 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><td>5. Atualizacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico.</td></tr>
                     <tr><td>6. Rollback</td><td>Se o servico nao iniciar, o script restaura o backup automaticamente.</td></tr>
                   </table>
-                  <p style="margin-top:10px;">O PDV App encerra durante a atualizacao. O tempo de interrupcao e inferior a 60 segundos.</p>
-                  <p>Para solicitar verificacao imediata sem esperar o proximo ciclo:</p>
+                  <p style="margin-top:10px;">O PDV App e a bandeja encerram durante a atualizacao (qualquer um dos dois fluxos). O tempo de interrupcao e inferior a 60 segundos. A bandeja reabre sozinha ao final.</p>
+                  <p>Para solicitar verificacao imediata do agendamento administrativo (sem esperar o proximo ciclo, e sem buscar a ultima versao publicada):</p>
                   <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/check-update" -Method Post</pre>
                   <p>Ou use o botao <strong>Verificar atualizacao</strong> em Detalhes Tecnicos no PDV App.</p>
                   <p>Log de atualizacao no Windows Event Log:</p>
-                  <pre>Get-EventLog -LogName Application -Source "PDV Local Self-Update" -Newest 20</pre>
+                  <pre>Get-EventLog -LogName Application -Source "AraraSuite Sync Update" -Newest 20</pre>
+                </section>
+
+                <section class="panel">
+                  <h2>Atualizacao manual (sem rede ate o ERP)</h2>
+                  <p>O mesmo instalador usado para instalar do zero (<code>PdvLocalInstaller-vX.Y.Z.exe</code>) detecta uma instalacao existente e abre em modo <strong>Atualizar</strong>, aplicando o pacote embutido nele mesmo (util para levar por pendrive quando a maquina nao tem acesso ao ERP no momento, ou quando o servico nao esta rodando).</p>
                 </section>
 
                 <section class="panel">
                   <h2>Arquivos e servico Windows</h2>
                   <table>
                     <tr><th>Item</th><th>Caminho/valor</th></tr>
-                    <tr><td>Servico</td><td><code>PDV Local Sync Agent</code></td></tr>
-                    <tr><td>Instalacao padrao</td><td><code>C:\Program Files\PDVLocal</code></td></tr>
+                    <tr><td>Servico (Get-Service)</td><td><code>AraraSuiteSync</code></td></tr>
+                    <tr><td>Instalacao padrao</td><td><code>C:\Program Files\AraraSuite.com.br</code></td></tr>
                     <tr><td>API local</td><td><code>http://127.0.0.1:{{options.LocalStatusPort}}</code></td></tr>
-                    <tr><td>Script de atualizacao</td><td><code>C:\Program Files\PDVLocal\SyncAgent\self-update.ps1</code></td></tr>
-                    <tr><td>Backup de versoes</td><td><code>C:\Program Files\PDVLocal\Backups\&lt;versao&gt;\</code></td></tr>
-                    <tr><td>Versao instalada</td><td><code>C:\Program Files\PDVLocal\SyncAgent\VERSION</code></td></tr>
+                    <tr><td>Script de atualizacao</td><td><code>C:\Program Files\AraraSuite.com.br\Sync\Agent\self-update.ps1</code></td></tr>
+                    <tr><td>Backup de versoes</td><td><code>C:\Program Files\AraraSuite.com.br\Backups\&lt;versao&gt;\</code></td></tr>
+                    <tr><td>Versao instalada</td><td><code>C:\Program Files\AraraSuite.com.br\Sync\Agent\VERSION</code></td></tr>
                     <tr><td>Documentacao tecnica</td><td><code>docs/sync-agent-sprint-1-manual.md</code></td></tr>
                   </table>
                 </section>
@@ -489,7 +587,7 @@ public sealed class LocalStatusServer : BackgroundService
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
               <meta http-equiv="refresh" content="15">
-              <title>Logs - PDV Local Sync Agent</title>
+              <title>Logs - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
                 main { max-width: 1180px; margin: 0 auto; }
@@ -553,16 +651,39 @@ public sealed class LocalStatusServer : BackgroundService
     private async Task HandleSetupActivationAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
         var form = await ReadFormAsync(context.Request, cancellationToken);
-        var erpApiBaseUrl = form.GetValueOrDefault("erp_api_base_url", string.Empty);
-        var activationCode = form.GetValueOrDefault("activation_code", string.Empty);
+        var erpApiBaseUrl = form.GetValueOrDefault("erp_api_base_url", string.Empty).Trim();
+        var activationCode = form.GetValueOrDefault("activation_code", string.Empty).Trim();
 
         var result = await _erpActivationClient.ActivateAsync(erpApiBaseUrl, activationCode, cancellationToken);
+
+        // A URL do ERP nao e segredo: guarda em memoria e em disco para as proximas
+        // tentativas (inclusive apos reinicio do servico).
+        if (!string.IsNullOrWhiteSpace(erpApiBaseUrl))
+        {
+            lock (_setupHintLock)
+            {
+                _lastErpApiBaseUrlHint = erpApiBaseUrl;
+            }
+
+            PersistErpUrlHint(erpApiBaseUrl);
+        }
+
+        var codeIsTerminal = !string.IsNullOrWhiteSpace(result.Code)
+            && TerminalActivationErrorCodes.Contains(result.Code);
+
+        lock (_setupHintLock)
+        {
+            _pendingActivationCodeHint = result.Succeeded || codeIsTerminal ? null : activationCode;
+        }
+
         if (result.Succeeded)
         {
             _manualSyncSignal.TrySignal();
         }
 
-        await WriteSetupAsync(context.Response, result, cancellationToken);
+        var echoUrl = result.Succeeded ? null : erpApiBaseUrl;
+        var echoCode = result.Succeeded || codeIsTerminal ? null : activationCode;
+        await WriteSetupAsync(context.Response, result, echoUrl, echoCode, cancellationToken);
     }
 
     private async Task HandlePdvSaleReprocessAsync(HttpListenerContext context, CancellationToken cancellationToken)
@@ -603,11 +724,30 @@ public sealed class LocalStatusServer : BackgroundService
         HttpListenerResponse response,
         ActivationResult? activationResult,
         CancellationToken cancellationToken)
+        => await WriteSetupAsync(response, activationResult, null, null, cancellationToken);
+
+    private async Task WriteSetupAsync(
+        HttpListenerResponse response,
+        ActivationResult? activationResult,
+        string? submittedErpApiBaseUrl,
+        string? submittedActivationCode,
+        CancellationToken cancellationToken)
     {
         var effectiveOptions = _effectiveConfigProvider.GetCurrent();
         var messageHtml = activationResult is null
             ? string.Empty
-            : $"""<div class="message {(activationResult.Succeeded ? "okbox" : "warnbox")}">{Html(activationResult.Message)}</div>""";
+            : BuildActivationMessageHtml(activationResult);
+
+        var estadoAtual = effectiveOptions.NeedsReactivation
+            ? "reconexao necessaria"
+            : effectiveOptions.IsProvisioned ? "ativado" : "aguardando ativacao";
+
+        var prefillUrl = ResolvePrefillErpUrl(submittedErpApiBaseUrl, effectiveOptions);
+        string prefillCode;
+        lock (_setupHintLock)
+        {
+            prefillCode = submittedActivationCode ?? _pendingActivationCodeHint ?? string.Empty;
+        }
 
         var reactivationNoticeHtml = effectiveOptions.IsProvisioned && effectiveOptions.NeedsReactivation
             ? $$"""
@@ -638,11 +778,12 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>{{(effectiveOptions.IsProvisioned ? "Reconectar ao ERP" : "Ativar conexao com o ERP")}}</h2>
                   <form method="post" action="/setup/activate">
                     <label for="erp_api_base_url">URL do ERP</label>
-                    <input id="erp_api_base_url" name="erp_api_base_url" type="url" required placeholder="https://erp.exemplo.com" value="{{Html(effectiveOptions.ErpApiBaseUrl)}}">
+                    <input id="erp_api_base_url" name="erp_api_base_url" type="url" required placeholder="https://erp.exemplo.com" value="{{Html(prefillUrl)}}">
                     <label for="activation_code">Codigo de ativacao</label>
-                    <input id="activation_code" name="activation_code" type="text" required autocomplete="off">
+                    <input id="activation_code" name="activation_code" type="text" required autocomplete="off" value="{{Html(prefillCode)}}">
                     <button type="submit">{{(effectiveOptions.IsProvisioned ? "Reconectar" : "Conectar")}}</button>
                   </form>
+                  <p class="muted">A URL do ERP fica salva para a proxima vez. O codigo de ativacao e de uso unico e nunca e gravado em disco.</p>
                 </section>
                 """;
 
@@ -652,7 +793,7 @@ public sealed class LocalStatusServer : BackgroundService
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>Ativacao - PDV Local Sync Agent</title>
+              <title>Ativacao - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
                 main { max-width: 760px; margin: 0 auto; }
@@ -677,6 +818,7 @@ public sealed class LocalStatusServer : BackgroundService
               <main>
                 <h1>Ativacao do Sync Agent</h1>
                 <p class="muted">Conecte esta instalacao ao ERP usando um codigo de ativacao.</p>
+                <p class="muted">Estado atual: <strong>{{Html(estadoAtual)}}</strong></p>
                 {{LocalNavHtml(SetupPath)}}
                 {{messageHtml}}
                 {{reactivationNoticeHtml}}
@@ -698,6 +840,164 @@ public sealed class LocalStatusServer : BackgroundService
         response.ContentLength64 = bytes.Length;
         await response.OutputStream.WriteAsync(bytes, cancellationToken);
         response.Close();
+    }
+
+    private string ResolvePrefillErpUrl(string? submitted, EffectiveSyncAgentConfiguration effectiveOptions)
+    {
+        if (!string.IsNullOrWhiteSpace(submitted))
+        {
+            return submitted.Trim();
+        }
+
+        lock (_setupHintLock)
+        {
+            if (!string.IsNullOrWhiteSpace(_lastErpApiBaseUrlHint))
+            {
+                return _lastErpApiBaseUrlHint!;
+            }
+        }
+
+        var fromDisk = ReadErpUrlHintFromDisk();
+        if (!string.IsNullOrWhiteSpace(fromDisk))
+        {
+            return fromDisk!;
+        }
+
+        if (effectiveOptions.IsProvisioned && !string.IsNullOrWhiteSpace(effectiveOptions.ErpApiBaseUrl))
+        {
+            return effectiveOptions.ErpApiBaseUrl;
+        }
+
+        var configured = _options.CurrentValue.ErpApiBaseUrl;
+        if (!string.IsNullOrWhiteSpace(configured) && !IsPlaceholderErpUrl(configured))
+        {
+            return configured;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsPlaceholderErpUrl(string url)
+    {
+        var trimmed = url.Trim().TrimEnd('/');
+        foreach (var placeholder in PlaceholderErpUrls)
+        {
+            if (string.Equals(placeholder, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private string? ResolveSetupHintFilePath()
+    {
+        var configured = _provisioningOptions.CurrentValue.SetupHintFile;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        var protectedFile = _provisioningOptions.CurrentValue.ProtectedFile;
+        if (string.IsNullOrWhiteSpace(protectedFile))
+        {
+            return null;
+        }
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(protectedFile));
+        return string.IsNullOrWhiteSpace(directory)
+            ? "setup-hint.json"
+            : Path.Combine(directory, "setup-hint.json");
+    }
+
+    private string? ReadErpUrlHintFromDisk()
+    {
+        try
+        {
+            var path = ResolveSetupHintFilePath();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return null;
+            }
+
+            var node = JsonNode.Parse(File.ReadAllText(path));
+            var url = node?["erpApiBaseUrl"]?.GetValue<string>();
+            return string.IsNullOrWhiteSpace(url) ? null : url;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Falha ao ler o hint da URL do ERP para a tela de ativacao.");
+            return null;
+        }
+    }
+
+    private void PersistErpUrlHint(string erpApiBaseUrl)
+    {
+        try
+        {
+            var path = ResolveSetupHintFilePath();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var json = JsonSerializer.Serialize(new { erpApiBaseUrl = erpApiBaseUrl.Trim() }, JsonOptions);
+            File.WriteAllText(path, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Falha ao gravar o hint da URL do ERP para a tela de ativacao.");
+        }
+    }
+
+    private static string BuildActivationMessageHtml(ActivationResult result)
+    {
+        if (result.Succeeded)
+        {
+            return "<div class=\"message okbox\">&#9989; Ativacao aceita pelo ERP. Sincronizacao iniciada."
+                + $"<br><span style=\"font-weight:400\">{Html(result.Message)}</span></div>";
+        }
+
+        var codePrefix = string.IsNullOrWhiteSpace(result.Code)
+            ? string.Empty
+            : $"<code>{Html(result.Code)}</code> &mdash; ";
+        var hint = ActivationErrorHint(result.Code);
+        var hintHtml = string.IsNullOrEmpty(hint)
+            ? string.Empty
+            : $"<br><span style=\"font-weight:400\">{Html(hint)}</span>";
+        return $"<div class=\"message warnbox\">{codePrefix}{Html(result.Message)}{hintHtml}</div>";
+    }
+
+    private static string ActivationErrorHint(string? code)
+    {
+        if (code is null)
+        {
+            return string.Empty;
+        }
+
+        return code switch
+        {
+            "activation_code_used" => "Esse codigo ja foi consumido. Gere um novo em API de Sincronizacao > Codigos de Ativacao no ERP e, se sobrar uma instalacao orfa, remova-a antes.",
+            "activation_code_expired" => "O codigo expirou. Gere um novo no ERP e use em seguida.",
+            "activation_code_revoked" => "O codigo foi revogado. Gere um novo no ERP.",
+            "activation_code_not_found" => "Codigo nao encontrado neste ERP. Confira se copiou o codigo inteiro e se a URL do ERP e a do cliente certo.",
+            "already_provisioned" => "Esta instalacao ja esta ativada. Reconexao exige acao administrativa de reprovisionamento.",
+            "invalid_erp_url" => "Confira o endereco do ERP (fora de localhost precisa comecar com https://).",
+            "erp_unreachable" => "O agente nao alcancou o ERP. Verifique rede, firewall e se a URL esta correta.",
+            "activation_timeout" => "O ERP demorou para responder. Verifique a conexao e tente de novo.",
+            "invalid_response" => "O ERP respondeu em formato inesperado. Confira a versao do ERP.",
+            "tenant_invalid" => "O ERP nao tem o ID do cliente do CP configurado. Ajuste em Configuracoes > Plano / Aplicar Configuracoes no CP.",
+            _ when code.StartsWith("http_", StringComparison.OrdinalIgnoreCase)
+                => "URL do ERP correta? Pode faltar a rota /v1/sync neste dominio.",
+            _ => string.Empty,
+        };
     }
 
     private static async Task<Dictionary<string, string>> ReadFormAsync(

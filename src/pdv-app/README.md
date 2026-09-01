@@ -111,7 +111,7 @@ Funcionalidades ja implementadas:
 
 Para leitura completa do status:
 
-- o servico `PDV Local Sync Agent` deve estar rodando e expondo a API local em
+- o servico `AraraSuiteSync` (AraraSuite Sync) deve estar rodando e expondo a API local em
   `http://127.0.0.1:47891`;
 - o PostgreSQL local deve estar acessivel pela connection string configurada.
 
@@ -197,19 +197,19 @@ D:\GitHub\pdv-local\artifacts\pdv-app\tef-provider-boundary\PdvLocal.App.exe
 
 ## Instalacao Windows
 
-O pacote do instalador inclui o payload `payload\PDVApp`.
+O pacote do instalador inclui o payload `payload\PDV`.
 
 Durante a instalacao, o script copia o app para:
 
 ```text
-C:\Program Files\PDVLocal\PDVApp\PdvLocal.App.exe
+C:\Program Files\AraraSuite.com.br\PDV\PdvLocal.App.exe
 ```
 
 Atalhos criados:
 
 ```text
-Desktop publico: PDV Local.lnk
-Menu Iniciar: PDV Local\PDV Local.lnk
+Desktop publico: AraraSuite PDV.lnk
+Menu Iniciar: AraraSuite\AraraSuite PDV.lnk
 ```
 
 ## Limites atuais

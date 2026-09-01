@@ -141,17 +141,17 @@ O instalador:
   `-EnablePostInstallActivation`;
 - importa PFX quando `-PfxPath` for informado;
 - opcionalmente protege a senha read-only do Arpa com DPAPI LocalMachine;
-- copia os artefatos para `C:\Program Files\PDVLocal`;
-- copia o PDV App para `C:\Program Files\PDVLocal\PDVApp`;
+- copia os artefatos para `C:\Program Files\AraraSuite.com.br`;
+- copia o PDV App para `C:\Program Files\AraraSuite.com.br\PDV`;
 - grava `appsettings.json` provisionado do SyncAgent;
 - grava `appsettings.json` provisionado do PDV App;
 - habilita `ErpPdvSnapshot` no SyncAgent instalado para importar operadores do
   ERP para `pdv.operators`;
-- instala/atualiza o Windows Service `PDV Local Sync Agent`;
+- instala/atualiza o Windows Service `AraraSuiteSync` (AraraSuite Sync);
 - configura restart automatico do servico em falha;
 - cria atalho do tray na inicializacao do Windows.
-- cria atalho `PDV Local.lnk` na area de trabalho publica.
-- cria atalho `PDV Local.lnk` no Menu Iniciar.
+- cria atalho `AraraSuite PDV.lnk` na area de trabalho publica.
+- cria atalho `AraraSuite PDV.lnk` no Menu Iniciar.
 
 ## Importacao de operadores do ERP
 
@@ -229,7 +229,7 @@ Esse modo grava:
 {
   "Provisioning": {
     "Enabled": true,
-    "ProtectedFile": "C:\\Program Files\\PDVLocal\\Secrets\\sync-agent-provisioning.dpapi",
+    "ProtectedFile": "C:\\Program Files\\AraraSuite.com.br\\Sync\\Secrets\\sync-agent-provisioning.dpapi",
     "ActivationTimeoutSeconds": 30
   }
 }
@@ -250,7 +250,7 @@ No modo com `-EnableArpaCollector`, o instalador grava a senha do Arpa em
 arquivo protegido por DPAPI:
 
 ```text
-C:\Program Files\PDVLocal\Secrets\arpa-runtime-password.dpapi
+C:\Program Files\AraraSuite.com.br\Sync\Secrets\arpa-runtime-password.dpapi
 ```
 
 O `appsettings.json` do servico aponta para esse arquivo em
@@ -561,7 +561,7 @@ dotnet run --project src/sync-agent/SyncAgent.csproj
 Apos instalar como servico:
 
 ```powershell
-Get-Service "PDV Local Sync Agent"
+Get-Service "AraraSuiteSync"
 Invoke-RestMethod -Uri "http://127.0.0.1:47891/status" -Method Get
 ```
 
@@ -657,24 +657,25 @@ dotnet publish src/sync-agent/SyncAgent.csproj `
   -c Release `
   -r win-x64 `
   --self-contained false `
-  -o C:\Program Files\PDVLocal\SyncAgent
+  -o C:\Program Files\AraraSuite.com.br\Sync\Agent
 ```
 
 Instalacao manual do servico:
 
 ```powershell
-sc.exe create "PDV Local Sync Agent" `
-  binPath= "\"C:\Program Files\PDVLocal\SyncAgent\SyncAgent.exe\"" `
+sc.exe create "AraraSuiteSync" `
+  binPath= "\"C:\Program Files\AraraSuite.com.br\Sync\Agent\SyncAgent.exe\"" `
+  DisplayName= "AraraSuite Sync" `
   start= auto
 
-sc.exe start "PDV Local Sync Agent"
+sc.exe start "AraraSuiteSync"
 ```
 
 Remocao manual:
 
 ```powershell
-sc.exe stop "PDV Local Sync Agent"
-sc.exe delete "PDV Local Sync Agent"
+sc.exe stop "AraraSuiteSync"
+sc.exe delete "AraraSuiteSync"
 ```
 
 ## App de bandeja
@@ -689,7 +690,7 @@ dotnet publish src/sync-agent-tray/SyncAgent.Tray.csproj `
   -c Release `
   -r win-x64 `
   --self-contained false `
-  -o C:\Program Files\PDVLocal\SyncAgentTray
+  -o C:\Program Files\AraraSuite.com.br\Sync\Tray
 ```
 
 O app de bandeja deve iniciar na sessao do usuario, enquanto o `SyncAgent`
@@ -709,7 +710,7 @@ Para remover tambem o atalho do tray:
 .\infra\windows\uninstall-sync-agent.ps1 -RemoveTrayStartup
 ```
 
-Para remover arquivos instalados em `C:\Program Files\PDVLocal`:
+Para remover arquivos instalados em `C:\Program Files\AraraSuite.com.br`:
 
 ```powershell
 .\infra\windows\uninstall-sync-agent.ps1 -RemoveTrayStartup -RemoveFiles

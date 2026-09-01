@@ -1,6 +1,6 @@
 param(
-    [string]$InstallRoot = "C:\Program Files\PDVLocal",
-    [string]$ServiceName = "PDV Local Sync Agent",
+    [string]$InstallRoot = "C:\Program Files\AraraSuite.com.br",
+    [string]$ServiceName = "AraraSuiteSync",
     [switch]$RemoveFiles,
     [switch]$RemoveTrayStartup
 )
@@ -43,12 +43,12 @@ if ($service) {
 
 if ($RemoveTrayStartup) {
     $startupPaths = [System.Collections.Generic.List[string]]::new()
-    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "CommonStartup" -RelativePath "PDV Local Sync Agent Tray.lnk"
-    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "Startup" -RelativePath "PDV Local Sync Agent Tray.lnk"
-    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "CommonDesktopDirectory" -RelativePath "PDV Local.lnk"
-    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "Desktop" -RelativePath "PDV Local.lnk"
-    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "CommonPrograms" -RelativePath "PDV Local\PDV Local.lnk"
-    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "Programs" -RelativePath "PDV Local\PDV Local.lnk"
+    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "CommonStartup" -RelativePath "AraraSuite Sync Tray.lnk"
+    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "Startup" -RelativePath "AraraSuite Sync Tray.lnk"
+    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "CommonDesktopDirectory" -RelativePath "AraraSuite PDV.lnk"
+    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "Desktop" -RelativePath "AraraSuite PDV.lnk"
+    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "CommonPrograms" -RelativePath "AraraSuite\AraraSuite PDV.lnk"
+    Add-SpecialFolderShortcutPath -Paths $startupPaths -FolderName "Programs" -RelativePath "AraraSuite\AraraSuite PDV.lnk"
 
     foreach ($shortcutPath in $startupPaths) {
         if (Test-Path -LiteralPath $shortcutPath) {
@@ -60,7 +60,7 @@ if ($RemoveTrayStartup) {
 
 if ($RemoveFiles) {
     $resolvedInstallRoot = Resolve-Path -LiteralPath $InstallRoot -ErrorAction SilentlyContinue
-    if ($resolvedInstallRoot -and $resolvedInstallRoot.Path -like "*\PDVLocal") {
+    if ($resolvedInstallRoot -and $resolvedInstallRoot.Path -like "*\AraraSuite.com.br") {
         Remove-Item -LiteralPath $resolvedInstallRoot.Path -Recurse -Force
         Write-Host "Files removed: $($resolvedInstallRoot.Path)"
     }

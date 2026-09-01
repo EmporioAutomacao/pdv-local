@@ -15,6 +15,9 @@ obj/
 .secrets/
 artifacts/
 
+# Payload embutido gerado por build-sync-agent-single-file-installer.ps1 (binario grande, nao versionar)
+src/sync-agent-installer/EmbeddedPayload/
+
 # Local codex skill discovery cache/links
 .codex/
 

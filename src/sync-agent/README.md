@@ -64,7 +64,7 @@ Para instalacao Windows sem Docker Desktop, consulte
 `docs/windows-installation.md`.
 
 O Worker esta preparado para rodar como Windows Service com o nome
-`PDV Local Sync Agent`.
+`AraraSuiteSync` (nome de exibicao `AraraSuite Sync`).
 
 ## API local
 
@@ -108,10 +108,15 @@ coluna `Detalhes`. A coluna `Entidade` indica o tipo sincronizado e a coluna
 
 `GET /setup` exibe a ativacao pos-instalacao. Com
 `Provisioning:Enabled=true`, o agente inicia como `not_provisioned` ate receber
-URL do ERP e codigo de ativacao.
+URL do ERP e codigo de ativacao. A URL do ERP informada fica salva
+(`Provisioning:SetupHintFile`, texto puro — nao e segredo) e volta
+pre-preenchida no formulario; o codigo de ativacao so persiste em memoria entre
+tentativas corrigiveis da mesma sessao e nunca vai a disco.
 
 `POST /setup/activate` consome o codigo de ativacao no ERP, recebe credenciais
 tecnicas da maquina e salva em arquivo protegido por DPAPI `LocalMachine`.
+Falha de rede/timeout retorna `erp_unreachable` / `activation_timeout` com
+mensagem legivel na tela (nao HTTP 500).
 
 `POST /sync-now` sinaliza o Worker para executar um ciclo manual sem aguardar o
 proximo intervalo agendado. Quando `ErpDispatcher:Enabled` estiver ativo, esse
@@ -150,7 +155,8 @@ Para ativacao pos-instalacao, habilite:
 {
   "Provisioning": {
     "Enabled": true,
-    "ProtectedFile": "C:\\Program Files\\PDVLocal\\Secrets\\sync-agent-provisioning.dpapi",
+    "ProtectedFile": "C:\\Program Files\\AraraSuite.com.br\\Sync\\Secrets\\sync-agent-provisioning.dpapi",
+    "SetupHintFile": "C:\\Program Files\\AraraSuite.com.br\\Sync\\Secrets\\sync-agent-setup-hint.json",
     "ActivationTimeoutSeconds": 30
   }
 }
@@ -568,6 +574,49 @@ O watermark e salvo em `sync_agent.agent_state` com chave:
 collector.arpa.<Name>.watermark
 ```
 
+### Configuracao remota (via ERP)
+
+Em vez de `ConnectionString`/`Entities` estaticos no `appsettings.json`, o
+coletor pode obter a conexao Arpa Control diretamente do ERP — a mesma
+conexao (`ArpaControlConexao`) ja cadastrada la, sem duplicar credenciais
+localmente:
+
+```json
+{
+  "ArpaCollector": {
+    "Enabled": true,
+    "UseRemoteConfig": true,
+    "RemoteConfigCacheProtectedFile": ".secrets/arpa/remote-config.dpapi",
+    "RemoteConfigRefreshMinutes": 60,
+    "RemoteConfigTimeoutSeconds": 20,
+    "BatchSize": 100
+  }
+}
+```
+
+Requisitos:
+
+- A instalacao precisa ter a capability `arpa_collector` concedida em
+  `activation:complete` (ver `requested_capabilities` em
+  `Provisioning/ErpActivationClient.cs`).
+- A `ArpaControlConexao` correspondente precisa estar vinculada a esta
+  instalacao no ERP (campo `sync_installation`) — sem isso,
+  `GET /v1/sync/agents/{instanceId}/arpa-connection` retorna `404`.
+- `ConnectionString`, `PasswordEnvironmentVariable`, `PasswordFile`,
+  `PasswordProtectedFile` e `Entities` sao ignorados quando
+  `UseRemoteConfig=true`; a conexao e as queries por entidade vem inteiras da
+  resposta do ERP.
+
+Funcionamento: `EffectiveArpaCollectorConfigurationProvider`
+(`Provisioning/EffectiveArpaCollectorConfigurationProvider.cs`) busca a
+configuracao via `ArpaConnectionConfigClient` a cada
+`RemoteConfigRefreshMinutes` e mantem a ultima copia obtida com sucesso em
+cache local protegido por DPAPI (`RemoteConfigCacheProtectedFile`,
+`Provisioning/ArpaRemoteConfigCache.cs`), para que o coletor continue
+rodando com a ultima configuracao conhecida se o ERP ficar temporariamente
+inacessivel. Se nunca houve uma configuracao em cache e o ERP esta
+inacessivel, a coleta e pulada naquela execucao (log de aviso).
+
 ## Normalizadores
 
 O coletor passa o `payload_json` por normalizadores antes de gravar no outbox.
@@ -589,9 +638,17 @@ Payload normalizado de `produto`:
   "codigo_fabrica": "FAB-9",
   "ncm": "12345678",
   "codigo_barras": "789000000001",
-  "ativo": true
+  "ativo": true,
+  "custo": "10.50",
+  "preco_venda": "19.90"
 }
 ```
+
+`nome` so e usado pelo ERP na criacao do produto — atualizacoes de um
+produto ja existente nunca sobrescrevem o nome (gerenciado pelo ERP).
+`custo`/`preco_venda`, quando presentes, sempre sobrescrevem o preco do
+produto na tabela de preco padrao da empresa vinculada a conexao — nao ha
+como editar esses campos pelo ERP em produtos sincronizados pelo Arpa.
 
 Campos de origem aceitos para codigo de barras:
 

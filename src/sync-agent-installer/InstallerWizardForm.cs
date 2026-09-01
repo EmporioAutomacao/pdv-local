@@ -13,7 +13,7 @@ public sealed class InstallerWizardForm : Form
     private readonly Label _title = new() { Dock = DockStyle.Top, Height = 36, Font = new Font("Segoe UI", 14, FontStyle.Bold) };
     private readonly Label _description = new() { Dock = DockStyle.Top, Height = 42, ForeColor = Color.DimGray };
 
-    private readonly TextBox _installRoot = new() { Text = @"C:\Program Files\PDVLocal" };
+    private readonly TextBox _installRoot = new() { Text = @"C:\Program Files\AraraSuite.com.br" };
     private readonly RadioButton _useExistingPostgres = new() { Text = "Usar PostgreSQL 17 ja instalado", Checked = true };
     private readonly RadioButton _installPostgres = new() { Text = "Instalar PostgreSQL 17 automaticamente" };
     private readonly TextBox _postgresInstallRoot = new() { Text = @"C:\Program Files\PostgreSQL\17" };
@@ -26,14 +26,14 @@ public sealed class InstallerWizardForm : Form
     private readonly NumericUpDown _postgresPort = new() { Minimum = 1, Maximum = 65535, Value = 5432 };
     private readonly TextBox _postgresAdminUser = new() { Text = "postgres" };
     private readonly TextBox _postgresAdminPassword = PasswordBox("postgres");
-    private readonly TextBox _databaseName = new() { Text = "pdv_sync" };
-    private readonly TextBox _databaseUser = new() { Text = "pdv_sync" };
+    private readonly TextBox _databaseName = new() { Text = "pdv" };
+    private readonly TextBox _databaseUser = new() { Text = "araras" };
     private readonly TextBox _databasePassword = PasswordBox("pdv_sync");
     private readonly CheckBox _enableArpa = new() { Text = "Habilitar coletor Arpa nesta instalacao" };
     private readonly TextBox _arpaHost = new() { Text = "127.0.0.1" };
     private readonly NumericUpDown _arpaPort = new() { Minimum = 1, Maximum = 65535, Value = 5432 };
     private readonly TextBox _arpaDatabase = new() { Text = "control" };
-    private readonly TextBox _arpaUsername = new() { Text = "sync_agent_anapolis_ro" };
+    private readonly TextBox _arpaUsername = new() { Text = "ararasuite_sync_ro" };
     private readonly TextBox _arpaPassword = PasswordBox("postgres");
     private readonly NumericUpDown _arpaBatchSize = new() { Minimum = 1, Maximum = 50000, Value = 5000 };
     private readonly Button _prepareArpaViews = new() { Text = "Preparar views", Width = 140 };
@@ -47,10 +47,12 @@ public sealed class InstallerWizardForm : Form
     private readonly Label _postgresStatus = new() { AutoSize = true, ForeColor = Color.DimGray };
 
     private int _step;
+    private readonly string? _payloadRoot;
 
-    public InstallerWizardForm()
+    public InstallerWizardForm(string? payloadRoot = null)
     {
-        Text = "PDV Local Sync Agent - Instalador";
+        _payloadRoot = payloadRoot;
+        Text = "AraraSuite - Instalador";
         Width = 820;
         Height = 620;
         MinimumSize = new Size(760, 540);
@@ -174,7 +176,7 @@ public sealed class InstallerWizardForm : Form
 
     private void RenderWelcome()
     {
-        SetHeader("Bem-vindo", "Este assistente instala o PDV Local, SyncAgent e deixa a ativacao do ERP para o dashboard local.");
+        SetHeader("Bem-vindo", "Este assistente instala o PDV e o Sync da AraraSuite e deixa a ativacao do ERP para o dashboard local.");
         var admin = IsAdministrator();
         var text = new Label
         {
@@ -619,6 +621,12 @@ public sealed class InstallerWizardForm : Form
 
     private string ResolveArpaViewsSqlFile()
     {
+        var fromPayload = ResolveUnderPayloadRoot("infra", "arpa", "sync-export-views-anapolis.initial-load.sql");
+        if (fromPayload is not null)
+        {
+            return fromPayload;
+        }
+
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
@@ -693,6 +701,12 @@ $$;
         }
 
         candidates.Add(Path.Combine(_postgresInstallRoot.Text, "bin", "psql.exe"));
+
+        var fromPayload = ResolveUnderPayloadRoot("payload", "PostgreSQL17", "pgsql", "bin", "psql.exe");
+        if (fromPayload is not null)
+        {
+            candidates.Add(fromPayload);
+        }
 
         var baseDir = AppContext.BaseDirectory;
         candidates.Add(Path.GetFullPath(Path.Combine(baseDir, "..", "..", "payload", "PostgreSQL17", "pgsql", "bin", "psql.exe")));
@@ -787,8 +801,25 @@ $$;
         return true;
     }
 
+    private string? ResolveUnderPayloadRoot(params string[] relativeParts)
+    {
+        if (_payloadRoot is null)
+        {
+            return null;
+        }
+
+        var candidate = Path.GetFullPath(Path.Combine([_payloadRoot, .. relativeParts]));
+        return File.Exists(candidate) ? candidate : null;
+    }
+
     private string ResolveInstallScript()
     {
+        var fromPayload = ResolveUnderPayloadRoot("infra", "install-sync-agent.ps1");
+        if (fromPayload is not null)
+        {
+            return fromPayload;
+        }
+
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
@@ -808,6 +839,12 @@ $$;
 
     private string ResolvePostgresInstallScript()
     {
+        var fromPayload = ResolveUnderPayloadRoot("infra", "install-postgresql17-local.ps1");
+        if (fromPayload is not null)
+        {
+            return fromPayload;
+        }
+
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
@@ -827,6 +864,12 @@ $$;
 
     private string ResolveVcRuntimeInstallScript()
     {
+        var fromPayload = ResolveUnderPayloadRoot("infra", "install-vc-redist-x64.ps1");
+        if (fromPayload is not null)
+        {
+            return fromPayload;
+        }
+
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
@@ -847,6 +890,12 @@ $$;
 
     private string ResolveDotNetRuntimeInstallScript()
     {
+        var fromPayload = ResolveUnderPayloadRoot("infra", "install-dotnet8-desktop-runtime.ps1");
+        if (fromPayload is not null)
+        {
+            return fromPayload;
+        }
+
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
@@ -866,6 +915,12 @@ $$;
 
     private string ResolveValidationScript()
     {
+        var fromPayload = ResolveUnderPayloadRoot("infra", "test-sync-agent-clean-install.ps1");
+        if (fromPayload is not null)
+        {
+            return fromPayload;
+        }
+
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {

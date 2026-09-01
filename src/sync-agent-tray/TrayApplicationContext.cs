@@ -1,5 +1,6 @@
 using SyncAgent.Tray.LocalApi;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace SyncAgent.Tray;
 
@@ -30,6 +31,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _reconciliationItem = new ToolStripMenuItem("Reconciliacao: -") { Enabled = false };
 
         var syncNowItem = new ToolStripMenuItem("Sincronizar agora", null, async (_, _) => await SyncNowAsync());
+        var updateAppItem = new ToolStripMenuItem("Atualizar App", null, (_, _) => OpenUpdateProgress());
         var openHelpItem = new ToolStripMenuItem("Abrir ajuda", null, (_, _) => OpenHelp());
         var copyInstanceItem = new ToolStripMenuItem("Copiar ID da instalacao", null, (_, _) => CopyInstanceId());
         var refreshItem = new ToolStripMenuItem("Atualizar status", null, async (_, _) => await RefreshStatusAsync());
@@ -38,7 +40,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
-            Text = "PDV Local Sync Agent",
+            Text = "AraraSuite Sync",
             Visible = true,
             ContextMenuStrip = new ContextMenuStrip()
         };
@@ -54,6 +56,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _reconciliationItem,
             new ToolStripSeparator(),
             syncNowItem,
+            updateAppItem,
             refreshItem,
             openHelpItem,
             copyInstanceItem,
@@ -71,6 +74,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _refreshTimer.Start();
 
         _ = RefreshStatusAsync();
+        ShowJustUpdatedBalloonIfApplicable();
     }
 
     protected override void Dispose(bool disposing)
@@ -104,7 +108,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             {
                 _notifyIcon.ShowBalloonTip(
                     3000,
-                    "PDV Local Sync Agent",
+                    "AraraSuite Sync",
                     $"Online. Pendentes: {_lastStatus.PendingOutboxEvents}; Dead-letter: {_lastStatus.DeadLetterEvents}",
                     ToolTipIcon.Info);
             }
@@ -121,7 +125,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _notifyIcon.Text = BuildNotifyText("Offline");
             _notifyIcon.ShowBalloonTip(
                 3000,
-                "PDV Local Sync Agent",
+                "AraraSuite Sync",
                 $"Nao foi possivel consultar o servico local: {ex.Message}",
                 ToolTipIcon.Warning);
         }
@@ -134,7 +138,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             var response = await _statusClient.SyncNowAsync();
             _notifyIcon.ShowBalloonTip(
                 3000,
-                "PDV Local Sync Agent",
+                "AraraSuite Sync",
                 response.Message,
                 ToolTipIcon.Info);
 
@@ -144,10 +148,85 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             _notifyIcon.ShowBalloonTip(
                 3000,
-                "PDV Local Sync Agent",
+                "AraraSuite Sync",
                 $"Falha ao sinalizar sincronizacao: {ex.Message}",
                 ToolTipIcon.Error);
         }
+    }
+
+    private void OpenUpdateProgress()
+    {
+        using var form = new UpdateProgressForm(_statusClient);
+        form.ShowDialog();
+        _ = RefreshStatusAsync();
+    }
+
+    private void ShowJustUpdatedBalloonIfApplicable()
+    {
+        try
+        {
+            // SyncAgent.Tray.exe roda em <InstallRoot>\Sync\Tray\, dois
+            // niveis abaixo da raiz. self-update.ps1 grava esse arquivo ao
+            // concluir e relanca a bandeja logo em seguida — se ele existir
+            // e for recente, foi essa relançada quem acabou de acontecer.
+            var installRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
+            var statusFile = Path.Combine(installRoot, "update-status.json");
+            if (!File.Exists(statusFile))
+            {
+                return;
+            }
+
+            var info = new FileInfo(statusFile);
+            if (DateTime.UtcNow - info.LastWriteTimeUtc > TimeSpan.FromMinutes(5))
+            {
+                return;
+            }
+
+            JustUpdatedStatus? payload;
+            using (var stream = File.Open(statusFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                payload = JsonSerializer.Deserialize<JustUpdatedStatus>(stream, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+
+            if (payload?.Status != "completed")
+            {
+                return;
+            }
+
+            // update-status.json fica em Program Files, onde um usuario comum
+            // (a bandeja roda com o token padrao/nao elevado do usuario
+            // logado) so tem leitura - renomear/apagar esse arquivo compartilhado
+            // e negado mesmo concedendo ACL na propria janela, porque a
+            // operacao depende de permissao no diretorio pai. Por isso o "ja
+            // notificado" e controlado por um marcador no perfil do usuario.
+            var markerFile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AraraSuite", "last-update-notified.txt");
+            var marker = $"{payload.Version}|{info.LastWriteTimeUtc:o}";
+            if (File.Exists(markerFile) && File.ReadAllText(markerFile) == marker)
+            {
+                return;
+            }
+
+            _notifyIcon.ShowBalloonTip(
+                5000,
+                "AraraSuite Sync",
+                $"Atualizacao concluida — versao {payload.Version}.",
+                ToolTipIcon.Info);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(markerFile)!);
+            File.WriteAllText(markerFile, marker);
+        }
+        catch
+        {
+            // Notificacao de conveniencia — falha aqui nunca deve impedir a bandeja de abrir.
+        }
+    }
+
+    private sealed class JustUpdatedStatus
+    {
+        public string? Status { get; set; }
+        public string? Version { get; set; }
     }
 
     private void CopyInstanceId()
@@ -160,7 +239,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         Clipboard.SetText(_lastStatus.InstanceId);
         _notifyIcon.ShowBalloonTip(
             2000,
-            "PDV Local Sync Agent",
+            "AraraSuite Sync",
             "ID da instalacao copiado.",
             ToolTipIcon.Info);
     }
@@ -179,7 +258,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             _notifyIcon.ShowBalloonTip(
                 3000,
-                "PDV Local Sync Agent",
+                "AraraSuite Sync",
                 $"Nao foi possivel abrir a ajuda: {ex.Message}",
                 ToolTipIcon.Warning);
         }

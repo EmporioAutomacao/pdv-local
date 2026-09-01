@@ -33,7 +33,7 @@ if (File.Exists(versionFilePath))
 
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = "PDV Local Sync Agent";
+    options.ServiceName = "AraraSuiteSync";
 });
 
 builder.Services.Configure<SyncAgentOptions>(
@@ -80,6 +80,9 @@ builder.Services.AddSingleton<ArpaConnectionStringProvider>();
 builder.Services.AddSingleton<ProvisioningStore>();
 builder.Services.AddSingleton<EffectiveSyncAgentConfigurationProvider>();
 builder.Services.AddSingleton<ErpActivationClient>();
+builder.Services.AddSingleton<ArpaConnectionConfigClient>();
+builder.Services.AddSingleton<ArpaRemoteConfigCache>();
+builder.Services.AddSingleton<EffectiveArpaCollectorConfigurationProvider>();
 builder.Services.AddSingleton<ArpaCollector>();
 builder.Services.AddSingleton<ErpCredentialProvider>();
 builder.Services.AddSingleton<ErpEventDispatcher>();
@@ -90,6 +93,8 @@ builder.Services.AddSingleton<PdvProductSnapshotClient>();
 builder.Services.AddSingleton<PdvPaymentMethodsSnapshotClient>();
 builder.Services.AddSingleton<PdvCustomerSnapshotClient>();
 builder.Services.AddSingleton<PdvSalesPublisher>();
+builder.Services.AddSingleton<ErpLatestPackageClient>();
+builder.Services.AddSingleton<UpdateProgressState>();
 builder.Services.AddHttpClient(ErpEventDispatcherHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpHeartbeatHttpClient.Name)
@@ -105,6 +110,10 @@ builder.Services.AddHttpClient(PdvPaymentMethodsSnapshotHttpClient.Name)
 builder.Services.AddHttpClient(PdvCustomerSnapshotHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpActivationHttpClient.Name);
+builder.Services.AddHttpClient(ArpaConnectionConfigHttpClient.Name)
+    .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
+builder.Services.AddHttpClient(ErpLatestPackageHttpClient.Name)
+    .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddSingleton<ManualSyncSignal>();
 builder.Services.AddSingleton<SyncAgentRuntimeState>();
 builder.Services.AddSingleton<SelfUpdater>();

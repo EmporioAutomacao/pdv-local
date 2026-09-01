@@ -4,8 +4,9 @@ Este diretorio e dedicado ao projeto do PDV local.
 
 ## Versao atual
 
-**1.2.0** (2026-07-20). Manual do operador: `docs/pdv-app-manual-operador.md`.
+**1.3.0** (2026-09-01). Manual do operador: `docs/pdv-app-manual-operador.md`.
 Referencia tecnica de atalhos/comportamentos: `docs/pdv-app-atalhos-e-comportamentos.md`.
+Instalacao em producao: `docs/manual-instalacao-producao.md`.
 
 ## Objetivo
 - Aplicacao local comercializavel em larga escala.

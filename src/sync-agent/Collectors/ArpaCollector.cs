@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using Npgsql;
 using System.Text.Json.Nodes;
 using SyncAgent.Configuration;
@@ -6,7 +5,6 @@ using SyncAgent.Contracts;
 using SyncAgent.Normalizers;
 using SyncAgent.Persistence;
 using SyncAgent.Provisioning;
-using SyncAgent.Security;
 using SyncAgent.Utilities;
 
 namespace SyncAgent.Collectors;
@@ -17,30 +15,27 @@ public sealed class ArpaCollector
 
     private readonly ILogger<ArpaCollector> _logger;
     private readonly EffectiveSyncAgentConfigurationProvider _effectiveConfigProvider;
-    private readonly IOptionsMonitor<ArpaCollectorOptions> _collectorOptions;
+    private readonly EffectiveArpaCollectorConfigurationProvider _effectiveCollectorConfigProvider;
     private readonly LocalSyncStore _localStore;
     private readonly ArpaPayloadNormalizerRegistry _normalizers;
-    private readonly ArpaConnectionStringProvider _connectionStringProvider;
 
     public ArpaCollector(
         ILogger<ArpaCollector> logger,
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
-        IOptionsMonitor<ArpaCollectorOptions> collectorOptions,
+        EffectiveArpaCollectorConfigurationProvider effectiveCollectorConfigProvider,
         LocalSyncStore localStore,
-        ArpaPayloadNormalizerRegistry normalizers,
-        ArpaConnectionStringProvider connectionStringProvider)
+        ArpaPayloadNormalizerRegistry normalizers)
     {
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
-        _collectorOptions = collectorOptions;
+        _effectiveCollectorConfigProvider = effectiveCollectorConfigProvider;
         _localStore = localStore;
         _normalizers = normalizers;
-        _connectionStringProvider = connectionStringProvider;
     }
 
     public async Task<ArpaCollectorRunSummary> CollectAsync(CancellationToken cancellationToken)
     {
-        var options = _collectorOptions.CurrentValue;
+        var options = await _effectiveCollectorConfigProvider.GetCurrentAsync(cancellationToken);
         if (!options.Enabled)
         {
             return ArpaCollectorRunSummary.Disabled;
@@ -49,7 +44,7 @@ public sealed class ArpaCollector
         var totalCollected = 0;
         var totalInserted = 0;
 
-        await using var dataSource = NpgsqlDataSource.Create(_connectionStringProvider.GetConnectionString());
+        await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
 
         foreach (var entity in options.Entities)
         {

@@ -53,13 +53,13 @@ Passos:
 1. Verificar servico:
 
 ```powershell
-Get-Service "PDV Local Sync Agent"
+Get-Service "AraraSuiteSync"
 ```
 
 2. Iniciar se estiver parado:
 
 ```powershell
-Start-Service "PDV Local Sync Agent"
+Start-Service "AraraSuiteSync"
 ```
 
 3. Validar dashboard local:

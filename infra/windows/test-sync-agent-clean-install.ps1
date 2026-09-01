@@ -1,12 +1,12 @@
 param(
-    [string]$InstallRoot = "C:\Program Files\PDVLocal",
-    [string]$ServiceName = "PDV Local Sync Agent",
+    [string]$InstallRoot = "C:\Program Files\AraraSuite.com.br",
+    [string]$ServiceName = "AraraSuiteSync",
     [string]$LocalStatusUrl = "http://127.0.0.1:47891",
     [string]$PsqlPath = "psql",
     [string]$PostgresHost = "localhost",
     [int]$PostgresPort = 5432,
-    [string]$DatabaseName = "pdv_sync",
-    [string]$DatabaseUser = "pdv_sync",
+    [string]$DatabaseName = "pdv",
+    [string]$DatabaseUser = "araras",
     [string]$DatabasePassword = "",
     [string]$ErpApiBaseUrl = "",
     [string]$InstanceId = "",
@@ -110,16 +110,16 @@ catch {
 }
 
 try {
-    $agentPath = Join-Path $InstallRoot "SyncAgent\SyncAgent.exe"
-    $trayPath = Join-Path $InstallRoot "SyncAgentTray\SyncAgent.Tray.exe"
-    $pdvAppPath = Join-Path $InstallRoot "PDVApp\PdvLocal.App.exe"
-    $pdvCorePath = Join-Path $InstallRoot "PDVApp\PdvLocal.Core.dll"
-    $configPath = Join-Path $InstallRoot "SyncAgent\appsettings.json"
-    $pdvAppConfigPath = Join-Path $InstallRoot "PDVApp\appsettings.json"
+    $agentPath = Join-Path $InstallRoot "Sync\Agent\SyncAgent.exe"
+    $trayPath = Join-Path $InstallRoot "Sync\Tray\SyncAgent.Tray.exe"
+    $pdvAppPath = Join-Path $InstallRoot "PDV\PdvLocal.App.exe"
+    $pdvCorePath = Join-Path $InstallRoot "PDV\PdvLocal.Core.dll"
+    $configPath = Join-Path $InstallRoot "Sync\Agent\appsettings.json"
+    $pdvAppConfigPath = Join-Path $InstallRoot "PDV\appsettings.json"
     $desktopDirectory = Get-SpecialFolderPathOrFallback -Primary "CommonDesktopDirectory" -Fallback "Desktop"
     $programsDirectory = Get-SpecialFolderPathOrFallback -Primary "CommonPrograms" -Fallback "Programs"
-    $desktopShortcutPath = Join-Path $desktopDirectory "PDV Local.lnk"
-    $programsShortcutPath = Join-Path (Join-Path $programsDirectory "PDV Local") "PDV Local.lnk"
+    $desktopShortcutPath = Join-Path $desktopDirectory "AraraSuite PDV.lnk"
+    $programsShortcutPath = Join-Path (Join-Path $programsDirectory "AraraSuite") "AraraSuite PDV.lnk"
 
     Add-Check $checks "agent_payload" (Test-Path -LiteralPath $agentPath) "SyncAgent.exe em $agentPath."
     Add-Check $checks "tray_payload" (Test-Path -LiteralPath $trayPath) "SyncAgent.Tray.exe em $trayPath."

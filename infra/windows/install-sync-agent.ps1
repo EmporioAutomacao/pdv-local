@@ -1,7 +1,7 @@
 param(
-    [string]$InstallRoot = "C:\Program Files\PDVLocal",
-    [string]$ServiceName = "PDV Local Sync Agent",
-    [string]$ServiceDisplayName = "PDV Local Sync Agent",
+    [string]$InstallRoot = "C:\Program Files\AraraSuite.com.br",
+    [string]$ServiceName = "AraraSuiteSync",
+    [string]$ServiceDisplayName = "AraraSuite Sync",
 
     [string]$InstanceId,
     [string]$ErpTenantId,
@@ -20,8 +20,8 @@ param(
     [int]$PostgresPort = 5432,
     [string]$PostgresAdminUser = "postgres",
     [securestring]$PostgresAdminPassword,
-    [string]$DatabaseName = "pdv_sync",
-    [string]$DatabaseUser = "pdv_sync",
+    [string]$DatabaseName = "pdv",
+    [string]$DatabaseUser = "araras",
     [string]$DatabasePassword = "pdv_sync",
     [string]$PsqlPath = "psql",
 
@@ -99,9 +99,9 @@ function Resolve-PackageLayout {
     if ($packagePayloadRoot) {
         return [pscustomobject]@{
             Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-            AgentArtifact = (Join-Path $packagePayloadRoot.Path "SyncAgent")
-            TrayArtifact = (Join-Path $packagePayloadRoot.Path "SyncAgentTray")
-            PdvAppArtifact = (Join-Path $packagePayloadRoot.Path "PDVApp")
+            AgentArtifact = (Join-Path $packagePayloadRoot.Path "Sync\Agent")
+            TrayArtifact = (Join-Path $packagePayloadRoot.Path "Sync\Tray")
+            PdvAppArtifact = (Join-Path $packagePayloadRoot.Path "PDV")
             InstallerArtifact = (Join-Path $packagePayloadRoot.Path "SyncAgentInstaller")
         }
     }
@@ -146,6 +146,7 @@ function Write-AgentConfig {
     $effectiveErpTenantId = $ErpTenantId
     $effectiveErpApiBaseUrl = $ErpApiBaseUrl
     $effectiveProvisioningProtectedFile = $ProvisioningProtectedFile
+    $effectiveProvisioningSetupHintFile = ""
 
     if ($EnablePostInstallActivation) {
         if ([string]::IsNullOrWhiteSpace($effectiveInstanceId)) {
@@ -161,7 +162,11 @@ function Write-AgentConfig {
         }
 
         if ([string]::IsNullOrWhiteSpace($effectiveProvisioningProtectedFile)) {
-            $effectiveProvisioningProtectedFile = Join-Path $InstallRoot "Secrets\sync-agent-provisioning.dpapi"
+            $effectiveProvisioningProtectedFile = Join-Path $secretsDir "sync-agent-provisioning.dpapi"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($effectiveProvisioningSetupHintFile)) {
+            $effectiveProvisioningSetupHintFile = Join-Path $secretsDir "sync-agent-setup-hint.json"
         }
     }
 
@@ -175,7 +180,7 @@ function Write-AgentConfig {
         }
 
         if ([string]::IsNullOrWhiteSpace($ArpaPasswordProtectedFile)) {
-            $arpaPasswordProtectedPath = Join-Path $InstallRoot "Secrets\arpa-runtime-password.dpapi"
+            $arpaPasswordProtectedPath = Join-Path $secretsDir "arpa-runtime-password.dpapi"
         }
         else {
             $arpaPasswordProtectedPath = $ArpaPasswordProtectedFile
@@ -218,6 +223,7 @@ function Write-AgentConfig {
         Provisioning = @{
             Enabled = [bool]$EnablePostInstallActivation
             ProtectedFile = $effectiveProvisioningProtectedFile
+            SetupHintFile = $effectiveProvisioningSetupHintFile
             ActivationTimeoutSeconds = 30
         }
         ArpaCollector = @{
@@ -316,7 +322,7 @@ function Install-OrUpdateService {
     }
 
     & sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/300000 | Out-Null
-    & sc.exe description $ServiceName "Sincronizacao offline-first do PDV Local com ERP em nuvem." | Out-Null
+    & sc.exe description $ServiceName "Sincronizacao offline-first da AraraSuite com o ERP em nuvem." | Out-Null
 }
 
 function Install-TrayStartupShortcut {
@@ -328,13 +334,13 @@ function Install-TrayStartupShortcut {
     }
 
     New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
-    $shortcutPath = Join-Path $startupDir "PDV Local Sync Agent Tray.lnk"
+    $shortcutPath = Join-Path $startupDir "AraraSuite Sync Tray.lnk"
 
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $TrayExecutablePath
     $shortcut.WorkingDirectory = Split-Path -Parent $TrayExecutablePath
-    $shortcut.Description = "PDV Local Sync Agent Tray"
+    $shortcut.Description = "AraraSuite Sync Tray"
     $shortcut.Save()
 }
 
@@ -374,16 +380,16 @@ function Install-PdvAppShortcuts {
     }
 
     New-Shortcut `
-        -ShortcutPath (Join-Path $desktopDirectory "PDV Local.lnk") `
+        -ShortcutPath (Join-Path $desktopDirectory "AraraSuite PDV.lnk") `
         -TargetPath $PdvAppExecutablePath `
         -WorkingDirectory $pdvAppDirectory `
-        -Description "PDV Local"
+        -Description "AraraSuite PDV"
 
     New-Shortcut `
-        -ShortcutPath (Join-Path (Join-Path $programsDirectory "PDV Local") "PDV Local.lnk") `
+        -ShortcutPath (Join-Path (Join-Path $programsDirectory "AraraSuite") "AraraSuite PDV.lnk") `
         -TargetPath $PdvAppExecutablePath `
         -WorkingDirectory $pdvAppDirectory `
-        -Description "PDV Local"
+        -Description "AraraSuite PDV"
 }
 
 $isWindowsPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
@@ -393,24 +399,26 @@ if ($EnableArpaCollector -and -not $isWindowsPlatform) {
     throw "-EnableArpaCollector com senha protegida requer Windows DPAPI."
 }
 
-$syncAgentInstallDir = Join-Path $InstallRoot "SyncAgent"
-$trayInstallDir = Join-Path $InstallRoot "SyncAgentTray"
-$pdvAppInstallDir = Join-Path $InstallRoot "PDVApp"
+$syncInstallDir = Join-Path $InstallRoot "Sync"
+$syncAgentInstallDir = Join-Path $syncInstallDir "Agent"
+$trayInstallDir = Join-Path $syncInstallDir "Tray"
+$secretsDir = Join-Path $syncInstallDir "Secrets"
+$pdvAppInstallDir = Join-Path $InstallRoot "PDV"
 $syncAgentArtifactDir = $layout.AgentArtifact
 $trayArtifactDir = $layout.TrayArtifact
 $pdvAppArtifactDir = $layout.PdvAppArtifact
 
 if ($ValidateOnly) {
     if (-not (Test-Path -LiteralPath (Join-Path $syncAgentArtifactDir "SyncAgent.exe"))) {
-        throw "Payload SyncAgent invalido ou incompleto: $syncAgentArtifactDir"
+        throw "Payload Sync Agent invalido ou incompleto: $syncAgentArtifactDir"
     }
 
     if (-not (Test-Path -LiteralPath (Join-Path $trayArtifactDir "SyncAgent.Tray.exe"))) {
-        throw "Payload SyncAgentTray invalido ou incompleto: $trayArtifactDir"
+        throw "Payload Sync Tray invalido ou incompleto: $trayArtifactDir"
     }
 
     if (-not (Test-Path -LiteralPath (Join-Path $pdvAppArtifactDir "PdvLocal.App.exe"))) {
-        throw "Payload PDVApp invalido ou incompleto: $pdvAppArtifactDir"
+        throw "Payload PDV invalido ou incompleto: $pdvAppArtifactDir"
     }
 
     if (-not (Test-Path -LiteralPath (Join-Path $layout.InstallerArtifact "SyncAgent.Installer.exe"))) {
@@ -433,11 +441,11 @@ if ($ValidateOnly) {
         throw "Script de bootstrap nao encontrado no pacote."
     }
 
-    Write-Host "Sync Agent installer validation OK."
+    Write-Host "AraraSuite installer validation OK."
     Write-Host "Layout root: $($layout.Root)"
-    Write-Host "SyncAgent payload: $syncAgentArtifactDir"
-    Write-Host "Tray payload: $trayArtifactDir"
-    Write-Host "PDVApp payload: $pdvAppArtifactDir"
+    Write-Host "Sync Agent payload: $syncAgentArtifactDir"
+    Write-Host "Sync Tray payload: $trayArtifactDir"
+    Write-Host "PDV payload: $pdvAppArtifactDir"
     Write-Host "Installer payload: $($layout.InstallerArtifact)"
     Write-Host ".NET payload: $($dotNetInstaller.FullName)"
     Write-Host "VC++ payload: $($vcRuntimeInstaller.FullName)"
@@ -505,7 +513,7 @@ Copy-DirectoryContents -Source $pdvAppArtifactDir -Destination $pdvAppInstallDir
 if ($EnableArpaCollector) {
     $resolvedArpaPasswordProtectedFile = $ArpaPasswordProtectedFile
     if ([string]::IsNullOrWhiteSpace($resolvedArpaPasswordProtectedFile)) {
-        $resolvedArpaPasswordProtectedFile = Join-Path $InstallRoot "Secrets\arpa-runtime-password.dpapi"
+        $resolvedArpaPasswordProtectedFile = Join-Path $secretsDir "arpa-runtime-password.dpapi"
     }
 
     Protect-SecretToFile -Secret $ArpaPassword -OutputFile $resolvedArpaPasswordProtectedFile

@@ -89,7 +89,7 @@ Responsabilidades:
 - executar retry/backoff e dead-letter;
 - enviar heartbeat remoto quando `ErpHeartbeat:Enabled=true`;
 - expor API local em `127.0.0.1`;
-- rodar como Windows Service `PDV Local Sync Agent`.
+- rodar como Windows Service `AraraSuiteSync` (AraraSuite Sync).
 
 ## API local
 
@@ -214,7 +214,7 @@ Modo pos-instalacao:
 {
   "Provisioning": {
     "Enabled": true,
-    "ProtectedFile": "C:\\Program Files\\PDVLocal\\Secrets\\sync-agent-provisioning.dpapi",
+    "ProtectedFile": "C:\\Program Files\\AraraSuite.com.br\\Sync\\Secrets\\sync-agent-provisioning.dpapi",
     "ActivationTimeoutSeconds": 30
   }
 }
@@ -757,7 +757,7 @@ Por padrao `SelfUpdateEnabled` e `true`. Para desabilitar:
 O script grava no Windows Event Log:
 
 ```powershell
-Get-EventLog -LogName Application -Source "PDV Local Self-Update" -Newest 20
+Get-EventLog -LogName Application -Source "AraraSuite Sync Update" -Newest 20
 ```
 
 ### Rollback manual
@@ -766,12 +766,12 @@ Se o script falhar antes de gravar o backup ou o operador quiser forcar o
 rollback manualmente:
 
 ```powershell
-$backupDir = "C:\Program Files\PDVLocal\Backups\1.0.0"
-Stop-Service "PDV Local Sync Agent" -Force
-Copy-Item "$backupDir\SyncAgent\*" "C:\Program Files\PDVLocal\SyncAgent\" -Recurse -Force
-Copy-Item "$backupDir\PDVApp\*" "C:\Program Files\PDVLocal\PDVApp\" -Recurse -Force
-Copy-Item "$backupDir\SyncAgentTray\*" "C:\Program Files\PDVLocal\SyncAgentTray\" -Recurse -Force
-Start-Service "PDV Local Sync Agent"
+$backupDir = "C:\Program Files\AraraSuite.com.br\Backups\1.0.0"
+Stop-Service "AraraSuiteSync" -Force
+Copy-Item "$backupDir\Sync\Agent\*" "C:\Program Files\AraraSuite.com.br\Sync\Agent\" -Recurse -Force
+Copy-Item "$backupDir\PDV\*" "C:\Program Files\AraraSuite.com.br\PDV\" -Recurse -Force
+Copy-Item "$backupDir\Sync\Tray\*" "C:\Program Files\AraraSuite.com.br\Sync\Tray\" -Recurse -Force
+Start-Service "AraraSuiteSync"
 ```
 
 ### Tempo estimado

@@ -60,7 +60,7 @@ padrao de sessao/exibicao/defaults do PostgreSQL local.
 O Worker ja faz:
 
 - sobe como console em desenvolvimento;
-- esta preparado para Windows Service com nome `PDV Local Sync Agent`;
+- esta preparado para Windows Service com nome `AraraSuiteSync` (AraraSuite Sync);
 - valida configuracao obrigatoria;
 - registra identidade local em `sync_agent.agent_state` com chave `agent.identity`;
 - le metricas basicas da fila local;
@@ -445,9 +445,9 @@ O instalador:
 
 - valida execucao como Administrador;
 - aplica bootstrap do PostgreSQL quando `-SkipDatabaseBootstrap` nao for usado;
-- copia `SyncAgent` e `SyncAgent.Tray` para `C:\Program Files\PDVLocal`;
+- copia `SyncAgent` e `SyncAgent.Tray` para `C:\Program Files\AraraSuite.com.br\Sync`;
 - grava `appsettings.json` provisionado;
-- instala/atualiza Windows Service `PDV Local Sync Agent`;
+- instala/atualiza Windows Service `AraraSuiteSync` (AraraSuite Sync);
 - configura restart automatico em falha;
 - cria atalho do tray na inicializacao do Windows;
 - nao remove banco local na desinstalacao padrao.
@@ -598,7 +598,7 @@ Validado em 30/05/2026:
 - instalador Windows atualizado para provisionar coletor Arpa opcionalmente:
   `-EnableArpaCollector`, `-ArpaConnectionString`, `-ArpaPassword`,
   `-ArpaCollectorPreset AnapolisInitialLoad` e `-ArpaBatchSize`; a senha e
-  gravada como DPAPI em `C:\Program Files\PDVLocal\Secrets` e o
+  gravada como DPAPI em `C:\Program Files\AraraSuite.com.br\Sync\Secrets` e o
   `appsettings.json` aponta para `ArpaCollector:PasswordProtectedFile`.
 - validacao pos-instalador em 01/06/2026: scripts PowerShell parseados com
   sucesso, JSONs parseados com sucesso, `dotnet build pdv-local.sln
