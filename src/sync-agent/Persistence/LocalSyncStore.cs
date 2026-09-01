@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
 using System.Globalization;
@@ -14,10 +15,12 @@ namespace SyncAgent.Persistence;
 public sealed class LocalSyncStore
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly ILogger<LocalSyncStore> _logger;
 
-    public LocalSyncStore(NpgsqlDataSource dataSource)
+    public LocalSyncStore(NpgsqlDataSource dataSource, ILogger<LocalSyncStore> logger)
     {
         _dataSource = dataSource;
+        _logger = logger;
     }
 
     public async Task<LocalSyncStoreStatus> GetStatusAsync(CancellationToken cancellationToken)
@@ -666,7 +669,25 @@ public sealed class LocalSyncStore
             return 0;
         }
 
+        // `pdv.operators` tem UNIQUE(login) alem da PK operator_id, e `login` e
+        // referenciado por FKs (cash_sessions etc.). Se o login ja existe local,
+        // atualiza a linha no lugar (preserva operator_id e as FKs); so insere
+        // linha nova quando o login e inedito. Cobre o caso de instalacao
+        // reaproveitada entre tenants (operator_id deterministico muda, login
+        // permanece) sem violar operators_login_key nem quebrar historico.
         const string sql = """
+            WITH upd AS (
+                UPDATE pdv.operators SET
+                    external_operator_id = @external_operator_id,
+                    display_name = @display_name,
+                    password_hash = @password_hash,
+                    role = @role,
+                    active = @active,
+                    permissions = @permissions,
+                    updated_at_utc = @updated_at_utc
+                WHERE login = @login
+                RETURNING operator_id
+            )
             INSERT INTO pdv.operators (
                 operator_id,
                 external_operator_id,
@@ -678,7 +699,7 @@ public sealed class LocalSyncStore
                 permissions,
                 updated_at_utc
             )
-            VALUES (
+            SELECT
                 @operator_id,
                 @external_operator_id,
                 @login,
@@ -688,7 +709,7 @@ public sealed class LocalSyncStore
                 @active,
                 @permissions,
                 @updated_at_utc
-            )
+            WHERE NOT EXISTS (SELECT 1 FROM upd)
             ON CONFLICT (operator_id) DO UPDATE
             SET
                 external_operator_id = EXCLUDED.external_operator_id,
@@ -702,6 +723,7 @@ public sealed class LocalSyncStore
             """;
 
         var imported = 0;
+        var failed = 0;
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -711,20 +733,53 @@ public sealed class LocalSyncStore
             var role = NormalizeOperatorRole(item.Role);
             var permissions = JsonSerializer.Serialize(item.Permissions);
 
-            await using var command = new NpgsqlCommand(sql, connection, transaction);
-            command.Parameters.AddWithValue("operator_id", operatorId);
-            command.Parameters.AddWithValue("external_operator_id", item.OperatorId);
-            command.Parameters.AddWithValue("login", item.Login);
-            command.Parameters.AddWithValue("display_name", item.DisplayName);
-            command.Parameters.AddWithValue("password_hash", item.PasswordHash);
-            command.Parameters.AddWithValue("role", role);
-            command.Parameters.AddWithValue("active", item.Active && item.DeletedAtUtc is null);
-            command.Parameters.AddWithValue("permissions", NpgsqlDbType.Jsonb, permissions);
-            command.Parameters.AddWithValue("updated_at_utc", item.UpdatedAtUtc);
-            imported += await command.ExecuteNonQueryAsync(cancellationToken);
+            // Savepoint por operador: um conflito irreconciliavel (ex.: login
+            // trocado para um ja usado por outro operador com historico) nao
+            // aborta a importacao dos demais.
+            await using (var savepoint = new NpgsqlCommand("SAVEPOINT op_import", connection, transaction))
+            {
+                await savepoint.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            try
+            {
+                await using var command = new NpgsqlCommand(sql, connection, transaction);
+                command.Parameters.AddWithValue("operator_id", operatorId);
+                command.Parameters.AddWithValue("external_operator_id", item.OperatorId);
+                command.Parameters.AddWithValue("login", item.Login);
+                command.Parameters.AddWithValue("display_name", item.DisplayName);
+                command.Parameters.AddWithValue("password_hash", item.PasswordHash);
+                command.Parameters.AddWithValue("role", role);
+                command.Parameters.AddWithValue("active", item.Active && item.DeletedAtUtc is null);
+                command.Parameters.AddWithValue("permissions", NpgsqlDbType.Jsonb, permissions);
+                command.Parameters.AddWithValue("updated_at_utc", item.UpdatedAtUtc);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                imported++;
+
+                await using var release = new NpgsqlCommand("RELEASE SAVEPOINT op_import", connection, transaction);
+                await release.ExecuteNonQueryAsync(cancellationToken);
+            }
+            catch (PostgresException ex)
+            {
+                failed++;
+                _logger.LogWarning(
+                    ex,
+                    "PDV operator {Login} nao pode ser importado (conflito local); os demais seguem.",
+                    item.Login);
+                await using var rollback = new NpgsqlCommand(
+                    "ROLLBACK TO SAVEPOINT op_import; RELEASE SAVEPOINT op_import",
+                    connection,
+                    transaction);
+                await rollback.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
 
         await transaction.CommitAsync(cancellationToken);
+        if (failed > 0)
+        {
+            _logger.LogWarning("PDV operators snapshot: {Imported} importados, {Failed} com conflito local.", imported, failed);
+        }
+
         return imported;
     }
 
