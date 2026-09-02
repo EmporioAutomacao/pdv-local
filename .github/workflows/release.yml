@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versao (ex.: 1.4.0) - sem o v'
+        required: true
 
 permissions:
   contents: write
@@ -21,29 +26,89 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Extract version from tag
+      - name: Resolve version
         id: version
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          $ver = $tag.TrimStart('v')
-          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
-          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $ver = '${{ github.event.inputs.version }}'.TrimStart('v')
+            $tag = "v$ver"
+          } else {
+            $tag = '${{ github.ref_name }}'
+            $ver = $tag.TrimStart('v')
+          }
+          "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          "TAG=$tag" >> $env:GITHUB_OUTPUT
 
-      - name: Build installer package
+      # --- Dependencias grandes do instalador (baixadas 1x, depois cache) ---
+      - name: Cache PostgreSQL 17 + pgvector
+        id: cache-pg
+        uses: actions/cache@v4
+        with:
+          path: |
+            artifacts/postgresql-17/extracted
+            artifacts/postgresql-17/pgvector
+          key: pg17-pgvector-0.8.0-v1
+
+      - name: Download PostgreSQL 17 binaries
+        if: steps.cache-pg.outputs.cache-hit != 'true'
         shell: pwsh
-        run: |
-          .\infra\windows\build-sync-agent-package.ps1 -Version '${{ steps.version.outputs.VERSION }}'
+        run: .\infra\windows\download-postgresql17-binaries.ps1
+
+      - name: Build pgvector 0.8.0
+        if: steps.cache-pg.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\infra\windows\build-postgresql17-pgvector-payload.ps1
+
+      - name: Cache .NET Desktop Runtime
+        id: cache-net
+        uses: actions/cache@v4
+        with:
+          path: artifacts/dotnet
+          key: dotnet8-desktop-runtime-v1
+
+      - name: Download .NET Desktop Runtime
+        if: steps.cache-net.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\infra\windows\download-dotnet8-desktop-runtime.ps1
+
+      - name: Cache VC++ Redistributable
+        id: cache-vc
+        uses: actions/cache@v4
+        with:
+          path: artifacts/vc-runtime
+          key: vc-redist-x64-v1
+
+      - name: Download VC++ Redistributable
+        if: steps.cache-vc.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\infra\windows\download-vc-redist-x64.ps1
+
+      # --- Artefatos de release ---
+      - name: Build auto-update package (ZIP)
+        shell: pwsh
+        run: .\infra\windows\build-sync-agent-package.ps1 -Version '${{ steps.version.outputs.VERSION }}' -SkipErpRegister
+
+      - name: Build single-file installer (.exe)
+        shell: pwsh
+        run: .\infra\windows\build-sync-agent-single-file-installer.ps1 -Version '${{ steps.version.outputs.VERSION }}' -SkipPublish
 
       - name: Locate artifacts
         id: artifacts
         shell: pwsh
         run: |
           $ver = '${{ steps.version.outputs.VERSION }}'
-          $zip = "artifacts\sync-agent-installer\pdv-local-v$ver.zip"
-          $sha = "$zip.sha256"
-          echo "ZIP=$zip" >> $env:GITHUB_OUTPUT
-          echo "SHA=$sha" >> $env:GITHUB_OUTPUT
+          $zip = "artifacts/sync-agent-installer/pdv-local-v$ver.zip"
+          $exe = "artifacts/sync-agent-single-file/PdvLocalInstaller-v$ver.exe"
+          foreach ($f in @($zip, "$zip.sha256", $exe, "$exe.sha256")) {
+            if (-not (Test-Path $f)) { throw "Artefato ausente: $f" }
+          }
+          $zipHash = (Get-Content "$zip.sha256" -Raw).Trim()
+          $exeHash = (Get-Content "$exe.sha256" -Raw).Trim()
+          "ZIP=$zip" >> $env:GITHUB_OUTPUT
+          "EXE=$exe" >> $env:GITHUB_OUTPUT
+          Write-Host "ZIP sha256: $zipHash"
+          Write-Host "EXE sha256: $exeHash"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -51,6 +116,17 @@ jobs:
           tag_name: ${{ steps.version.outputs.TAG }}
           name: PDV Local ${{ steps.version.outputs.TAG }}
           generate_release_notes: true
+          body: |
+            ## Artefatos
+
+            | Arquivo | Uso |
+            |---|---|
+            | `pdv-local-v${{ steps.version.outputs.VERSION }}.zip` | Pacote de **auto-update** (Tray > Atualizar App). Registrar como `SyncPackage` atual no ERP. |
+            | `PdvLocalInstaller-v${{ steps.version.outputs.VERSION }}.exe` | Instalador **completo** para maquina nova (PostgreSQL 17 + pgvector + runtime .NET embutidos). |
+
+            SHA256 de cada arquivo esta no `.sha256` correspondente.
           files: |
-            ${{ steps.artifacts.outputs.ZIP }}
-            ${{ steps.artifacts.outputs.SHA }}
+            artifacts/sync-agent-installer/pdv-local-v${{ steps.version.outputs.VERSION }}.zip
+            artifacts/sync-agent-installer/pdv-local-v${{ steps.version.outputs.VERSION }}.zip.sha256
+            artifacts/sync-agent-single-file/PdvLocalInstaller-v${{ steps.version.outputs.VERSION }}.exe
+            artifacts/sync-agent-single-file/PdvLocalInstaller-v${{ steps.version.outputs.VERSION }}.exe.sha256

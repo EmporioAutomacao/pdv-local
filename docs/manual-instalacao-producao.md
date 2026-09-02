@@ -127,8 +127,20 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-O workflow `.github/workflows/release.yml` builda e publica o ZIP + SHA256
-na aba Releases do repositorio.
+O workflow `.github/workflows/release.yml` (repo publico
+`github.com/EmporioAutomacao/pdv-local`) baixa as dependencias grandes
+(PostgreSQL 17, pgvector, runtime .NET, VC++ redist) com cache, builda os dois
+artefatos e cria o Release:
+
+| Arquivo | Uso |
+|---|---|
+| `pdv-local-vX.Y.Z.zip` (+ `.sha256`) | Pacote de **auto-update** (Tray > Atualizar App). |
+| `PdvLocalInstaller-vX.Y.Z.exe` (+ `.sha256`) | Instalador completo para maquina nova. |
+
+O `download_url` do `SyncPackage` a registrar no ERP fica
+`https://github.com/EmporioAutomacao/pdv-local/releases/download/vX.Y.Z/pdv-local-vX.Y.Z.zip`.
+Da para disparar o workflow sem tag pela aba Actions ("Run workflow", campo
+`version`).
 
 **Antes de levar o pacote para a maquina do cliente**, valide o layout sem
 exigir Administrador e sem alterar nada:

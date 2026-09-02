@@ -491,7 +491,7 @@ Quando o ERP tiver um pacote pendente para a instalacao, `pending_update` contem
 ```json
 {
   "version": "1.1.0",
-  "download_url": "https://github.com/ORG/pdv-local/releases/download/v1.1.0/pdv-local-v1.1.0.zip",
+  "download_url": "https://github.com/EmporioAutomacao/pdv-local/releases/download/v1.1.0/pdv-local-v1.1.0.zip",
   "sha256": "abc123...",
   "release_notes": "Melhorias UX"
 }
