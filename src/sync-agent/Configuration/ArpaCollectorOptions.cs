@@ -36,6 +36,15 @@ public sealed class ArpaCollectorOptions
     public int RemoteConfigRefreshMinutes { get; init; } = 60;
 
     public int RemoteConfigTimeoutSeconds { get; init; } = 20;
+
+    /// <summary>
+    /// Arquivo cifrado por DPAPI LocalMachine com a lista de conexoes Arpa
+    /// geridas pelo dashboard (aba Configuracoes > Arpa). Quando existe e tem
+    /// entradas, e a fonte de verdade das conexoes - tem precedencia sobre
+    /// ConnectionString/Entities estaticos e sobre UseRemoteConfig.
+    /// Vazio => derivado do diretorio de Provisioning:ProtectedFile.
+    /// </summary>
+    public string? LocalConnectionsProtectedFile { get; init; }
 }
 
 public sealed class ArpaEntityCollectorOptions

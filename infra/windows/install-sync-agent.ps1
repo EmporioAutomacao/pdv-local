@@ -232,6 +232,10 @@ function Write-AgentConfig {
         }
         ArpaCollector = @{
             Enabled = [bool]$EnableArpaCollector
+            # As conexoes Arpa passam a ser geridas na aba Configuracoes > Arpa do
+            # dashboard local (arquivo cifrado por DPAPI). A ConnectionString legada
+            # abaixo, quando presente, e importada para o store no 1o start.
+            LocalConnectionsProtectedFile = (Join-Path $secretsDir "arpa-connections.dpapi")
             ConnectionString = $ArpaConnectionString
             PasswordEnvironmentVariable = ""
             PasswordFile = ""

@@ -19,8 +19,11 @@ public sealed class LocalStatusServer : BackgroundService
         WriteIndented = true
     };
     private const int MaxSetupFormBytes = 8192;
+    private const int MaxConfigFormBytes = 16384;
     private const string DashboardPath = "/";
     private const string SetupPath = "/setup";
+    private const string ConfigPath = "/config";
+    private const string ConfigArpaPath = "/config/arpa";
     private const string LogsPath = "/logs";
     private const string HelpPath = "/help";
     private const string StatusPath = "/status";
@@ -46,8 +49,11 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ILogger<LocalStatusServer> _logger;
     private readonly IOptionsMonitor<SyncAgentOptions> _options;
     private readonly IOptionsMonitor<SyncAgentProvisioningOptions> _provisioningOptions;
+    private readonly IOptionsMonitor<ArpaCollectorOptions> _arpaOptions;
     private readonly EffectiveSyncAgentConfigurationProvider _effectiveConfigProvider;
     private readonly ErpActivationClient _erpActivationClient;
+    private readonly ArpaConnectionsStore _arpaConnectionsStore;
+    private readonly ArpaDdlRunner _arpaDdlRunner;
     private readonly LocalSyncStore _localStore;
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
@@ -65,8 +71,11 @@ public sealed class LocalStatusServer : BackgroundService
         ILogger<LocalStatusServer> logger,
         IOptionsMonitor<SyncAgentOptions> options,
         IOptionsMonitor<SyncAgentProvisioningOptions> provisioningOptions,
+        IOptionsMonitor<ArpaCollectorOptions> arpaOptions,
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
         ErpActivationClient erpActivationClient,
+        ArpaConnectionsStore arpaConnectionsStore,
+        ArpaDdlRunner arpaDdlRunner,
         LocalSyncStore localStore,
         ManualSyncSignal manualSyncSignal,
         SyncAgentRuntimeState runtimeState,
@@ -76,8 +85,11 @@ public sealed class LocalStatusServer : BackgroundService
         _logger = logger;
         _options = options;
         _provisioningOptions = provisioningOptions;
+        _arpaOptions = arpaOptions;
         _effectiveConfigProvider = effectiveConfigProvider;
         _erpActivationClient = erpActivationClient;
+        _arpaConnectionsStore = arpaConnectionsStore;
+        _arpaDdlRunner = arpaDdlRunner;
         _localStore = localStore;
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
@@ -137,6 +149,26 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/setup/activate")
             {
                 await HandleSetupActivationAsync(context, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigPath)
+            {
+                await WriteConfigIndexAsync(context.Response, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaPath)
+            {
+                await WriteConfigArpaAsync(context.Response, context.Request.Url.Query, null, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST"
+                && context.Request.Url?.AbsolutePath is { } p
+                && p.StartsWith("/config/arpa/", StringComparison.Ordinal))
+            {
+                await HandleConfigArpaPostAsync(context, p["/config/arpa/".Length..], cancellationToken);
                 return;
             }
 
@@ -486,14 +518,14 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.produtos</code> / <code>sync_export.estoque</code> no banco Arpa Control do cliente, com um usuario <em>read-only</em>. Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.produtos</code> / <code>sync_export.clientes</code> / <code>sync_export.estoque</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; botoes de Testar, Preparar views e Criar usuario read-only). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
                     <tr><td><code>42501: permission denied for relation ...</code></td><td>Usuario read-only do agente sem <code>GRANT SELECT</code> nas views.</td><td>Aplicar os grants de <code>sync-export-readonly-user-*.template.sql</code>.</td></tr>
                     <tr><td><code>42703: column "..." does not exist</code></td><td>A view <code>sync_export</code> referencia colunas que nao existem no Arpa daquele cliente.</td><td>Regenerar a view do diagnostico real do schema.</td></tr>
                   </table>
-                  <p>Se o cliente <strong>nao usa Arpa Control</strong>, o coletor deve estar desligado (<code>ArpaCollector:Enabled=false</code> no <code>appsettings.json</code>, ou a conexao Arpa nao vinculada a instalacao no ERP). A partir de 1.3.3 uma entidade Arpa quebrada e <strong>pulada</strong> e nao derruba o ciclo (heartbeat / vendas PDV / dispatcher continuam).</p>
+                  <p>Se o cliente <strong>nao usa Arpa Control</strong>, o coletor deve estar desligado (<code>ArpaCollector:Enabled=false</code> no <code>appsettings.json</code>). A partir de 1.3.3 uma entidade Arpa quebrada e <strong>pulada</strong> e nao derruba o ciclo (heartbeat / vendas PDV / dispatcher continuam). A partir de 1.4.0 o agente suporta varias conexoes Arpa, geridas localmente na aba Configuracoes.</p>
                 </section>
 
                 <section class="panel">
@@ -1029,20 +1061,443 @@ public sealed class LocalStatusServer : BackgroundService
         };
     }
 
-    private static async Task<Dictionary<string, string>> ReadFormAsync(
-        HttpListenerRequest request,
+    private async Task WriteHtmlAsync(HttpListenerResponse response, string html, CancellationToken cancellationToken)
+    {
+        var bytes = Encoding.UTF8.GetBytes(html);
+        response.StatusCode = (int)HttpStatusCode.OK;
+        response.ContentType = "text/html; charset=utf-8";
+        AddNoStoreHeaders(response);
+        response.ContentLength64 = bytes.Length;
+        await response.OutputStream.WriteAsync(bytes, cancellationToken);
+        response.Close();
+    }
+
+    private static string? ReadQueryParam(string? queryString, string name)
+    {
+        if (string.IsNullOrEmpty(queryString))
+        {
+            return null;
+        }
+
+        foreach (var part in queryString.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split('=', 2);
+            if (WebUtility.UrlDecode(kv[0]) == name)
+            {
+                return kv.Length > 1 ? WebUtility.UrlDecode(kv[1]) : string.Empty;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task WriteConfigIndexAsync(HttpListenerResponse response, CancellationToken cancellationToken)
+    {
+        var arpaEnabled = _arpaOptions.CurrentValue.Enabled;
+        var arpaCount = _arpaConnectionsStore.ReadAll().Count;
+        var arpaLine = arpaEnabled
+            ? $"{arpaCount} conexao(oes) configurada(s)."
+            : "Coletor desligado (ArpaCollector:Enabled=false no appsettings.json).";
+
+        var html = $$"""
+            <!doctype html>
+            <html lang="pt-BR">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Configuracoes - AraraSuite Sync</title>
+              <style>
+                body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
+                main { max-width: 860px; margin: 0 auto; }
+                h1 { margin-bottom: 4px; font-size: 28px; }
+                h2 { margin: 0 0 6px; font-size: 18px; }
+                .muted { color: #64748b; margin: 0; }
+                {{BaseStyles}}
+                .panel { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin: 16px 0; }
+                a.cardlink { display: block; text-decoration: none; color: inherit; }
+                a.cardlink:hover .panel { border-color: #93c5fd; }
+              </style>
+            </head>
+            <body>
+              <main>
+                <h1>Configuracoes</h1>
+                <p class="muted">Configuracao local deste agente.</p>
+                {{LocalNavHtml(ConfigPath)}}
+                <a class="cardlink" href="/config/arpa">
+                  <section class="panel">
+                    <h2>Arpa Control</h2>
+                    <p class="muted">Conexoes com bancos Arpa Control para importar produtos, clientes e estoque. {{Html(arpaLine)}}</p>
+                  </section>
+                </a>
+              </main>
+            </body>
+            </html>
+            """;
+
+        await WriteHtmlAsync(response, html, cancellationToken);
+    }
+
+    private async Task WriteConfigArpaAsync(
+        HttpListenerResponse response,
+        string? queryString,
+        string? flashMessage,
         CancellationToken cancellationToken)
     {
-        if (request.ContentLength64 > MaxSetupFormBytes)
+        var enabled = _arpaOptions.CurrentValue.Enabled;
+        var connections = _arpaConnectionsStore.ReadAll();
+
+        var msg = flashMessage ?? ReadQueryParam(queryString, "msg");
+
+        var rows = new StringBuilder();
+        if (connections.Count == 0)
         {
-            throw new InvalidOperationException("Setup form body exceeded the maximum accepted size.");
+            rows.Append("<tr><td colspan=\"6\" class=\"muted\">Nenhuma conexao. Use o formulario abaixo para adicionar.</td></tr>");
+        }
+
+        foreach (var c in connections)
+        {
+            var toggles = string.Join(" ", new[]
+            {
+                c.SyncProdutos ? "Produtos" : null,
+                c.SyncClientes ? "Clientes" : null,
+                c.SyncEstoque ? "Estoque" : null,
+            }.Where(t => t is not null));
+
+            rows.Append($$"""
+                <tr>
+                  <td>{{Html(c.Nome)}}{{(c.Enabled ? "" : " <span class=\"muted\">(inativa)</span>")}}</td>
+                  <td>{{Html($"{c.Host}:{c.Port}/{c.Database}")}}</td>
+                  <td>{{Html(string.IsNullOrWhiteSpace(c.LojaCodigo) ? "-" : c.LojaCodigo)}}</td>
+                  <td>{{Html(toggles)}}</td>
+                  <td>{{Html(c.Username)}}</td>
+                  <td style="white-space:nowrap">
+                    <button type="button" class="mini" onclick="editConn('{{Html(c.Id)}}')">Editar</button>
+                    <button type="button" class="mini" onclick="postAct('sync-now','{{Html(c.Id)}}')">Sincronizar</button>
+                    <button type="button" class="mini danger" onclick="if(confirm('Remover a conexao {{Html(c.Nome)}}?'))postAct('delete','{{Html(c.Id)}}')">Remover</button>
+                  </td>
+                </tr>
+                """);
+        }
+
+        // Senha NAO vai para o navegador; ao editar, o campo fica vazio e o save
+        // mantem a senha atual quando enviado em branco.
+        var connectionsJson = JsonSerializer.Serialize(
+            connections.ToDictionary(
+                c => c.Id,
+                c => new
+                {
+                    id = c.Id,
+                    nome = c.Nome,
+                    host = c.Host,
+                    port = c.Port,
+                    database = c.Database,
+                    username = c.Username,
+                    lojaCodigo = c.LojaCodigo,
+                    controlaEstoque = c.ControlaEstoque,
+                    syncProdutos = c.SyncProdutos,
+                    syncClientes = c.SyncClientes,
+                    syncEstoque = c.SyncEstoque,
+                    batchSize = c.BatchSize,
+                    enabled = c.Enabled,
+                }),
+            JsonOptions);
+        var msgHtml = string.IsNullOrWhiteSpace(msg)
+            ? string.Empty
+            : $"""<div class="message okbox">{Html(msg!)}</div>""";
+        var disabledNote = enabled
+            ? string.Empty
+            : """<div class="message warnbox">O coletor Arpa esta desligado. Ative com <code>ArpaCollector:Enabled=true</code> no appsettings.json e reinicie o servico para as conexoes abaixo passarem a coletar.</div>""";
+
+        var html = $$"""
+            <!doctype html>
+            <html lang="pt-BR">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Configuracoes - Arpa - AraraSuite Sync</title>
+              <style>
+                body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
+                main { max-width: 960px; margin: 0 auto; }
+                h1 { margin-bottom: 4px; font-size: 26px; }
+                h2 { font-size: 18px; }
+                .muted { color: #64748b; }
+                {{BaseStyles}}
+                .panel { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin: 16px 0; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { border-bottom: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 14px; vertical-align: top; }
+                th { color: #475569; font-size: 13px; }
+                label { display: block; color: #64748b; font-size: 13px; margin: 10px 0 4px; }
+                input[type=text], input[type=password], input[type=number] { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+                .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+                .row3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+                .checks { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+                .checks label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: #1f2937; }
+                button { padding: 9px 13px; border: 0; border-radius: 6px; background: #2563eb; color: white; cursor: pointer; font-size: 14px; }
+                button:hover { background: #1d4ed8; }
+                button.secondary { background: #64748b; }
+                button.mini { padding: 5px 8px; font-size: 12px; background: #eef2ff; color: #3730a3; }
+                button.mini.danger { background: #fee2e2; color: #991b1b; }
+                button.danger { background: #dc2626; }
+                .message { border-radius: 8px; padding: 12px; margin: 14px 0; font-weight: 600; }
+                .okbox { background: #dcfce7; color: #166534; }
+                .warnbox { background: #fef3c7; color: #92400e; }
+                #status { margin-top: 10px; font-weight: 600; white-space: pre-wrap; }
+                details { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+                summary { cursor: pointer; font-weight: 600; color: #334155; }
+              </style>
+            </head>
+            <body>
+              <main>
+                <h1>Configuracoes &rsaquo; Arpa</h1>
+                <p class="muted">Cada conexao aponta para um banco Arpa Control e e mapeada a uma Loja/Estoque do ERP. As conexoes ficam salvas nesta maquina (cifradas por DPAPI).</p>
+                {{LocalNavHtml(ConfigPath)}}
+                {{msgHtml}}
+                {{disabledNote}}
+
+                <section class="panel">
+                  <h2>Conexoes</h2>
+                  <table>
+                    <tr><th>Nome</th><th>Banco</th><th>Loja</th><th>Sincroniza</th><th>Usuario</th><th></th></tr>
+                    {{rows}}
+                  </table>
+                </section>
+
+                <section class="panel">
+                  <h2 id="formtitle">Adicionar conexao</h2>
+                  <form id="connform">
+                    <input type="hidden" name="id" id="f_id">
+                    <div class="row2">
+                      <div><label for="f_nome">Nome</label><input type="text" id="f_nome" name="nome" required placeholder="Ex.: Loja Centro"></div>
+                      <div><label for="f_loja">Loja/Estoque (nome no ERP)</label><input type="text" id="f_loja" name="loja_codigo" placeholder="Ex.: Centro"></div>
+                    </div>
+                    <div class="row3">
+                      <div><label for="f_host">Host</label><input type="text" id="f_host" name="host" required placeholder="127.0.0.1"></div>
+                      <div><label for="f_port">Porta</label><input type="number" id="f_port" name="port" value="5432" min="1" max="65535"></div>
+                      <div><label for="f_db">Database</label><input type="text" id="f_db" name="database" required placeholder="control"></div>
+                    </div>
+                    <div class="row3">
+                      <div><label for="f_user">Usuario (read-only)</label><input type="text" id="f_user" name="username" required placeholder="ararasuite_sync_ro"></div>
+                      <div><label for="f_pass">Senha</label><input type="password" id="f_pass" name="password" autocomplete="off"></div>
+                      <div><label for="f_batch">Batch size</label><input type="number" id="f_batch" name="batch_size" value="5000" min="1" max="50000"></div>
+                    </div>
+                    <div class="checks">
+                      <label><input type="checkbox" id="f_produtos" name="sync_produtos" checked> Produtos</label>
+                      <label><input type="checkbox" id="f_clientes" name="sync_clientes" checked> Clientes</label>
+                      <label><input type="checkbox" id="f_estoque" name="sync_estoque"> Estoque</label>
+                      <label><input type="checkbox" id="f_controla" name="controla_estoque"> Controla o estoque desta Loja</label>
+                      <label><input type="checkbox" id="f_enabled" name="enabled" checked> Ativa</label>
+                    </div>
+
+                    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap">
+                      <button type="button" onclick="save()">Salvar</button>
+                      <button type="button" class="secondary" onclick="act('test')">Testar conexao</button>
+                      <button type="button" class="secondary" onclick="resetForm()">Limpar</button>
+                    </div>
+
+                    <details>
+                      <summary>Preparar banco Arpa (requer credencial DBA)</summary>
+                      <p class="muted">Usa uma credencial de administrador do Postgres do Arpa apenas para este comando. Nao e gravada.</p>
+                      <div class="row2">
+                        <div><label for="f_dbauser">Usuario DBA</label><input type="text" id="f_dbauser" name="dba_user" autocomplete="off" placeholder="postgres"></div>
+                        <div><label for="f_dbapass">Senha DBA</label><input type="password" id="f_dbapass" name="dba_password" autocomplete="off"></div>
+                      </div>
+                      <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap">
+                        <button type="button" class="secondary" onclick="act('prepare-views')">Preparar views sync_export</button>
+                      </div>
+                      <div class="row2" style="margin-top:12px">
+                        <div><label for="f_newrole">Novo usuario read-only</label><input type="text" id="f_newrole" name="new_role" autocomplete="off" placeholder="ararasuite_sync_ro"></div>
+                        <div><label for="f_newrolepass">Senha do novo usuario</label><input type="password" id="f_newrolepass" name="new_role_password" autocomplete="off"></div>
+                      </div>
+                      <div style="margin-top:10px"><button type="button" class="secondary" onclick="act('create-user')">Criar usuario read-only</button></div>
+                    </details>
+                  </form>
+                  <div id="status"></div>
+                </section>
+              </main>
+              <script>
+                var CONNS = {{connectionsJson}};
+                function fd(){ return new URLSearchParams(new FormData(document.getElementById('connform'))); }
+                function setStatus(t, ok){ var s=document.getElementById('status'); s.textContent=t; s.style.color = ok ? '#166534' : '#92400e'; }
+                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); }
+                function editConn(id){
+                  var c = CONNS[id]; if(!c) return;
+                  document.getElementById('f_id').value = c.id;
+                  document.getElementById('f_nome').value = c.nome || '';
+                  document.getElementById('f_loja').value = c.lojaCodigo || '';
+                  document.getElementById('f_host').value = c.host || '';
+                  document.getElementById('f_port').value = c.port || 5432;
+                  document.getElementById('f_db').value = c.database || '';
+                  document.getElementById('f_user').value = c.username || '';
+                  document.getElementById('f_pass').value = c.password || '';
+                  document.getElementById('f_batch').value = c.batchSize || 5000;
+                  document.getElementById('f_produtos').checked = !!c.syncProdutos;
+                  document.getElementById('f_clientes').checked = !!c.syncClientes;
+                  document.getElementById('f_estoque').checked = !!c.syncEstoque;
+                  document.getElementById('f_controla').checked = !!c.controlaEstoque;
+                  document.getElementById('f_enabled').checked = !!c.enabled;
+                  document.getElementById('formtitle').textContent = 'Editar conexao: ' + (c.nome||'');
+                  window.scrollTo(0, document.getElementById('formtitle').offsetTop - 20);
+                }
+                function save(){
+                  setStatus('Salvando...', true);
+                  fetch('/config/arpa/save', { method:'POST', body: fd() })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ if(j.ok){ location.href = '/config/arpa?msg=' + encodeURIComponent(j.message || 'Conexao salva.'); } else { setStatus(j.message || 'Falha ao salvar.', false); } })
+                    .catch(function(e){ setStatus(String(e), false); });
+                }
+                function act(a){
+                  setStatus('Executando ' + a + '...', true);
+                  fetch('/config/arpa/' + a, { method:'POST', body: fd() })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ setStatus(j.message || (j.ok ? 'OK.' : 'Falha.'), !!j.ok); })
+                    .catch(function(e){ setStatus(String(e), false); });
+                }
+                function postAct(a, id){
+                  var b = new URLSearchParams(); b.set('id', id);
+                  fetch('/config/arpa/' + a, { method:'POST', body: b })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ location.href = '/config/arpa?msg=' + encodeURIComponent(j.message || 'OK.'); })
+                    .catch(function(e){ setStatus(String(e), false); });
+                }
+              </script>
+            </body>
+            </html>
+            """;
+
+        await WriteHtmlAsync(response, html, cancellationToken);
+    }
+
+    private async Task HandleConfigArpaPostAsync(HttpListenerContext context, string action, CancellationToken cancellationToken)
+    {
+        Dictionary<string, string> form;
+        try
+        {
+            form = await ReadFormAsync(context.Request, MaxConfigFormBytes, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = ex.Message }, cancellationToken);
+            return;
+        }
+
+        string V(string k) => form.GetValueOrDefault(k, string.Empty).Trim();
+        bool B(string k) => form.ContainsKey(k) && form[k] is "on" or "true" or "1";
+        int I(string k, int fallback) => int.TryParse(V(k), out var n) ? n : fallback;
+
+        switch (action)
+        {
+            case "save":
+            {
+                if (string.IsNullOrWhiteSpace(V("nome")) || string.IsNullOrWhiteSpace(V("host")) || string.IsNullOrWhiteSpace(V("database")))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Nome, host e database sao obrigatorios." }, cancellationToken);
+                    return;
+                }
+
+                var existing = string.IsNullOrWhiteSpace(V("id")) ? null : _arpaConnectionsStore.Get(V("id"));
+                var connection = new ArpaLocalConnection
+                {
+                    Id = V("id"),
+                    Nome = V("nome"),
+                    Host = V("host"),
+                    Port = I("port", 5432),
+                    Database = V("database"),
+                    Username = V("username"),
+                    // senha em branco no form de edicao mantem a atual
+                    Password = string.IsNullOrEmpty(V("password")) && existing is not null ? existing.Password : V("password"),
+                    LojaCodigo = V("loja_codigo"),
+                    ControlaEstoque = B("controla_estoque"),
+                    SyncProdutos = B("sync_produtos"),
+                    SyncClientes = B("sync_clientes"),
+                    SyncEstoque = B("sync_estoque"),
+                    BatchSize = I("batch_size", 5000),
+                    Enabled = B("enabled"),
+                };
+
+                var id = _arpaConnectionsStore.Upsert(connection);
+                _manualSyncSignal.TrySignal();
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = true, id, message = "Conexao salva." }, cancellationToken);
+                return;
+            }
+
+            case "delete":
+            {
+                var removed = _arpaConnectionsStore.Delete(V("id"));
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = removed, message = removed ? "Conexao removida." : "Conexao nao encontrada." }, cancellationToken);
+                return;
+            }
+
+            case "sync-now":
+            {
+                var accepted = _manualSyncSignal.TrySignal();
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = true, accepted, message = accepted ? "Sincronizacao solicitada." : "Ja existe uma sincronizacao pendente." }, cancellationToken);
+                return;
+            }
+
+            case "test":
+            {
+                var result = await _arpaDdlRunner.TestConnectionAsync(
+                    V("host"), I("port", 5432), V("database"), V("username"), V("password"),
+                    B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), cancellationToken);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
+                return;
+            }
+
+            case "prepare-views":
+            {
+                if (string.IsNullOrWhiteSpace(V("dba_user")) || string.IsNullOrEmpty(V("dba_password")))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe usuario e senha DBA." }, cancellationToken);
+                    return;
+                }
+
+                var result = await _arpaDdlRunner.PrepareViewsAsync(
+                    V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"), cancellationToken);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
+                return;
+            }
+
+            case "create-user":
+            {
+                if (string.IsNullOrWhiteSpace(V("dba_user")) || string.IsNullOrEmpty(V("dba_password")))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe usuario e senha DBA." }, cancellationToken);
+                    return;
+                }
+
+                var result = await _arpaDdlRunner.CreateReadonlyUserAsync(
+                    V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"),
+                    V("new_role"), V("new_role_password"), cancellationToken);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
+                return;
+            }
+
+            default:
+                await WriteJsonAsync(context.Response, HttpStatusCode.NotFound, new { ok = false, message = "Acao desconhecida." }, cancellationToken);
+                return;
+        }
+    }
+
+    private static Task<Dictionary<string, string>> ReadFormAsync(
+        HttpListenerRequest request,
+        CancellationToken cancellationToken)
+        => ReadFormAsync(request, MaxSetupFormBytes, cancellationToken);
+
+    private static async Task<Dictionary<string, string>> ReadFormAsync(
+        HttpListenerRequest request,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        if (request.ContentLength64 > maxBytes)
+        {
+            throw new InvalidOperationException("Form body exceeded the maximum accepted size.");
         }
 
         using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
         var body = await reader.ReadToEndAsync(cancellationToken);
-        if (Encoding.UTF8.GetByteCount(body) > MaxSetupFormBytes)
+        if (Encoding.UTF8.GetByteCount(body) > maxBytes)
         {
-            throw new InvalidOperationException("Setup form body exceeded the maximum accepted size.");
+            throw new InvalidOperationException("Form body exceeded the maximum accepted size.");
         }
 
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1107,6 +1562,7 @@ public sealed class LocalStatusServer : BackgroundService
                 <nav class="local-nav" aria-label="Navegacao local">
                   {LocalNavLink(DashboardPath, "Dashboard", activePath)}
                   {LocalNavLink(SetupPath, "Ativacao", activePath)}
+                  {LocalNavLink(ConfigPath, "Configuracoes", activePath)}
                   {LocalNavLink(LogsPath, "Logs", activePath)}
                   {LocalNavLink(HelpPath, "Ajuda", activePath)}
                   {LocalNavLink(StatusPath, "JSON tecnico", activePath)}

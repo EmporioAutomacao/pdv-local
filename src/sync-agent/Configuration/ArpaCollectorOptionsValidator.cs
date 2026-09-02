@@ -41,9 +41,19 @@ public sealed class ArpaCollectorOptionsValidator : IValidateOptions<ArpaCollect
                 : ValidateOptionsResult.Fail(failures);
         }
 
+        // Modo store local (aba Configuracoes > Arpa): Enabled=true sem
+        // ConnectionString estatica nem UseRemoteConfig. As conexoes vem do
+        // arquivo DPAPI e sao validadas em runtime, nao aqui.
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
-            failures.Add($"{ArpaCollectorOptions.SectionName}:ConnectionString is required when collector is enabled.");
+            if (options.BatchSize is < 1 or > 10_000)
+            {
+                failures.Add($"{ArpaCollectorOptions.SectionName}:BatchSize must be between 1 and 10000.");
+            }
+
+            return failures.Count == 0
+                ? ValidateOptionsResult.Success
+                : ValidateOptionsResult.Fail(failures);
         }
 
         var passwordSourceCount = new[]

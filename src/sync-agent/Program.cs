@@ -77,6 +77,8 @@ builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaVendaPayloadNormalizer
 builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaFinanceiroPayloadNormalizer>();
 builder.Services.AddSingleton<ArpaPayloadNormalizerRegistry>();
 builder.Services.AddSingleton<ArpaConnectionStringProvider>();
+builder.Services.AddSingleton<ArpaConnectionsStore>();
+builder.Services.AddSingleton<ArpaDdlRunner>();
 builder.Services.AddSingleton<ProvisioningStore>();
 builder.Services.AddSingleton<EffectiveSyncAgentConfigurationProvider>();
 builder.Services.AddSingleton<ErpActivationClient>();

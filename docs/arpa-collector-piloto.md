@@ -7,6 +7,36 @@ Data: 30/05/2026
 Preparar a primeira coleta real read-only do Arpa para o SyncAgent, iniciando
 por `produto` e `cliente`.
 
+## Configuracao pelo dashboard (a partir de 1.4.0)
+
+As conexoes Arpa passam a ser geridas **localmente** na aba
+**Configuracoes > Arpa** do dashboard (`http://127.0.0.1:47891/config/arpa`),
+nao mais so no `appsettings.json` nem no `ArpaControlConexao` do ERP.
+
+- **Multi-conexao:** uma conexao por Loja/Estoque do ERP. O campo
+  *Loja/Estoque (nome no ERP)* vai como `loja_codigo` nos eventos de estoque
+  (o ERP resolve/cria a Loja por nome).
+- **O que sincronizar:** toggles Produtos / Clientes / Estoque. O agente monta a
+  query padrao contra `sync_export.<view>` (mesma forma do
+  `build_sync_agent_entities` do ERP).
+- **Persistencia:** arquivo `arpa-connections.dpapi` cifrado por DPAPI
+  LocalMachine, no diretorio de secrets. Caminho em
+  `ArpaCollector:LocalConnectionsProtectedFile`.
+- **Acoes na tela:** *Testar conexao* (valida credencial + presenca das views),
+  *Preparar views sync_export* e *Criar usuario read-only* (pedem uma credencial
+  DBA transitoria, nunca gravada), *Sincronizar agora* por conexao.
+- **Migracao:** uma instalacao antiga com `ArpaCollector:ConnectionString`
+  estatica e importada para o store como conexao "Padrao" no primeiro start;
+  ajuste a Loja e os toggles pela tela.
+- `ArpaCollector:Enabled=true` no `appsettings.json` continua sendo o
+  interruptor geral do coletor.
+- `UseRemoteConfig=true` (buscar do ERP) segue funcionando como legado, mas so
+  quando o store local esta vazio.
+
+O restante deste documento (preparar views por diagnostico, usuario read-only,
+preflight) continua valido para os casos em que o schema real do Arpa nao bate
+com o template generico.
+
 ## Decisao
 
 O SyncAgent nao deve consultar diretamente tabelas internas do Arpa. Para o

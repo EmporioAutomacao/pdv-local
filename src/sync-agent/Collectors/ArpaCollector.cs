@@ -35,8 +35,8 @@ public sealed class ArpaCollector
 
     public async Task<ArpaCollectorRunSummary> CollectAsync(CancellationToken cancellationToken)
     {
-        var options = await _effectiveCollectorConfigProvider.GetCurrentAsync(cancellationToken);
-        if (!options.Enabled)
+        var connections = await _effectiveCollectorConfigProvider.GetCurrentAsync(cancellationToken);
+        if (connections.Count == 0)
         {
             return ArpaCollectorRunSummary.Disabled;
         }
@@ -44,31 +44,51 @@ public sealed class ArpaCollector
         var totalCollected = 0;
         var totalInserted = 0;
         var failedEntities = 0;
+        var totalEntities = 0;
 
-        await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
-
-        foreach (var entity in options.Entities)
+        foreach (var connection in connections)
         {
+            NpgsqlDataSource dataSource;
             try
             {
-                var entitySummary = await CollectEntityAsync(dataSource, entity, options.BatchSize, cancellationToken);
-                totalCollected += entitySummary.Collected;
-                totalInserted += entitySummary.Inserted;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
+                dataSource = NpgsqlDataSource.Create(connection.ConnectionString);
             }
             catch (Exception ex)
             {
-                // Uma entidade Arpa quebrada (view sync_export ausente, permissao
-                // negada, schema divergente) nao deve derrubar o ciclo inteiro -
-                // heartbeat, envio de vendas PDV e dispatcher precisam continuar.
-                failedEntities++;
-                _logger.LogWarning(
-                    ex,
-                    "Arpa collector: entidade '{EntityName}' falhou e foi pulada nesta execucao.",
-                    entity.Name);
+                failedEntities += connection.Entities.Count;
+                totalEntities += connection.Entities.Count;
+                _logger.LogWarning(ex, "Arpa collector: conexao '{Nome}' invalida e pulada nesta execucao.", connection.Nome);
+                continue;
+            }
+
+            await using (dataSource)
+            {
+                foreach (var entity in connection.Entities)
+                {
+                    totalEntities++;
+                    try
+                    {
+                        var entitySummary = await CollectEntityAsync(dataSource, connection, entity, cancellationToken);
+                        totalCollected += entitySummary.Collected;
+                        totalInserted += entitySummary.Inserted;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Uma entidade Arpa quebrada (view sync_export ausente, permissao
+                        // negada, schema divergente) nao deve derrubar o ciclo inteiro -
+                        // heartbeat, envio de vendas PDV e dispatcher precisam continuar.
+                        failedEntities++;
+                        _logger.LogWarning(
+                            ex,
+                            "Arpa collector: conexao '{Nome}' entidade '{EntityName}' falhou e foi pulada nesta execucao.",
+                            connection.Nome,
+                            entity.Name);
+                    }
+                }
             }
         }
 
@@ -77,7 +97,7 @@ public sealed class ArpaCollector
             _logger.LogWarning(
                 "Arpa collector: {Failed} de {Total} entidades falharam. Verifique as views sync_export e as permissoes do usuario read-only no Arpa.",
                 failedEntities,
-                options.Entities.Count);
+                totalEntities);
         }
 
         return new ArpaCollectorRunSummary(true, totalCollected, totalInserted);
@@ -85,12 +105,12 @@ public sealed class ArpaCollector
 
     private async Task<ArpaEntityCollectorRunSummary> CollectEntityAsync(
         NpgsqlDataSource dataSource,
+        EffectiveArpaCollectorConnection connection,
         ArpaEntityCollectorOptions entity,
-        int batchSize,
         CancellationToken cancellationToken)
     {
         var syncOptions = _effectiveConfigProvider.GetCurrent();
-        var watermarkKey = $"collector.arpa.{entity.Name}.watermark";
+        var watermarkKey = $"collector.arpa.{connection.Id}.{entity.EntityType}.watermark";
         var watermark = await _localStore.GetDateTimeOffsetStateAsync(
             watermarkKey,
             InitialWatermark,
@@ -102,7 +122,7 @@ public sealed class ArpaCollector
 
         await using var command = dataSource.CreateCommand(entity.Query);
         command.Parameters.AddWithValue("watermark_utc", watermark);
-        command.Parameters.AddWithValue("limit", batchSize);
+        command.Parameters.AddWithValue("limit", connection.BatchSize);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -112,6 +132,16 @@ public sealed class ArpaCollector
 
             var payload = JsonNode.Parse(row.PayloadJson)?.AsObject()
                 ?? throw new InvalidOperationException($"Collector '{entity.Name}' returned invalid payload_json.");
+
+            // Estoque e por Loja: injeta o loja_codigo da conexao (nome da Loja
+            // no ERP) quando a view sync_export.estoque nao o traz.
+            if (entity.EntityType == "estoque"
+                && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
+                && payload["loja_codigo"] is null)
+            {
+                payload["loja_codigo"] = connection.LojaCodigo;
+            }
+
             var normalizedPayload = _normalizers.Normalize(entity.EntityType, row.EntityKey, payload);
 
             var eventId = DeterministicGuid.Create(
@@ -150,7 +180,8 @@ public sealed class ArpaCollector
         }
 
         _logger.LogInformation(
-            "Arpa collector entity completed. Entity={EntityName}; Type={EntityType}; Collected={Collected}; Inserted={Inserted}; Watermark={Watermark}",
+            "Arpa collector entity completed. Connection={Connection}; Entity={EntityName}; Type={EntityType}; Collected={Collected}; Inserted={Inserted}; Watermark={Watermark}",
+            connection.Nome,
             entity.Name,
             entity.EntityType,
             collected,
