@@ -483,10 +483,26 @@ Tray (`SyncAgent.Tray`): inicia na sessao do usuario, consulta a mesma API
 local (`http://127.0.0.1:47891`). Nao precisa de acao manual apos a
 instalacao.
 
-Auto-update: o pacote inclui `self-update.ps1` dentro do payload do
-SyncAgent. Quando um pacote versionado (`pdv-local-vX.Y.Z.zip`) e
-registrado/disponibilizado para download, o agente detecta a nova versao no
-proximo heartbeat e se auto-atualiza.
+Auto-update ("Atualizar App" na bandeja):
+
+1. `git tag vX.Y.Z && git push origin vX.Y.Z` no `pdv-local` -> o workflow
+   builda e publica o Release (`pdv-local-vX.Y.Z.zip` + `.sha256` + o `.exe`).
+2. No admin do ERP de **cada** cliente -> `API de Sincronizacao > Pacotes de
+   atualizacao` -> Adicionar (versao/URL/SHA256) -> acao **"Marcar como versao
+   atual"**. Ou `python manage.py register_sync_package --pkg-version X.Y.Z
+   --url <zip> --sha256 <hash>` (marca sozinho).
+3. Na maquina: bandeja -> **Atualizar App**. Baixa o `.zip` do GitHub, confere o
+   SHA256 e roda `self-update.ps1` (backup + troca de `PDV`/`Sync\Agent`/
+   `Sync\Tray` + rollback automatico). `appsettings.json` e credenciais
+   preservados.
+
+`404 no_package_published` / *"Nenhuma versao publicada foi encontrada no ERP"*
+= nenhum pacote marcado como atual **nesse** ERP (o campo `is_current` nao e
+editavel no formulario - so a acao ou o comando marcam). Guia:
+`../erp/docs/infra/sync-agent-auto-update.md`.
+
+O canal administrativo (`Instalacoes do SyncAgent` -> "Solicitar atualizacao")
+continua em paralelo, agendando uma versao especifica via heartbeat.
 
 Endpoints uteis do dashboard/API local (sempre `127.0.0.1:47891`):
 
