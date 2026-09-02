@@ -43,14 +43,41 @@ public sealed class ArpaCollector
 
         var totalCollected = 0;
         var totalInserted = 0;
+        var failedEntities = 0;
 
         await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
 
         foreach (var entity in options.Entities)
         {
-            var entitySummary = await CollectEntityAsync(dataSource, entity, options.BatchSize, cancellationToken);
-            totalCollected += entitySummary.Collected;
-            totalInserted += entitySummary.Inserted;
+            try
+            {
+                var entitySummary = await CollectEntityAsync(dataSource, entity, options.BatchSize, cancellationToken);
+                totalCollected += entitySummary.Collected;
+                totalInserted += entitySummary.Inserted;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Uma entidade Arpa quebrada (view sync_export ausente, permissao
+                // negada, schema divergente) nao deve derrubar o ciclo inteiro -
+                // heartbeat, envio de vendas PDV e dispatcher precisam continuar.
+                failedEntities++;
+                _logger.LogWarning(
+                    ex,
+                    "Arpa collector: entidade '{EntityName}' falhou e foi pulada nesta execucao.",
+                    entity.Name);
+            }
+        }
+
+        if (failedEntities > 0)
+        {
+            _logger.LogWarning(
+                "Arpa collector: {Failed} de {Total} entidades falharam. Verifique as views sync_export e as permissoes do usuario read-only no Arpa.",
+                failedEntities,
+                options.Entities.Count);
         }
 
         return new ArpaCollectorRunSummary(true, totalCollected, totalInserted);

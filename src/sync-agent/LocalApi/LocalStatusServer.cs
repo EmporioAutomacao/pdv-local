@@ -486,6 +486,14 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.produtos</code> / <code>sync_export.estoque</code> no banco Arpa Control do cliente, com um usuario <em>read-only</em>. Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <table>
+                    <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
+                    <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
+                    <tr><td><code>42501: permission denied for relation ...</code></td><td>Usuario read-only do agente sem <code>GRANT SELECT</code> nas views.</td><td>Aplicar os grants de <code>sync-export-readonly-user-*.template.sql</code>.</td></tr>
+                    <tr><td><code>42703: column "..." does not exist</code></td><td>A view <code>sync_export</code> referencia colunas que nao existem no Arpa daquele cliente.</td><td>Regenerar a view do diagnostico real do schema.</td></tr>
+                  </table>
+                  <p>Se o cliente <strong>nao usa Arpa Control</strong>, o coletor deve estar desligado (<code>ArpaCollector:Enabled=false</code> no <code>appsettings.json</code>, ou a conexao Arpa nao vinculada a instalacao no ERP). A partir de 1.3.3 uma entidade Arpa quebrada e <strong>pulada</strong> e nao derruba o ciclo (heartbeat / vendas PDV / dispatcher continuam).</p>
                 </section>
 
                 <section class="panel">

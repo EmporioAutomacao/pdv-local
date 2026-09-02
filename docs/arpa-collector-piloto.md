@@ -267,3 +267,17 @@ Nao habilitar envio real se:
 - usuario do SyncAgent tiver permissao de escrita no Arpa;
 - houver dados sensiveis desnecessarios no payload;
 - normalizadores gerarem dead-letter em massa.
+
+## Erros do coletor em producao
+
+Log: `SyncAgent.Collectors.ArpaCollector` (Windows Event Log, fonte `SyncAgent`).
+A partir do agente `1.3.3` uma entidade que falha e **pulada** com aviso, sem
+derrubar o ciclo (heartbeat, vendas PDV e dispatcher continuam).
+
+| Erro | Causa | Correcao |
+|---|---|---|
+| `42P01: relation "sync_export.produtos" does not exist` | O schema/views `sync_export` nunca foi criado no banco Arpa Control desse cliente. | 1. No ERP: `python manage.py export_arpa_schema_diagnostics --conexao-id <id> --output-file arpa-diag.json`. 2. `new-arpa-sync-export-views-from-diagnostics.ps1 -DiagnosticsFile arpa-diag.json -OutputFile sync-export-views.generated.sql`. 3. Revisar o SQL contra o schema real. 4. Aplicar como **DBA** (nao o usuario read-only): `apply-arpa-sync-export-views.ps1 -SqlFile sync-export-views.generated.sql -PostgresHost <arpa> -DatabaseName <db> -DatabaseUser <dba> -ConfirmApply`. 5. `GRANT USAGE ON SCHEMA sync_export` + `GRANT SELECT` para o usuario do agente (ver `sync-export-readonly-user-*.template.sql`). 6. Preflight: `test-arpa-export-preflight.ps1`. |
+| `42501: permission denied for relation sync_export.produtos` | As views existem mas o usuario read-only do agente nao tem `GRANT SELECT`. | Aplicar os grants do `sync-export-readonly-user-*.template.sql` como DBA. |
+| `42703: column "..." does not exist` | A view `sync_export` referencia colunas que nao existem no Arpa daquele cliente (schema divergente). | Regenerar a view a partir do diagnostico real e reaplicar. |
+| Coleta sempre pulada / `configuracao remota indisponivel` | `UseRemoteConfig=true` e o ERP nao respondeu `GET /v1/sync/agents/{id}/arpa-connection` (404 = conexao Arpa nao vinculada a instalacao, ou sem capability `arpa_collector`). | No ERP, vincular a `ArpaControlConexao` a esta instalacao (`sync_installation`) e conceder a capability. |
+| Cliente **nao usa** Arpa Control | O coletor nao deveria estar habilitado. | `ArpaCollector:Enabled=false` no `appsettings.json` (ou nao vincular conexao no ERP) e reiniciar `AraraSuiteSync`. |
