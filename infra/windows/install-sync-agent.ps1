@@ -13,6 +13,10 @@ param(
     [string]$ClientCertificateThumbprint = "",
     [string]$PfxPath = "",
     [securestring]$PfxPassword,
+    # mTLS so quando o gateway do ERP exigir certificado cliente. O ERP padrao
+    # (Traefik atras do Cloudflare) NAO faz mTLS - deixar desligado, senao a
+    # sincronizacao para com "Client certificate is required".
+    [switch]$RequireMutualTls,
     [switch]$EnablePostInstallActivation,
     [string]$ProvisioningProtectedFile = "",
 
@@ -262,7 +266,7 @@ function Write-AgentConfig {
             ClientCertificatePasswordEnvironmentVariable = "PDV_SYNC_ERP_CERT_PASSWORD"
             ClientCertificatePassword = ""
             RequireBearerToken = $true
-            RequireMutualTls = $true
+            RequireMutualTls = [bool]$RequireMutualTls -or -not [string]::IsNullOrWhiteSpace($ClientCertificateThumbprint)
         }
     }
 

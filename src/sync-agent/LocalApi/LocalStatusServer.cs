@@ -448,6 +448,27 @@ public sealed class LocalStatusServer : BackgroundService
                 </section>
 
                 <section class="panel">
+                  <h2>Ativacao com o ERP e erros comuns</h2>
+                  <p>A ativacao e feita em <a href="/setup">/setup</a>: informe a <strong>URL do ERP</strong> (ex.: <code>https://cliente.ararasuite.com.br</code>) e o <strong>codigo de ativacao</strong> gerado no ERP em <em>API de Sincronizacao &gt; Codigos de Ativacao &gt; Gerar</em>. O codigo e de uso unico e validade curta.</p>
+                  <table>
+                    <tr><th>Mensagem / code</th><th>Causa</th><th>Correcao</th></tr>
+                    <tr><td><code>Aguardando ativacao com o ERP</code> (<code>not_provisioned</code>)</td><td>Estado normal antes de ativar.</td><td>Concluir a ativacao em <a href="/setup">/setup</a>.</td></tr>
+                    <tr><td><code>Configure o ID do cliente no CP...</code> (na tela do ERP)</td><td>O ERP nao tem o vinculo com o Control Plane.</td><td>No CP, botao <strong>Aplicar Configuracoes</strong> no cliente. Requer imagem ERP &ge; 0.0.94.</td></tr>
+                    <tr><td><code>invalid_response</code> — "must use HTTPS outside local development"</td><td>ERP antigo atras do proxy devolvia <code>http://</code> na URL da API.</td><td>Atualizar o ERP para &ge; 0.0.96. O codigo ja foi consumido: no ERP, apagar a instalacao orfa e gerar um novo.</td></tr>
+                    <tr><td><code>activation_code_used</code></td><td>Codigo ja consumido (tentativa anterior, ou envio duplo do formulario).</td><td>Gerar novo. Se sobrou instalacao orfa (Visto por ultimo vazio) no ERP e for reusar o mesmo instance_id, apaga-la antes.</td></tr>
+                    <tr><td><code>activation_code_expired</code> / <code>activation_code_revoked</code></td><td>Codigo fora da validade ou revogado.</td><td>Gerar um novo e usar em seguida.</td></tr>
+                    <tr><td><code>activation_code_not_found</code></td><td>Codigo incompleto, ou URL do ERP aponta para outro cliente.</td><td>Conferir o codigo inteiro e a URL do ERP.</td></tr>
+                    <tr><td><code>invalid_erp_url</code></td><td>URL nao e <code>https://</code> fora de localhost, ou malformada.</td><td>Corrigir a URL (fora da rede local exige HTTPS).</td></tr>
+                    <tr><td><code>erp_unreachable</code> / <code>activation_timeout</code></td><td>A maquina nao alcanca o ERP (rede, firewall, DNS, URL errada) ou ele nao respondeu a tempo.</td><td>Testar <code>curl</code>/navegador ate a URL do ERP a partir desta maquina.</td></tr>
+                    <tr><td><code>tenant_invalid</code></td><td>Codigo gerado antes do CP resolver o cliente.</td><td>No CP, Aplicar Configuracoes; depois gerar novo codigo.</td></tr>
+                    <tr><td><code>http_404</code> / <code>http_5xx</code></td><td>Rota <code>/v1/sync/...</code> ausente nesse dominio, ou ERP com erro.</td><td>Conferir se a URL e a do ERP do cliente e se ele esta no ar.</td></tr>
+                    <tr><td><code>Client certificate is required</code> (apos ativar, <code>runtime_status=degraded</code>)</td><td><code>ErpSecurity:RequireMutualTls=true</code> mas o ERP nao exige certificado cliente.</td><td>No <code>appsettings.json</code> do agente, <code>"RequireMutualTls": false</code> na secao <code>ErpSecurity</code>, e reiniciar <code>AraraSuiteSync</code>.</td></tr>
+                    <tr><td><code>23505 ... operators_login_key</code> (import de operadores)</td><td>Banco local reaproveitado entre clientes diferentes.</td><td>Agente &ge; 1.3.1 (import resiliente). Instalacao nova nao apresenta isso.</td></tr>
+                  </table>
+                  <p style="margin-top:10px;">Reativar uma instalacao ja ativada: parar o servico, apagar <code>C:\Program Files\AraraSuite.com.br\Sync\Secrets\sync-agent-provisioning.dpapi</code>, reiniciar e ativar de novo em <a href="/setup">/setup</a>.</p>
+                </section>
+
+                <section class="panel">
                   <h2>O que cada indicador significa</h2>
                   <table>
                     <tr><th>Indicador</th><th>Significado</th><th>Acao sugerida</th></tr>

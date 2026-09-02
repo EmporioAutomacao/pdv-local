@@ -459,3 +459,30 @@ Para reduzir retrabalho na ativacao:
   a linha "Estado atual" (aguardando ativacao / ativado / reconexao necessaria)
   e, no sucesso, a caixa verde "Ativacao aceita pelo ERP" alem do painel com
   instancia/tenant/URL/expiracao do token.
+
+## Erros de ativacao e correcoes (01/09/2026)
+
+Catalogo exibido tambem em `/help` do agente e no admin do ERP
+(tela "Gerar codigo de ativacao"). Guia canonico no repo `erp`:
+`docs/infra/sync-agent-ativacao-troubleshooting.md`.
+
+| Mensagem / `code` | Causa | Correcao |
+|---|---|---|
+| `Aguardando ativacao com o ERP` (`not_provisioned`) | Estado normal antes de ativar | Concluir a ativacao em `/setup` |
+| `Configure o ID do cliente no CP...` (tela do ERP) | ERP sem `CP_CLIENTE_ID` | CP -> cliente -> **Aplicar Configuracoes** (imagem ERP >= 0.0.94) |
+| `invalid_response` — must use HTTPS outside local development | ERP < 0.0.96 devolvia `erp_api_base_url` http (Traefik reescreve `X-Forwarded-Proto`) | Atualizar o ERP para >= 0.0.96; apagar a instalacao orfa no ERP e gerar codigo novo |
+| `activation_code_used` | Codigo ja consumido / envio duplo do form | Gerar codigo novo; apagar instalacao orfa se reusar o mesmo `instance_id` |
+| `activation_code_expired` / `activation_code_revoked` | Fora da validade / revogado | Gerar um novo e usar em seguida |
+| `activation_code_not_found` | Codigo incompleto ou URL do ERP de outro cliente | Conferir codigo e URL |
+| `already_provisioned` | Ja existe credencial DPAPI | Parar servico, apagar `sync-agent-provisioning.dpapi`, reiniciar, reativar |
+| `invalid_erp_url` | URL nao https fora de localhost ou malformada | Corrigir a URL |
+| `erp_unreachable` / `activation_timeout` (>= 1.3.0) | Maquina nao alcanca o ERP / timeout | Testar a URL do ERP pelo navegador na maquina do agente |
+| `tenant_invalid` | Codigo gerado antes do CP resolver | CP -> Aplicar Configuracoes; gerar codigo novo |
+| `http_404` / `http_5xx` | Rota `/v1/sync` ausente nesse dominio / ERP com erro | Conferir a URL e se `sync_api` esta no ar |
+| `Client certificate is required` (apos ativar, `degraded`) | `ErpSecurity:RequireMutualTls=true`, ERP sem mTLS | `"RequireMutualTls": false` no `appsettings.json` do agente + reiniciar `AraraSuiteSync` (instalador >= 1.3.2 ja usa `false`) |
+| `PostgresException 23505 ... operators_login_key` | Banco local reaproveitado entre clientes | Agente >= 1.3.1 (import resiliente por savepoint) |
+
+**Nota:** toda tentativa que chega a criar a `SyncInstallation` no ERP queima o
+codigo de ativacao, mesmo que o agente rejeite a resposta depois. Por isso quase
+sempre e preciso apagar a instalacao orfa e gerar um codigo novo a cada
+correcao.
