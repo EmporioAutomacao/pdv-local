@@ -23,6 +23,7 @@ public sealed class ErpHeartbeatClient
     private readonly IOptionsMonitor<ErpHeartbeatOptions> _heartbeatOptions;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly LocalSyncStore _localStore;
+    private readonly ArpaConnectionsStore _arpaConnectionsStore;
     private readonly ErpCredentialProvider _credentialProvider;
 
     public ErpHeartbeatClient(
@@ -31,6 +32,7 @@ public sealed class ErpHeartbeatClient
         IOptionsMonitor<ErpHeartbeatOptions> heartbeatOptions,
         IHttpClientFactory httpClientFactory,
         LocalSyncStore localStore,
+        ArpaConnectionsStore arpaConnectionsStore,
         ErpCredentialProvider credentialProvider)
     {
         _logger = logger;
@@ -38,6 +40,7 @@ public sealed class ErpHeartbeatClient
         _heartbeatOptions = heartbeatOptions;
         _httpClientFactory = httpClientFactory;
         _localStore = localStore;
+        _arpaConnectionsStore = arpaConnectionsStore;
         _credentialProvider = credentialProvider;
     }
 
@@ -60,12 +63,19 @@ public sealed class ErpHeartbeatClient
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(heartbeatOptions.TimeoutSeconds));
 
+        var arpaConnections = _arpaConnectionsStore.ReadAll();
         var request = new HeartbeatRequest(
             DateTimeOffset.UtcNow,
             syncOptions.AgentVersion,
             storeStatus.PendingOutboxEvents,
             storeStatus.OldestPendingAgeSeconds,
-            connectivity);
+            connectivity,
+            arpaConnections.Count == 0
+                ? null
+                : arpaConnections.Select(c => new HeartbeatArpaConnection(
+                    c.Nome, c.Host, c.Port, c.Database, c.Username, c.LojaCodigo,
+                    c.ControlaEstoque, c.SyncProdutos, c.SyncClientes, c.SyncEstoque,
+                    c.SyncVendas, c.SyncFinanceiro, c.Enabled)).ToList());
 
         var escapedInstanceId = Uri.EscapeDataString(syncOptions.InstanceId);
         using var httpRequest = new HttpRequestMessage(
@@ -181,7 +191,23 @@ public sealed record HeartbeatRequest(
     [property: JsonPropertyName("agent_version")] string AgentVersion,
     [property: JsonPropertyName("queue_size")] long QueueSize,
     [property: JsonPropertyName("oldest_pending_age_seconds")] int OldestPendingAgeSeconds,
-    [property: JsonPropertyName("connectivity")] string Connectivity);
+    [property: JsonPropertyName("connectivity")] string Connectivity,
+    [property: JsonPropertyName("arpa_connections")] IReadOnlyList<HeartbeatArpaConnection>? ArpaConnections = null);
+
+public sealed record HeartbeatArpaConnection(
+    [property: JsonPropertyName("nome")] string Nome,
+    [property: JsonPropertyName("host")] string Host,
+    [property: JsonPropertyName("port")] int Port,
+    [property: JsonPropertyName("database")] string Database,
+    [property: JsonPropertyName("username")] string Username,
+    [property: JsonPropertyName("loja_codigo")] string LojaCodigo,
+    [property: JsonPropertyName("controla_estoque")] bool ControlaEstoque,
+    [property: JsonPropertyName("sync_produtos")] bool SyncProdutos,
+    [property: JsonPropertyName("sync_clientes")] bool SyncClientes,
+    [property: JsonPropertyName("sync_estoque")] bool SyncEstoque,
+    [property: JsonPropertyName("sync_vendas")] bool SyncVendas,
+    [property: JsonPropertyName("sync_financeiro")] bool SyncFinanceiro,
+    [property: JsonPropertyName("enabled")] bool Enabled);
 
 public sealed record HeartbeatResponse(
     [property: JsonPropertyName("status")] string Status,

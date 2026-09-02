@@ -518,7 +518,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.produtos</code> / <code>sync_export.clientes</code> / <code>sync_export.estoque</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; botoes de Testar, Preparar views e Criar usuario read-only). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
@@ -1161,6 +1161,8 @@ public sealed class LocalStatusServer : BackgroundService
                 c.SyncProdutos ? "Produtos" : null,
                 c.SyncClientes ? "Clientes" : null,
                 c.SyncEstoque ? "Estoque" : null,
+                c.SyncVendas ? "Vendas" : null,
+                c.SyncFinanceiro ? "Financeiro" : null,
             }.Where(t => t is not null));
 
             rows.Append($$"""
@@ -1197,6 +1199,8 @@ public sealed class LocalStatusServer : BackgroundService
                     syncProdutos = c.SyncProdutos,
                     syncClientes = c.SyncClientes,
                     syncEstoque = c.SyncEstoque,
+                    syncVendas = c.SyncVendas,
+                    syncFinanceiro = c.SyncFinanceiro,
                     batchSize = c.BatchSize,
                     enabled = c.Enabled,
                 }),
@@ -1284,6 +1288,8 @@ public sealed class LocalStatusServer : BackgroundService
                       <label><input type="checkbox" id="f_produtos" name="sync_produtos" checked> Produtos</label>
                       <label><input type="checkbox" id="f_clientes" name="sync_clientes" checked> Clientes</label>
                       <label><input type="checkbox" id="f_estoque" name="sync_estoque"> Estoque</label>
+                      <label><input type="checkbox" id="f_vendas" name="sync_vendas"> Vendas</label>
+                      <label><input type="checkbox" id="f_financeiro" name="sync_financeiro"> Financeiro</label>
                       <label><input type="checkbox" id="f_controla" name="controla_estoque"> Controla o estoque desta Loja</label>
                       <label><input type="checkbox" id="f_enabled" name="enabled" checked> Ativa</label>
                     </div>
@@ -1333,6 +1339,8 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_produtos').checked = !!c.syncProdutos;
                   document.getElementById('f_clientes').checked = !!c.syncClientes;
                   document.getElementById('f_estoque').checked = !!c.syncEstoque;
+                  document.getElementById('f_vendas').checked = !!c.syncVendas;
+                  document.getElementById('f_financeiro').checked = !!c.syncFinanceiro;
                   document.getElementById('f_controla').checked = !!c.controlaEstoque;
                   document.getElementById('f_enabled').checked = !!c.enabled;
                   document.getElementById('formtitle').textContent = 'Editar conexao: ' + (c.nome||'');
@@ -1410,6 +1418,8 @@ public sealed class LocalStatusServer : BackgroundService
                     SyncProdutos = B("sync_produtos"),
                     SyncClientes = B("sync_clientes"),
                     SyncEstoque = B("sync_estoque"),
+                    SyncVendas = B("sync_vendas"),
+                    SyncFinanceiro = B("sync_financeiro"),
                     BatchSize = I("batch_size", 5000),
                     Enabled = B("enabled"),
                 };
@@ -1438,7 +1448,8 @@ public sealed class LocalStatusServer : BackgroundService
             {
                 var result = await _arpaDdlRunner.TestConnectionAsync(
                     V("host"), I("port", 5432), V("database"), V("username"), V("password"),
-                    B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), cancellationToken);
+                    B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"), B("sync_financeiro"),
+                    cancellationToken);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
                 return;
             }

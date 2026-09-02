@@ -40,6 +40,10 @@ public sealed record ArpaLocalConnection
 
     public bool SyncEstoque { get; init; }
 
+    public bool SyncVendas { get; init; }
+
+    public bool SyncFinanceiro { get; init; }
+
     public int BatchSize { get; init; } = 5000;
 
     public bool Enabled { get; init; } = true;

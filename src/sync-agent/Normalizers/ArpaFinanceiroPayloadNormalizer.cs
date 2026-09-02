@@ -2,64 +2,36 @@ using System.Text.Json.Nodes;
 
 namespace SyncAgent.Normalizers;
 
+/// <summary>
+/// A view <c>sync_export.financeiro</c> ja entrega o <c>payload_json</c> no
+/// formato consumido por <c>sync_api.domain_processor.apply_financeiro</c>
+/// (chaves <c>titulo_externo_id</c>, <c>natureza</c>, <c>codigo_venda_arpa</c>,
+/// <c>valor_base</c>, <c>vencimento</c>, <c>valor_recebido</c>...). O
+/// normalizador so garante a chave de identidade e <c>natureza=receber</c>
+/// (o contrato v1 so aceita titulos a receber).
+/// </summary>
 public sealed class ArpaFinanceiroPayloadNormalizer : IArpaPayloadNormalizer
 {
     public string EntityType => "financeiro";
 
     public JsonObject Normalize(string entityKey, JsonObject sourcePayload)
     {
-        var tituloId = JsonPayloadReader.ReadFirstString(sourcePayload, "titulo_id", "parcela_id", "documento", "numero")
+        var normalized = sourcePayload.DeepClone().AsObject();
+
+        var tituloId = JsonPayloadReader.ReadFirstString(
+            normalized, "titulo_externo_id", "codigo_titulo_arpa", "codigo_arpa", "titulo_id", "documento", "numero")
             ?? entityKey;
         if (string.IsNullOrWhiteSpace(tituloId))
         {
-            throw new InvalidOperationException("Financeiro payload requires a titulo id or entity_key.");
+            throw new InvalidOperationException("Financeiro payload requires titulo_externo_id or entity_key.");
         }
 
-        var normalized = new JsonObject
-        {
-            ["titulo_id"] = tituloId
-        };
+        normalized["titulo_externo_id"] = tituloId;
 
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "venda_id",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "venda_id", "pedido_id", "ordem_id"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "cliente_codigo",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "cliente_codigo", "codcliente", "codigo_cliente"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "tipo",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "tipo", "natureza"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "numero_parcela",
-            JsonPayloadReader.ReadDecimal(sourcePayload, "numero_parcela"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "status",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "status", "situacao"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "vencimento_utc",
-            JsonPayloadReader.ReadDateTimeOffset(sourcePayload, "vencimento_utc", "vencimento", "data_vencimento")?.ToString("O"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "pagamento_utc",
-            JsonPayloadReader.ReadDateTimeOffset(sourcePayload, "pagamento_utc", "pagamento", "data_pagamento")?.ToString("O"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "valor",
-            JsonPayloadReader.ReadDecimal(sourcePayload, "valor"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "valor_pago",
-            JsonPayloadReader.ReadDecimal(sourcePayload, "valor_pago"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "forma_pagamento",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "forma_pagamento", "especie_pagamento", "especie"));
+        if (string.IsNullOrWhiteSpace(JsonPayloadReader.ReadFirstString(normalized, "natureza", "tipo")))
+        {
+            normalized["natureza"] = "receber";
+        }
 
         return normalized;
     }

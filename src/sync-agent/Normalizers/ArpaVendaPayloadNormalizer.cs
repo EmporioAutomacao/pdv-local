@@ -2,93 +2,37 @@ using System.Text.Json.Nodes;
 
 namespace SyncAgent.Normalizers;
 
+/// <summary>
+/// A view <c>sync_export.vendas</c> ja entrega o <c>payload_json</c> no formato
+/// consumido por <c>sync_api.domain_processor.apply_arpa_venda</c> (chaves
+/// <c>codigo_venda_arpa</c>, <c>data</c>, <c>cliente_documento</c>,
+/// <c>empresa_cnpj</c>, <c>loja_codigo</c>, <c>itens[]</c> com
+/// <c>codigo_produto_arpa</c>...). O normalizador so garante a chave de
+/// identidade e o array de itens.
+/// </summary>
 public sealed class ArpaVendaPayloadNormalizer : IArpaPayloadNormalizer
 {
     public string EntityType => "venda";
 
     public JsonObject Normalize(string entityKey, JsonObject sourcePayload)
     {
-        var vendaId = JsonPayloadReader.ReadFirstString(sourcePayload, "pedido_id", "venda_id", "ordem_id", "numero", "codigo")
+        var normalized = sourcePayload.DeepClone().AsObject();
+
+        var codigo = JsonPayloadReader.ReadFirstString(
+            normalized, "codigo_venda_arpa", "codigo_arpa", "codigo", "venda_id", "pedido_id")
             ?? entityKey;
-        if (string.IsNullOrWhiteSpace(vendaId))
+        if (string.IsNullOrWhiteSpace(codigo))
         {
-            throw new InvalidOperationException("Venda payload requires a venda id or entity_key.");
+            throw new InvalidOperationException("Venda payload requires codigo_venda_arpa or entity_key.");
         }
 
-        var normalized = new JsonObject
-        {
-            ["venda_id"] = vendaId
-        };
+        normalized["codigo_venda_arpa"] = codigo;
 
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "cliente_codigo",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "cliente_codigo", "codcliente", "codigo_cliente"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "vendedor_codigo",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "vendedor_codigo", "codvendedor", "codigo_vendedor"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "loja_codigo",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "loja_codigo", "codigo_loja", "loja", "estoque_codigo"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "status",
-            JsonPayloadReader.ReadFirstString(sourcePayload, "status", "situacao"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "data_venda_utc",
-            JsonPayloadReader.ReadDateTimeOffset(sourcePayload, "data_venda_utc", "dataordem", "data_venda")?.ToString("O"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "subtotal",
-            JsonPayloadReader.ReadDecimal(sourcePayload, "subtotal"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "desconto_total",
-            JsonPayloadReader.ReadDecimal(sourcePayload, "desconto_total"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "total",
-            JsonPayloadReader.ReadDecimal(sourcePayload, "total"));
-        JsonPayloadReader.AddIfPresent(
-            normalized,
-            "itens",
-            NormalizeItens(JsonPayloadReader.ReadArray(sourcePayload, "itens")));
+        if (normalized["itens"] is not JsonArray)
+        {
+            normalized["itens"] = new JsonArray();
+        }
 
         return normalized;
-    }
-
-    private static JsonArray? NormalizeItens(JsonArray? itens)
-    {
-        if (itens is null)
-        {
-            return null;
-        }
-
-        var normalizedItens = new JsonArray();
-        foreach (var itemNode in itens)
-        {
-            if (itemNode is not JsonObject item)
-            {
-                continue;
-            }
-
-            var normalized = new JsonObject();
-            JsonPayloadReader.AddIfPresent(
-                normalized,
-                "produto_codigo",
-                JsonPayloadReader.ReadFirstString(item, "produto_codigo", "codigo_produto", "codigo", "codigo_arpa"));
-            JsonPayloadReader.AddIfPresent(normalized, "descricao", JsonPayloadReader.ReadString(item, "descricao"));
-            JsonPayloadReader.AddIfPresent(normalized, "quantidade", JsonPayloadReader.ReadDecimal(item, "quantidade"));
-            JsonPayloadReader.AddIfPresent(normalized, "valor_unitario", JsonPayloadReader.ReadDecimal(item, "valor_unitario"));
-            JsonPayloadReader.AddIfPresent(normalized, "desconto", JsonPayloadReader.ReadDecimal(item, "desconto"));
-            JsonPayloadReader.AddIfPresent(normalized, "total", JsonPayloadReader.ReadDecimal(item, "total"));
-
-            normalizedItens.Add(normalized);
-        }
-
-        return normalizedItens;
     }
 }

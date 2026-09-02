@@ -74,6 +74,68 @@ public sealed partial class ArpaDdlRunner
         WHERE p.codigo IS NOT NULL;
         """;
 
+    // Vendas/financeiro: schema legado do Arpa Control varia MUITO por cliente
+    // (pedidos/itenspedido/contas_receber com nomes proprios). Este e um
+    // template best-effort; se as tabelas/colunas diferirem, o CREATE VIEW
+    // falha e o runner devolve a mensagem apontando o fluxo por diagnostico.
+    // O payload_json ja sai no formato consumido por apply_arpa_venda /
+    // apply_financeiro no ERP.
+    private const string PrepareVendasFinanceiroSql = """
+        CREATE SCHEMA IF NOT EXISTS sync_export;
+
+        CREATE OR REPLACE VIEW sync_export.vendas AS
+        SELECT
+            v.codigo::text AS entity_key,
+            COALESCE(v.updated_at_utc, v.data, now())::timestamptz AS occurred_at_utc,
+            jsonb_build_object(
+                'codigo_venda_arpa', v.codigo,
+                'data', COALESCE(v.data, v.updated_at_utc),
+                'status', v.status,
+                'vendedor_codigo', v.codvendedor,
+                'desconto_total', v.desconto,
+                'especie_pagamento', v.forma_pagamento,
+                'cliente_documento', c.cnpj_cpf,
+                'cliente_nome', c.nome,
+                'itens', COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'codigo_produto_arpa', i.codproduto,
+                        'quantidade', i.quantidade,
+                        'valor_unitario', i.valorunitario,
+                        'desconto', i.desconto
+                    ))
+                    FROM public.itenspedido i
+                    WHERE i.codpedido = v.codigo
+                ), '[]'::jsonb)
+            )::text AS payload_json,
+            concat('arpa-venda-', v.codigo)::text AS trace_id
+        FROM public.pedidos v
+        LEFT JOIN public.clientes c ON c.codigo = v.codcliente
+        WHERE v.codigo IS NOT NULL;
+
+        CREATE OR REPLACE VIEW sync_export.financeiro AS
+        SELECT
+            r.codigo::text AS entity_key,
+            COALESCE(r.updated_at_utc, r.datapagamento, r.vencimento, now())::timestamptz AS occurred_at_utc,
+            jsonb_build_object(
+                'titulo_externo_id', r.codigo,
+                'natureza', 'receber',
+                'codigo_venda_arpa', r.codpedido,
+                'cliente_documento', c.cnpj_cpf,
+                'cliente_nome', c.nome,
+                'especie_pagamento', r.forma_pagamento,
+                'valor_base', r.valor,
+                'valor_recebido', r.valorpago,
+                'vencimento', r.vencimento,
+                'data_recebimento', r.datapagamento,
+                'status', r.status,
+                'documento', r.documento
+            )::text AS payload_json,
+            concat('arpa-financeiro-', r.codigo)::text AS trace_id
+        FROM public.contas_receber r
+        LEFT JOIN public.clientes c ON c.codigo = r.codcliente
+        WHERE r.codigo IS NOT NULL;
+        """;
+
     private readonly ILogger<ArpaDdlRunner> _logger;
 
     public ArpaDdlRunner(ILogger<ArpaDdlRunner> logger)
@@ -83,7 +145,7 @@ public sealed partial class ArpaDdlRunner
 
     public async Task<ArpaTestResult> TestConnectionAsync(
         string host, int port, string database, string username, string password,
-        bool needProdutos, bool needClientes, bool needEstoque,
+        bool needProdutos, bool needClientes, bool needEstoque, bool needVendas, bool needFinanceiro,
         CancellationToken cancellationToken)
     {
         try
@@ -92,7 +154,11 @@ public sealed partial class ArpaDdlRunner
             await using var conn = await dataSource.OpenConnectionAsync(cancellationToken);
 
             var views = new Dictionary<string, bool>();
-            foreach (var (view, needed) in new[] { ("produtos", needProdutos), ("clientes", needClientes), ("estoque", needEstoque) })
+            foreach (var (view, needed) in new[]
+            {
+                ("produtos", needProdutos), ("clientes", needClientes), ("estoque", needEstoque),
+                ("vendas", needVendas), ("financeiro", needFinanceiro),
+            })
             {
                 if (!needed)
                 {
@@ -123,9 +189,28 @@ public sealed partial class ArpaDdlRunner
         {
             await using var dataSource = NpgsqlDataSource.Create(BuildConnectionString(host, port, database, dbaUser, dbaPassword));
             await using var conn = await dataSource.OpenConnectionAsync(cancellationToken);
-            await using var cmd = new NpgsqlCommand(PrepareViewsSql, conn);
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
-            return new ArpaDdlResult(true, "Views sync_export criadas/atualizadas. Rode \"Testar conexao\".");
+
+            // Batch 1: produtos/clientes/estoque (schema comum, quase sempre passa).
+            await using (var cmd = new NpgsqlCommand(PrepareViewsSql, conn))
+            {
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            // Batch 2: vendas/financeiro (schema legado varia muito) - isolado
+            // para nao desfazer o batch 1 se falhar.
+            string? vendasFinNote = null;
+            try
+            {
+                await using var cmd = new NpgsqlCommand(PrepareVendasFinanceiroSql, conn);
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+            catch (PostgresException ex) when (ex.SqlState is "42703" or "42P01")
+            {
+                vendasFinNote = $" Vendas/financeiro NAO criados ({ex.MessageText}) - gere pelo diagnostico do schema real.";
+            }
+
+            var msg = "Views produtos/clientes/estoque criadas/atualizadas." + (vendasFinNote ?? " Vendas/financeiro tambem.");
+            return new ArpaDdlResult(vendasFinNote is null, msg + " Rode \"Testar conexao\".");
         }
         catch (PostgresException ex) when (ex.SqlState is "42703" or "42P01")
         {

@@ -133,9 +133,9 @@ public sealed class ArpaCollector
             var payload = JsonNode.Parse(row.PayloadJson)?.AsObject()
                 ?? throw new InvalidOperationException($"Collector '{entity.Name}' returned invalid payload_json.");
 
-            // Estoque e por Loja: injeta o loja_codigo da conexao (nome da Loja
-            // no ERP) quando a view sync_export.estoque nao o traz.
-            if (entity.EntityType == "estoque"
+            // Estoque e venda sao por Loja: injeta o loja_codigo da conexao
+            // (nome da Loja no ERP) quando a view sync_export nao o traz.
+            if ((entity.EntityType == "estoque" || entity.EntityType == "venda")
                 && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
                 && payload["loja_codigo"] is null)
             {

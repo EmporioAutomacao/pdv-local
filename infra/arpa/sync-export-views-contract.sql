@@ -91,3 +91,76 @@ SELECT
 FROM public.produtos p
 WHERE p.codigo IS NOT NULL;
 */
+
+-- View: sync_export.vendas
+-- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
+-- payload_json JA no formato consumido por sync_api.domain_processor.apply_arpa_venda:
+--   codigo_venda_arpa, data (timestamptz), status, vendedor_codigo, vendedor_nome,
+--   desconto_total, condicao_pagamento, especie_pagamento/forma_pagamento,
+--   numero_nota, cliente_documento, cliente_nome, empresa_cnpj, empresa_nome,
+--   loja_codigo (o agente injeta o loja_codigo da conexao se ausente),
+--   itens: [ { codigo_produto_arpa, quantidade, valor_unitario, desconto } ].
+-- O schema legado do Arpa (pedidos/itenspedido) varia MUITO por cliente -
+-- ajuste tabelas/colunas ao real. O agente/ERP tratam a ausencia de campos.
+/*
+CREATE OR REPLACE VIEW sync_export.vendas AS
+SELECT
+    v.codigo::text AS entity_key,
+    COALESCE(v.updated_at_utc, v.data, now())::timestamptz AS occurred_at_utc,
+    jsonb_build_object(
+        'codigo_venda_arpa', v.codigo,
+        'data', COALESCE(v.data, v.updated_at_utc),
+        'status', v.status,
+        'vendedor_codigo', v.codvendedor,
+        'desconto_total', v.desconto,
+        'especie_pagamento', v.forma_pagamento,
+        'cliente_documento', c.cnpj_cpf,
+        'cliente_nome', c.nome,
+        'itens', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+                'codigo_produto_arpa', i.codproduto,
+                'quantidade', i.quantidade,
+                'valor_unitario', i.valorunitario,
+                'desconto', i.desconto
+            ))
+            FROM public.itenspedido i WHERE i.codpedido = v.codigo
+        ), '[]'::jsonb)
+    )::text AS payload_json,
+    concat('arpa-venda-', v.codigo)::text AS trace_id
+FROM public.pedidos v
+LEFT JOIN public.clientes c ON c.codigo = v.codcliente
+WHERE v.codigo IS NOT NULL;
+*/
+
+-- View: sync_export.financeiro
+-- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
+-- payload_json JA no formato consumido por sync_api.domain_processor.apply_financeiro:
+--   titulo_externo_id, natureza='receber' (contrato v1 so aceita a receber),
+--   codigo_venda_arpa (link com a venda), cliente_documento, cliente_nome,
+--   cliente_codigo, especie_pagamento/forma_pagamento, valor_base, multa, juros,
+--   valor_recebido/valor_pago, valor_atual, vencimento, data_recebimento,
+--   status, nosso_numero, linha_digitavel, codigo_barras, url_boleto (opcionais).
+/*
+CREATE OR REPLACE VIEW sync_export.financeiro AS
+SELECT
+    r.codigo::text AS entity_key,
+    COALESCE(r.updated_at_utc, r.datapagamento, r.vencimento, now())::timestamptz AS occurred_at_utc,
+    jsonb_build_object(
+        'titulo_externo_id', r.codigo,
+        'natureza', 'receber',
+        'codigo_venda_arpa', r.codpedido,
+        'cliente_documento', c.cnpj_cpf,
+        'cliente_nome', c.nome,
+        'especie_pagamento', r.forma_pagamento,
+        'valor_base', r.valor,
+        'valor_recebido', r.valorpago,
+        'vencimento', r.vencimento,
+        'data_recebimento', r.datapagamento,
+        'status', r.status,
+        'documento', r.documento
+    )::text AS payload_json,
+    concat('arpa-financeiro-', r.codigo)::text AS trace_id
+FROM public.contas_receber r
+LEFT JOIN public.clientes c ON c.codigo = r.codcliente
+WHERE r.codigo IS NOT NULL;
+*/

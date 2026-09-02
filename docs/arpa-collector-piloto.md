@@ -16,9 +16,16 @@ nao mais so no `appsettings.json` nem no `ArpaControlConexao` do ERP.
 - **Multi-conexao:** uma conexao por Loja/Estoque do ERP. O campo
   *Loja/Estoque (nome no ERP)* vai como `loja_codigo` nos eventos de estoque
   (o ERP resolve/cria a Loja por nome).
-- **O que sincronizar:** toggles Produtos / Clientes / Estoque. O agente monta a
-  query padrao contra `sync_export.<view>` (mesma forma do
-  `build_sync_agent_entities` do ERP).
+- **O que sincronizar:** toggles Produtos / Clientes / Estoque / **Vendas** /
+  **Financeiro**. O agente monta a query padrao contra `sync_export.<view>`
+  (`produtos`, `clientes`, `estoque`, `vendas`, `financeiro`). O `payload_json`
+  das views de venda/financeiro ja sai no formato consumido por
+  `sync_api.domain_processor.apply_arpa_venda` / `apply_financeiro`.
+- **Espelho no ERP:** o agente reporta as conexoes (sem senha) no heartbeat
+  (contrato `../sync` 2.5.0). O ERP cria/atualiza linhas `ArpaControlConexao`
+  marcadas `gerido_pelo_agente=true` (somente leitura no admin) so para
+  exibicao; conexoes manuais nao sao tocadas. O sync direto agendado do ERP ja
+  ignora conexoes vinculadas a um SyncAgent.
 - **Persistencia:** arquivo `arpa-connections.dpapi` cifrado por DPAPI
   LocalMachine, no diretorio de secrets. Caminho em
   `ArpaCollector:LocalConnectionsProtectedFile`.

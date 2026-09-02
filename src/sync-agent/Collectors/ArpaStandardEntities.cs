@@ -21,7 +21,9 @@ public static class ArpaStandardEntities
     public static IReadOnlyList<ArpaEntityCollectorOptions> Build(
         bool produtos,
         bool clientes,
-        bool estoque)
+        bool estoque,
+        bool vendas = false,
+        bool financeiro = false)
     {
         var entities = new List<ArpaEntityCollectorOptions>();
 
@@ -38,6 +40,16 @@ public static class ArpaStandardEntities
         if (estoque)
         {
             entities.Add(Make("estoque", "estoque"));
+        }
+
+        if (vendas)
+        {
+            entities.Add(Make("vendas", "venda"));
+        }
+
+        if (financeiro)
+        {
+            entities.Add(Make("financeiro", "financeiro"));
         }
 
         return entities;

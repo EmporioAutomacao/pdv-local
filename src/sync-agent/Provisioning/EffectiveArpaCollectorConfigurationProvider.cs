@@ -143,7 +143,9 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
         var entities = ArpaStandardEntities.Build(
             connection.SyncProdutos,
             connection.SyncClientes,
-            connection.SyncEstoque);
+            connection.SyncEstoque,
+            connection.SyncVendas,
+            connection.SyncFinanceiro);
 
         return new EffectiveArpaCollectorConnection(
             connection.Id,
@@ -193,6 +195,8 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
                 SyncProdutos = !hasAny || entityTypes.Contains("produto"),
                 SyncClientes = !hasAny || entityTypes.Contains("cliente"),
                 SyncEstoque = hasAny && entityTypes.Contains("estoque"),
+                SyncVendas = hasAny && entityTypes.Contains("venda"),
+                SyncFinanceiro = hasAny && entityTypes.Contains("financeiro"),
                 BatchSize = options.BatchSize <= 0 ? 5000 : options.BatchSize,
                 Enabled = true,
             };
