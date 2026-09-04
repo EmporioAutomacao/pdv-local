@@ -156,6 +156,15 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OpenUpdateProgress()
     {
+        using (var check = new UpdateAvailableDialog(_statusClient))
+        {
+            if (check.ShowDialog() != DialogResult.OK)
+            {
+                _ = RefreshStatusAsync();
+                return;
+            }
+        }
+
         using var form = new UpdateProgressForm(_statusClient);
         form.ShowDialog();
         _ = RefreshStatusAsync();

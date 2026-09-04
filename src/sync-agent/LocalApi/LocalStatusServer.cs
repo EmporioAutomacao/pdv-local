@@ -220,6 +220,24 @@ public sealed class LocalStatusServer : BackgroundService
                 return;
             }
 
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == "/update-check")
+            {
+                var preview = await _selfUpdater.PreviewLatestAsync(cancellationToken);
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    new
+                    {
+                        current_version = preview.CurrentVersion,
+                        latest_version = preview.LatestVersion,
+                        update_available = preview.UpdateAvailable,
+                        release_notes = preview.ReleaseNotes,
+                        error = preview.Error,
+                    },
+                    cancellationToken);
+                return;
+            }
+
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/update-now")
             {
                 if (_updateProgress.IsInProgress)
@@ -551,14 +569,15 @@ public sealed class LocalStatusServer : BackgroundService
                   <table>
                     <tr><th>Etapa</th><th>Descricao</th></tr>
                     <tr><td>1. Bandeja</td><td>Clique com o botao direito no icone da bandeja e escolha <strong>Atualizar App</strong>.</td></tr>
-                    <tr><td>2. Busca</td><td>O agente consulta o ERP pela versao mais recente publicada (<code>is_current</code>), independente de qualquer agendamento administrativo pendente.</td></tr>
-                    <tr><td>3. Progresso</td><td>Uma janela com barra de progresso acompanha download, verificacao de SHA256 e aplicacao em tempo real.</td></tr>
+                    <tr><td>2. Comparacao</td><td>A janela consulta o ERP e mostra a <strong>versao instalada</strong> e a <strong>versao disponivel</strong> (<code>is_current</code>). Se ja estiver na mais recente, informa e nao faz nada; caso contrario, pede confirmacao antes de baixar.</td></tr>
+                    <tr><td>3. Progresso</td><td>Confirmada a atualizacao, uma janela com barra de progresso acompanha download, verificacao de SHA256 e aplicacao em tempo real.</td></tr>
                     <tr><td>4. Aplicacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico (mesmo mecanismo do fluxo administrativo, incluindo rollback automatico).</td></tr>
                     <tr><td>5. Retorno</td><td>Ao concluir, a bandeja reabre sozinha e mostra um aviso "Atualizacao concluida".</td></tr>
                   </table>
                   <p style="margin-top:10px;">Se a versao instalada ja for a mais recente, o agente informa e nao baixa nada.</p>
                   <p>Endpoints locais usados por esse fluxo:</p>
-                  <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-now" -Method Post
+                  <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-check" -Method Get
+            Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-now" -Method Post
             Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-status" -Method Get</pre>
                 </section>
 

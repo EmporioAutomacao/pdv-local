@@ -491,10 +491,12 @@ Auto-update ("Atualizar App" na bandeja):
    atualizacao` -> Adicionar (versao/URL/SHA256) -> acao **"Marcar como versao
    atual"**. Ou `python manage.py register_sync_package --pkg-version X.Y.Z
    --url <zip> --sha256 <hash>` (marca sozinho).
-3. Na maquina: bandeja -> **Atualizar App**. Baixa o `.zip` do GitHub, confere o
-   SHA256 e roda `self-update.ps1` (backup + troca de `PDV`/`Sync\Agent`/
-   `Sync\Tray` + rollback automatico). `appsettings.json` e credenciais
-   preservados.
+3. Na maquina: bandeja -> **Atualizar App**. A janela consulta o ERP e mostra a
+   **versao instalada** e a **versao disponivel**; se ja estiver na mais recente,
+   avisa e nao baixa nada, senao pede confirmacao. Confirmada, baixa o `.zip` do
+   GitHub, confere o SHA256 e roda `self-update.ps1` (backup + troca de `PDV`/
+   `Sync\Agent`/`Sync\Tray` + rollback automatico). `appsettings.json` e
+   credenciais preservados.
 
 `404 no_package_published` / *"Nenhuma versao publicada foi encontrada no ERP"*
 = nenhum pacote marcado como atual **nesse** ERP (o campo `is_current` nao e

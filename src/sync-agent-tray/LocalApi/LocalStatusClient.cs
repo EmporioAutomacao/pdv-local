@@ -26,6 +26,12 @@ public sealed class LocalStatusClient : IDisposable
             ?? throw new InvalidOperationException("Sync-now response is empty.");
     }
 
+    public async Task<UpdateCheckResponse> CheckUpdateAsync()
+    {
+        return await _httpClient.GetFromJsonAsync<UpdateCheckResponse>("/update-check")
+            ?? throw new InvalidOperationException("Update-check response is empty.");
+    }
+
     public async Task<SyncNowResponse> TriggerUpdateAsync()
     {
         using var response = await _httpClient.PostAsync("/update-now", content: null);

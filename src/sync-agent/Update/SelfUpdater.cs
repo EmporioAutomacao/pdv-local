@@ -55,6 +55,33 @@ public sealed class SelfUpdater
     }
 
     /// <summary>
+    /// Consulta sem efeito colateral (botao "Atualizar App" da bandeja, via
+    /// GET /update-check): retorna a versao instalada e a versao mais recente
+    /// publicada no ERP, sem baixar nem aplicar nada. A bandeja usa isso para
+    /// mostrar "versao atual x versao disponivel" e pedir confirmacao antes de
+    /// chamar POST /update-now.
+    /// </summary>
+    public async Task<UpdatePreview> PreviewLatestAsync(CancellationToken cancellationToken)
+    {
+        var currentVersion = _options.CurrentValue.AgentVersion;
+
+        if (!_options.CurrentValue.SelfUpdateEnabled)
+        {
+            return new UpdatePreview(currentVersion, null, false, null, "self_update_disabled");
+        }
+
+        var result = await _latestPackageClient.FetchAsync(cancellationToken);
+        if (!result.Succeeded || result.Package is null)
+        {
+            return new UpdatePreview(currentVersion, null, false, null, result.Error ?? "unknown");
+        }
+
+        var latestVersion = result.Package.Version;
+        var updateAvailable = !string.Equals(currentVersion, latestVersion, StringComparison.OrdinalIgnoreCase);
+        return new UpdatePreview(currentVersion, latestVersion, updateAvailable, result.Package.ReleaseNotes, null);
+    }
+
+    /// <summary>
     /// Disparado sob demanda (botao "Atualizar App" da bandeja, via
     /// POST /update-now): busca a versao mais recente publicada no ERP
     /// (independente de qualquer pending_update ja agendado via heartbeat
@@ -208,3 +235,15 @@ public sealed class SelfUpdater
         Process.Start(psi);
     }
 }
+
+/// <summary>
+/// Resultado de <see cref="SelfUpdater.PreviewLatestAsync"/>: versao instalada,
+/// versao publicada no ERP e se ha diferenca. <see cref="Error"/> preenchido
+/// quando nao foi possivel consultar o ERP (ou o self-update esta desabilitado).
+/// </summary>
+public sealed record UpdatePreview(
+    string CurrentVersion,
+    string? LatestVersion,
+    bool UpdateAvailable,
+    string? ReleaseNotes,
+    string? Error);
