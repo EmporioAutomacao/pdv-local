@@ -129,6 +129,8 @@ internal sealed class UpdateAvailableDialog : Form
     {
         "no_package_published" => "Nenhuma versao foi publicada no ERP ainda.",
         "not_provisioned" => "Esta instalacao ainda nao foi ativada no ERP.",
+        "invalid_package_sha256" => "O pacote publicado no ERP tem um Sha256 invalido (parece ser uma URL, nao o hash). "
+            + "Peca para corrigirem em API de Sincronizacao > Pacotes de atualizacao.",
         "self_update_disabled" => $"A atualizacao automatica esta desabilitada nesta instalacao (versao atual {currentVersion}).",
         "invalid_response" => "O ERP respondeu de forma inesperada a consulta de versao.",
         _ when code.StartsWith("http_", StringComparison.Ordinal) => $"O ERP retornou um erro ({code}) ao consultar a versao disponivel.",

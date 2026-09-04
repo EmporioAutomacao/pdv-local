@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using SyncAgent.Configuration;
 using SyncAgent.Heartbeat;
@@ -8,6 +9,8 @@ namespace SyncAgent.Update;
 
 public sealed class SelfUpdater
 {
+    private static readonly Regex Sha256HexPattern = new("^[0-9A-Fa-f]{64}$", RegexOptions.Compiled);
+
     private readonly ILogger<SelfUpdater> _logger;
     private readonly IOptionsMonitor<SyncAgentOptions> _options;
     private readonly IHostApplicationLifetime _lifetime;
@@ -78,6 +81,18 @@ public sealed class SelfUpdater
 
         var latestVersion = result.Package.Version;
         var updateAvailable = !string.Equals(currentVersion, latestVersion, StringComparison.OrdinalIgnoreCase);
+
+        // Pacote mal cadastrado no ERP (ex.: campo Sha256 preenchido com a URL do
+        // arquivo .sha256 em vez do hash) — avisa aqui, antes de a bandeja deixar
+        // o usuario confirmar um download que vai falhar la na frente.
+        if (updateAvailable && !Sha256HexPattern.IsMatch(result.Package.Sha256))
+        {
+            _logger.LogWarning(
+                "PreviewLatestAsync: pacote v{Version} tem Sha256 invalido no ERP ({Sha256Length} chars).",
+                latestVersion, result.Package.Sha256?.Length ?? 0);
+            return new UpdatePreview(currentVersion, latestVersion, false, null, "invalid_package_sha256");
+        }
+
         return new UpdatePreview(currentVersion, latestVersion, updateAvailable, result.Package.ReleaseNotes, null);
     }
 
@@ -132,6 +147,21 @@ public sealed class SelfUpdater
             "Self-update triggered: {CurrentVersion} -> {TargetVersion}. Downloading from {Url}.",
             currentVersion, targetVersion, downloadUrl);
 
+        if (!Sha256HexPattern.IsMatch(sha256))
+        {
+            _logger.LogError(
+                "Self-update aborted: Sha256 cadastrado no ERP para v{Version} nao e um hash valido ({Length} chars): {Sha256}",
+                targetVersion, sha256?.Length ?? 0, sha256);
+            _progress.Set(
+                UpdateStatus.Failed,
+                0,
+                "O Sha256 cadastrado no ERP para essa versao nao e um hash valido (parece ser uma URL ou texto incompleto). "
+                    + "Corrija o pacote em API de Sincronizacao > Pacotes de atualizacao antes de tentar de novo.",
+                targetVersion,
+                "invalid_package_sha256");
+            return false;
+        }
+
         var downloadDir = Path.Combine(Path.GetTempPath(), "pdv-update", targetVersion);
         Directory.CreateDirectory(downloadDir);
         var zipPath = Path.Combine(downloadDir, "payload.zip");
@@ -143,6 +173,21 @@ public sealed class SelfUpdater
 
             _progress.Set(UpdateStatus.Verifying, 100, "Verificando integridade do pacote...", targetVersion);
             VerifySha256(zipPath, sha256);
+        }
+        catch (InvalidDataException ex)
+        {
+            // VerifySha256 falhou: o SHA256 calculado do ZIP baixado nao bate com o
+            // cadastrado no ERP. Mensagem completa (hash esperado x obtido) vai pro
+            // log; a bandeja mostra um resumo acionavel.
+            _logger.LogError(ex, "Self-update SHA256 mismatch. Update aborted.");
+            _progress.Set(
+                UpdateStatus.Failed,
+                0,
+                "O SHA256 do pacote baixado nao confere com o cadastrado no ERP (pacote corrompido ou "
+                    + "cadastrado com o hash errado). Detalhes no log do servico.",
+                targetVersion,
+                "sha256_mismatch");
+            return false;
         }
         catch (Exception ex)
         {
