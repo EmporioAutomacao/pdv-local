@@ -525,6 +525,18 @@ editavel no formulario - so a acao ou o comando marcam). Guia:
 O canal administrativo (`Instalacoes do SyncAgent` -> "Solicitar atualizacao")
 continua em paralelo, agendando uma versao especifica via heartbeat.
 
+*Janela "Atualizar App" parada em "Baixando ... 97%" + balao "nao foi possivel
+consultar o servico local" repetindo, e o servico fica **Stopped*** (visto ate
+1.6.2): o `self-update.ps1` nao conseguia matar a bandeja/PDV a tempo e a copia
+de `Sync\Tray\SyncAgent.Tray.dll` falhava com "arquivo em uso" -> rollback.
+Contorno: fechar a bandeja, `Start-Service AraraSuiteSync`, tentar de novo com a
+bandeja fechada. **Corrigido na 1.6.3** (kill via `taskkill` com verificacao +
+copia com retry/backoff; janela nao congela mais). Como o hop 1.6.2 -> 1.6.3
+ainda roda o `self-update.ps1` **antigo** (o instalado), pode precisar do
+contorno uma ultima vez; a partir da 1.6.3 o agente extrai o `self-update.ps1`
+do proprio pacote baixado, entao correcoes no script passam a valer ja na
+atualizacao que as entrega.
+
 Endpoints uteis do dashboard/API local (sempre `127.0.0.1:47891`):
 
 | Endpoint | Metodo | Uso |

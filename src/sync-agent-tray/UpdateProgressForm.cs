@@ -119,25 +119,33 @@ internal sealed class UpdateProgressForm : Form
         }
         catch
         {
-            if (_seenApplyingPhase)
+            // A API local caiu. O caso normal e o self-update.ps1 estar trocando
+            // os binarios e reiniciando o servico - ele grava o progresso em
+            // update-status.json, entao seguimos por ele. Antes isso so era
+            // tentado depois de a janela ter visto a fase "Applying"; se a
+            // conexao caisse antes disso (download rapido, poll com azar), a
+            // janela congelava em "Baixando ... 97%" pra sempre. Agora tenta o
+            // disco sempre que a API some e o arquivo esta fresco.
+            var fromDisk = TryReadDiskStatus();
+            if (fromDisk is not null)
             {
-                // Esperado: a API local cai enquanto self-update.ps1 troca os
-                // binarios e reinicia o servico. Tenta ler o progresso do
-                // script direto do disco; se nao conseguir, so mantem a
-                // mensagem de "aplicando" ja exibida.
-                var fromDisk = TryReadDiskStatus();
-                if (fromDisk is not null)
+                _seenApplyingPhase = true;
+                _bar.Style = ProgressBarStyle.Marquee;
+                _messageLabel.Text = fromDisk.Value.Message;
+                if (fromDisk.Value.Status is "completed")
                 {
-                    _messageLabel.Text = fromDisk.Value.Message;
-                    if (fromDisk.Value.Status == "completed")
-                    {
-                        ShowTerminal("Atualizacao concluida. A bandeja sera reaberta em instantes.", success: true);
-                    }
-                    else if (fromDisk.Value.Status == "failed")
-                    {
-                        ShowTerminal(fromDisk.Value.Message, success: false);
-                    }
+                    ShowTerminal("Atualizacao concluida. A bandeja sera reaberta em instantes.", success: true);
                 }
+                else if (fromDisk.Value.Status is "failed" or "rolled_back")
+                {
+                    ShowTerminal(fromDisk.Value.Message, success: false);
+                }
+            }
+            else if (!_seenApplyingPhase)
+            {
+                // Sem status em disco e ainda na fase de download/verificacao:
+                // provavelmente um soluco de rede momentaneo. A proxima poll
+                // tenta de novo - nao trava a barra.
             }
         }
     }
@@ -189,6 +197,15 @@ internal sealed class UpdateProgressForm : Form
             var installRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
             var statusFile = Path.Combine(installRoot, "update-status.json");
             if (!File.Exists(statusFile))
+            {
+                return null;
+            }
+
+            // update-status.json fica no disco depois da atualizacao (status
+            // "completed"/"failed"). So confiar nele se for recente - senao uma
+            // reabertura da janela mais tarde, com um soluco de rede, leria um
+            // "completed" velho e mostraria sucesso a toa.
+            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(statusFile) > TimeSpan.FromMinutes(15))
             {
                 return null;
             }

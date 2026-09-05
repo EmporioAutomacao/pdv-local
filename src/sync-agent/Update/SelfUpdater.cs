@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
@@ -245,7 +246,12 @@ public sealed class SelfUpdater
             return false;
         }
 
-        var scriptPath = Path.Combine(AppContext.BaseDirectory, "self-update.ps1");
+        // Preferir o self-update.ps1 que veio DENTRO do pacote baixado ao que
+        // esta instalado: assim uma correcao no script ja vale na propria
+        // atualizacao que a entrega, sem depender de um "hop" extra. Cai para
+        // o instalado se o pacote nao trouxer o script (formatos antigos).
+        var scriptPath = ExtractUpdateScriptFromPackage(zipPath, downloadDir)
+            ?? Path.Combine(AppContext.BaseDirectory, "self-update.ps1");
         if (!File.Exists(scriptPath))
         {
             _logger.LogError("self-update.ps1 not found at {Path}. Update aborted.", scriptPath);
@@ -309,6 +315,36 @@ public sealed class SelfUpdater
         if (!string.Equals(actual, expectedHex, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(
                 $"SHA256 mismatch: expected {expectedHex}, got {actual}.");
+    }
+
+    /// <summary>
+    /// Extrai <c>payload/Sync/Agent/self-update.ps1</c> do pacote baixado para
+    /// <paramref name="targetDir"/> e devolve o caminho. Retorna null (e o
+    /// chamador usa o script instalado) se o pacote nao tiver o script ou a
+    /// extracao falhar.
+    /// </summary>
+    private string? ExtractUpdateScriptFromPackage(string zipPath, string targetDir)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(zipPath);
+            var entry = archive.Entries.FirstOrDefault(e =>
+                e.FullName.Replace('\\', '/').EndsWith("payload/Sync/Agent/self-update.ps1", StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                return null;
+            }
+
+            var destination = Path.Combine(targetDir, "self-update.ps1");
+            entry.ExtractToFile(destination, overwrite: true);
+            _logger.LogInformation("Usando self-update.ps1 do proprio pacote baixado ({Path}).", destination);
+            return destination;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Falha ao extrair self-update.ps1 do pacote; usando o script instalado.");
+            return null;
+        }
     }
 
     private static void LaunchUpdateScript(string scriptPath, string zipPath, string version, string installRoot)

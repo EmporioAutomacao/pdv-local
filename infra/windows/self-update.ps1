@@ -71,6 +71,55 @@ function Write-ProgressStatus {
     Write-Log $Message
 }
 
+function Copy-TreeWithRetry {
+    # A copia de PDV\ e Sync\Tray\ pode falhar por handle preso (bandeja/PDV
+    # recem-encerrados, antivirus varrendo a DLL). Em vez de uma tentativa
+    # unica com Start-Sleep fixo, tenta varias vezes com folga entre elas.
+    param(
+        [Parameter(Mandatory)] [string] $Source,
+        [Parameter(Mandatory)] [string] $Destination,
+        [Parameter(Mandatory)] [string] $Label,
+        [int] $MaxAttempts = 8,
+        [int] $DelaySeconds = 3
+    )
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Copy-Item "$Source\*" $Destination -Recurse -Force -ErrorAction Stop
+            if ($attempt -gt 1) { Write-Log "Copia de '$Label' concluida na tentativa $attempt." }
+            return
+        } catch {
+            if ($attempt -ge $MaxAttempts) { throw }
+            Write-Log "Copia de '$Label' falhou (tentativa $attempt/$MaxAttempts): $($_.Exception.Message). Nova tentativa em ${DelaySeconds}s." 'Error'
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
+function Stop-ClientApps {
+    # taskkill /F e mais confiavel que Stop-Process quando o script roda como
+    # LocalSystem (Sessao 0) e o alvo (PDV App / bandeja) esta na sessao do
+    # usuario logado. Sem /T de proposito - nao queremos matar processo-pai.
+    # Repete kill + verificacao ate os processos sumirem de fato (o antigo
+    # Start-Sleep 4 fixo nao dava conta e a copia da Tray falhava com o
+    # arquivo em uso).
+    $exeNames  = @('PdvLocal.App.exe', 'SyncAgent.Tray.exe')
+    $procMatch = { $_.ProcessName -in @('PdvLocal.App', 'SyncAgent.Tray') -or $_.ProcessName -like 'SYNCAG~*' -or $_.ProcessName -like 'PDVLOC~*' }
+
+    for ($round = 1; $round -le 15; $round++) {
+        $alive = Get-Process -ErrorAction SilentlyContinue | Where-Object $procMatch
+        if (-not $alive) {
+            if ($round -gt 1) { Write-Log "PDV App e bandeja encerrados (verificacao $round)." }
+            Start-Sleep -Seconds 2   # folga final para o antivirus soltar o handle da DLL
+            return
+        }
+        foreach ($n in $exeNames) { & taskkill.exe /F /IM $n 2>&1 | Out-Null }
+        $alive | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+
+    Write-Log "PDV App/bandeja ainda em execucao apos ~30s - a copia sera tentada mesmo assim (com retry)." 'Error'
+}
+
 function Restore-Backup {
     param([string]$BackupDir)
     Write-ProgressStatus -StepNumber 9 -StepName 'restoring_backup' -Message "Restaurando backup de $BackupDir..." -Status 'in_progress'
@@ -78,7 +127,11 @@ function Restore-Backup {
         $src = Join-Path $BackupDir $comp.Relative
         $dst = Join-Path $InstallRoot $comp.Relative
         if (Test-Path $src) {
-            Copy-Item "$src\*" $dst -Recurse -Force -ErrorAction SilentlyContinue
+            try {
+                Copy-TreeWithRetry -Source $src -Destination $dst -Label "restore $($comp.Name)" -MaxAttempts 5 -DelaySeconds 3
+            } catch {
+                Write-Log "Falha ao restaurar '$($comp.Name)' do backup: $($_.Exception.Message)" 'Error'
+            }
         }
     }
 }
@@ -180,10 +233,9 @@ if ($svc -and $svc.Status -ne 'Stopped') {
     Start-Sleep -Seconds 3
 }
 
-# --- 3. Encerrar PDV App e SyncAgent Tray se em execucao ---
+# --- 3. Encerrar PDV App e SyncAgent Tray e aguardar os handles serem liberados ---
 Write-ProgressStatus -StepNumber 3 -StepName 'stopping_apps' -Message "Encerrando PDV App e bandeja..."
-Get-Process -Name 'PdvLocal.App','SyncAgent.Tray' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 4  # aguardar liberacao de file handles
+Stop-ClientApps
 
 # --- 4. Desabilitar recuperacao automatica temporariamente ---
 Write-ProgressStatus -StepNumber 4 -StepName 'disabling_recovery' -Message "Desabilitando recuperacao automatica do servico..."
@@ -204,7 +256,7 @@ foreach ($comp in $components) {
     $dst = Join-Path $backupDir $comp.Relative
     if (Test-Path $src) {
         New-Item -ItemType Directory -Force -Path $dst | Out-Null
-        Copy-Item "$src\*" $dst -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-TreeWithRetry -Source $src -Destination $dst -Label "backup $($comp.Name)" -MaxAttempts 5 -DelaySeconds 3
     }
 }
 
@@ -223,7 +275,7 @@ try {
         $src = Join-Path $payloadDir $comp.Relative
         $dst = Join-Path $InstallRoot $comp.Relative
         if (Test-Path $src) {
-            Copy-Item "$src\*" $dst -Recurse -Force
+            Copy-TreeWithRetry -Source $src -Destination $dst -Label $comp.Name
             Write-Log "Copiado: $($comp.Name)"
         }
     }
