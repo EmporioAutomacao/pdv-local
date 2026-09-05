@@ -25,6 +25,7 @@ public sealed class LocalStatusServer : BackgroundService
     private const string SetupPath = "/setup";
     private const string ConfigPath = "/config";
     private const string ConfigArpaPath = "/config/arpa";
+    private const string ConfigArpaLojasPath = "/config/arpa/lojas";
     private const string LogsPath = "/logs";
     private const string HelpPath = "/help";
     private const string StatusPath = "/status";
@@ -54,6 +55,8 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly EffectiveSyncAgentConfigurationProvider _effectiveConfigProvider;
     private readonly ErpActivationClient _erpActivationClient;
     private readonly ArpaConnectionsStore _arpaConnectionsStore;
+    private readonly ArpaCollectorSettingsStore _arpaSettingsStore;
+    private readonly ArpaLojaListClient _arpaLojaListClient;
     private readonly ArpaDdlRunner _arpaDdlRunner;
     private readonly LocalSyncStore _localStore;
     private readonly ManualSyncSignal _manualSyncSignal;
@@ -76,6 +79,8 @@ public sealed class LocalStatusServer : BackgroundService
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
         ErpActivationClient erpActivationClient,
         ArpaConnectionsStore arpaConnectionsStore,
+        ArpaCollectorSettingsStore arpaSettingsStore,
+        ArpaLojaListClient arpaLojaListClient,
         ArpaDdlRunner arpaDdlRunner,
         LocalSyncStore localStore,
         ManualSyncSignal manualSyncSignal,
@@ -90,6 +95,8 @@ public sealed class LocalStatusServer : BackgroundService
         _effectiveConfigProvider = effectiveConfigProvider;
         _erpActivationClient = erpActivationClient;
         _arpaConnectionsStore = arpaConnectionsStore;
+        _arpaSettingsStore = arpaSettingsStore;
+        _arpaLojaListClient = arpaLojaListClient;
         _arpaDdlRunner = arpaDdlRunner;
         _localStore = localStore;
         _manualSyncSignal = manualSyncSignal;
@@ -162,6 +169,12 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaPath)
             {
                 await WriteConfigArpaAsync(context.Response, context.Request.Url.Query, null, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaLojasPath)
+            {
+                await HandleConfigArpaLojasAsync(context.Response, cancellationToken);
                 return;
             }
 
@@ -568,14 +581,14 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
                     <tr><td><code>42501: permission denied for relation ...</code></td><td>Usuario read-only do agente sem <code>GRANT SELECT</code> nas views.</td><td>Aplicar os grants de <code>sync-export-readonly-user-*.template.sql</code>.</td></tr>
                     <tr><td><code>42703: column "..." does not exist</code></td><td>A view <code>sync_export</code> referencia colunas que nao existem no Arpa daquele cliente.</td><td>Regenerar a view do diagnostico real do schema.</td></tr>
                   </table>
-                  <p>Se o cliente <strong>nao usa Arpa Control</strong>, o coletor deve estar desligado (<code>ArpaCollector:Enabled=false</code> no <code>appsettings.json</code>). A partir de 1.3.3 uma entidade Arpa quebrada e <strong>pulada</strong> e nao derruba o ciclo (heartbeat / vendas PDV / dispatcher continuam). A partir de 1.4.0 o agente suporta varias conexoes Arpa, geridas localmente na aba Configuracoes.</p>
+                  <p>Se o cliente <strong>nao usa Arpa Control</strong>, o coletor deve ficar desativado (botao <strong>Desativar coletor</strong> em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a>; ou <code>ArpaCollector:Enabled=false</code> no <code>appsettings.json</code> quando o botao nunca foi usado). A partir de 1.3.3 uma entidade Arpa quebrada e <strong>pulada</strong> e nao derruba o ciclo (heartbeat / vendas PDV / dispatcher continuam). A partir de 1.4.0 o agente suporta varias conexoes Arpa, geridas localmente na aba Configuracoes.</p>
                 </section>
 
                 <section class="panel">
@@ -1144,11 +1157,11 @@ public sealed class LocalStatusServer : BackgroundService
 
     private async Task WriteConfigIndexAsync(HttpListenerResponse response, CancellationToken cancellationToken)
     {
-        var arpaEnabled = _arpaOptions.CurrentValue.Enabled;
+        var arpaEnabled = _arpaSettingsStore.IsEffectivelyEnabled();
         var arpaCount = _arpaConnectionsStore.ReadAll().Count;
         var arpaLine = arpaEnabled
             ? $"{arpaCount} conexao(oes) configurada(s)."
-            : "Coletor desligado (ArpaCollector:Enabled=false no appsettings.json).";
+            : "Coletor desligado.";
 
         var html = $$"""
             <!doctype html>
@@ -1194,8 +1207,13 @@ public sealed class LocalStatusServer : BackgroundService
         string? flashMessage,
         CancellationToken cancellationToken)
     {
-        var enabled = _arpaOptions.CurrentValue.Enabled;
+        var enabled = _arpaSettingsStore.IsEffectivelyEnabled();
         var connections = _arpaConnectionsStore.ReadAll();
+        var lojasEmUsoJson = JsonSerializer.Serialize(
+            connections
+                .Where(c => !string.IsNullOrWhiteSpace(c.LojaCodigo))
+                .Select(c => new { id = c.Id, nome = c.Nome, lojaCodigo = c.LojaCodigo }),
+            JsonOptions);
 
         var msg = flashMessage ?? ReadQueryParam(queryString, "msg");
 
@@ -1259,9 +1277,16 @@ public sealed class LocalStatusServer : BackgroundService
         var msgHtml = string.IsNullOrWhiteSpace(msg)
             ? string.Empty
             : $"""<div class="message okbox">{Html(msg!)}</div>""";
-        var disabledNote = enabled
-            ? string.Empty
-            : """<div class="message warnbox">O coletor Arpa esta desligado. Ative com <code>ArpaCollector:Enabled=true</code> no appsettings.json e reinicie o servico para as conexoes abaixo passarem a coletar.</div>""";
+        var toggleStatusClass = enabled ? "ok" : "warn";
+        var toggleStatusLabel = enabled ? "Ativado" : "Desativado";
+        var toggleHint = enabled
+            ? "As conexoes ativas abaixo estao coletando."
+            : "Nenhuma conexao coleta enquanto o coletor estiver desativado.";
+        var toggleButtonClass = enabled ? "danger" : string.Empty;
+        var toggleButtonLabel = enabled ? "Desativar coletor" : "Ativar coletor";
+        var toggleConfirmJs = enabled
+            ? "confirm('Desativar o coletor Arpa? As conexoes abaixo param de coletar ate serem reativadas aqui.')"
+            : "true";
 
         var html = $$"""
             <!doctype html>
@@ -1296,9 +1321,13 @@ public sealed class LocalStatusServer : BackgroundService
                 .message { border-radius: 8px; padding: 12px; margin: 14px 0; font-weight: 600; }
                 .okbox { background: #dcfce7; color: #166534; }
                 .warnbox { background: #fef3c7; color: #92400e; }
+                .ok { color: #047857; }
+                .warn { color: #b45309; }
+                .togglebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
                 #status { margin-top: 10px; font-weight: 600; white-space: pre-wrap; }
                 details { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
                 summary { cursor: pointer; font-weight: 600; color: #334155; }
+                select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; }
               </style>
             </head>
             <body>
@@ -1307,7 +1336,14 @@ public sealed class LocalStatusServer : BackgroundService
                 <p class="muted">Cada conexao aponta para um banco Arpa Control e e mapeada a uma Loja/Estoque do ERP. As conexoes ficam salvas nesta maquina (cifradas por DPAPI).</p>
                 {{LocalNavHtml(ConfigPath)}}
                 {{msgHtml}}
-                {{disabledNote}}
+
+                <section class="panel togglebar">
+                  <div>
+                    <h2 style="margin:0">Coletor Arpa: <span class="{{toggleStatusClass}}">{{toggleStatusLabel}}</span></h2>
+                    <p class="muted" style="margin:4px 0 0">{{toggleHint}}</p>
+                  </div>
+                  <button type="button" class="{{toggleButtonClass}}" onclick="if({{toggleConfirmJs}})toggleEnabled()">{{toggleButtonLabel}}</button>
+                </section>
 
                 <section class="panel">
                   <h2>Conexoes</h2>
@@ -1323,7 +1359,13 @@ public sealed class LocalStatusServer : BackgroundService
                     <input type="hidden" name="id" id="f_id">
                     <div class="row2">
                       <div><label for="f_nome">Nome</label><input type="text" id="f_nome" name="nome" required placeholder="Ex.: Loja Centro"></div>
-                      <div><label for="f_loja">Loja/Estoque (nome no ERP)</label><input type="text" id="f_loja" name="loja_codigo" placeholder="Ex.: Centro"></div>
+                      <div>
+                        <label for="f_loja_select">Loja/Estoque (nome no ERP)</label>
+                        <select id="f_loja_select" onchange="onLojaSelectChange()"></select>
+                        <input type="text" id="f_loja_custom" placeholder="Nome da Loja/Estoque no ERP" style="display:none; margin-top:6px" oninput="onLojaCustomInput()">
+                        <input type="hidden" id="f_loja" name="loja_codigo">
+                        <div id="loja_warning" class="muted" style="margin-top:4px; font-size:12px"></div>
+                      </div>
                     </div>
                     <div class="row3">
                       <div><label for="f_host">Host</label><input type="text" id="f_host" name="host" required placeholder="127.0.0.1"></div>
@@ -1373,14 +1415,102 @@ public sealed class LocalStatusServer : BackgroundService
               </main>
               <script>
                 var CONNS = {{connectionsJson}};
+                var LOJAS_EM_USO = {{lojasEmUsoJson}};
+                var LOJAS = [];
+
+                function toggleEnabled(){
+                  setStatus('Atualizando...', true);
+                  var novoValor = {{(enabled ? "false" : "true")}};
+                  fetch('/config/arpa/set-enabled', { method:'POST', body: new URLSearchParams({ enabled: novoValor.toString() }) })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ location.href = '/config/arpa?msg=' + encodeURIComponent(j.message || 'OK.'); })
+                    .catch(function(e){ setStatus(String(e), false); });
+                }
+
+                function populateLojaSelect(selectedNome){
+                  var sel = document.getElementById('f_loja_select');
+                  sel.innerHTML = '';
+                  var placeholder = document.createElement('option');
+                  placeholder.value = '';
+                  placeholder.textContent = LOJAS.length ? 'Selecione a Loja/Estoque...' : '(nao foi possivel consultar o ERP agora)';
+                  sel.appendChild(placeholder);
+                  LOJAS.forEach(function(l){
+                    var opt = document.createElement('option');
+                    opt.value = l.nome;
+                    opt.textContent = l.empresa_nome ? (l.nome + ' — ' + l.empresa_nome) : l.nome;
+                    sel.appendChild(opt);
+                  });
+                  var custom = document.createElement('option');
+                  custom.value = '__custom__';
+                  custom.textContent = 'Outro (digitar manualmente)';
+                  sel.appendChild(custom);
+
+                  var customInput = document.getElementById('f_loja_custom');
+                  if(selectedNome && LOJAS.some(function(l){ return l.nome === selectedNome; })){
+                    sel.value = selectedNome;
+                    customInput.style.display = 'none';
+                    customInput.value = '';
+                  } else if(selectedNome){
+                    sel.value = '__custom__';
+                    customInput.style.display = 'block';
+                    customInput.value = selectedNome;
+                  } else {
+                    sel.value = '';
+                    customInput.style.display = 'none';
+                    customInput.value = '';
+                  }
+                  document.getElementById('f_loja').value = selectedNome || '';
+                  checkLojaDuplicada();
+                }
+
+                function onLojaSelectChange(){
+                  var sel = document.getElementById('f_loja_select');
+                  var custom = document.getElementById('f_loja_custom');
+                  if(sel.value === '__custom__'){
+                    custom.style.display = 'block';
+                    custom.value = '';
+                    custom.focus();
+                    document.getElementById('f_loja').value = '';
+                  } else {
+                    custom.style.display = 'none';
+                    custom.value = '';
+                    document.getElementById('f_loja').value = sel.value;
+                    var nomeField = document.getElementById('f_nome');
+                    if(sel.value && !nomeField.value){ nomeField.value = sel.value; }
+                  }
+                  checkLojaDuplicada();
+                }
+
+                function onLojaCustomInput(){
+                  document.getElementById('f_loja').value = document.getElementById('f_loja_custom').value;
+                  checkLojaDuplicada();
+                }
+
+                function checkLojaDuplicada(){
+                  var warn = document.getElementById('loja_warning');
+                  var value = (document.getElementById('f_loja').value || '').trim().toLowerCase();
+                  var currentId = document.getElementById('f_id').value;
+                  if(!value){ warn.textContent = ''; return; }
+                  var conflito = LOJAS_EM_USO.find(function(c){ return c.id !== currentId && (c.lojaCodigo||'').trim().toLowerCase() === value; });
+                  warn.textContent = conflito ? ('Ja vinculada a conexao "' + conflito.nome + '".') : '';
+                  warn.style.color = conflito ? '#b45309' : '#64748b';
+                }
+
+                function loadLojas(selectedNome){
+                  fetch('/config/arpa/lojas')
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ LOJAS = (j.ok && j.lojas) ? j.lojas : []; populateLojaSelect(selectedNome); })
+                    .catch(function(){ LOJAS = []; populateLojaSelect(selectedNome); });
+                }
+
                 function fd(){ return new URLSearchParams(new FormData(document.getElementById('connform'))); }
                 function setStatus(t, ok){ var s=document.getElementById('status'); s.textContent=t; s.style.color = ok ? '#166534' : '#92400e'; }
-                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); }
+                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); }
                 function editConn(id){
                   var c = CONNS[id]; if(!c) return;
                   document.getElementById('f_id').value = c.id;
                   document.getElementById('f_nome').value = c.nome || '';
-                  document.getElementById('f_loja').value = c.lojaCodigo || '';
+                  loadLojas(c.lojaCodigo || '');
                   document.getElementById('f_host').value = c.host || '';
                   document.getElementById('f_port').value = c.port || 5432;
                   document.getElementById('f_db').value = c.database || '';
@@ -1418,12 +1548,39 @@ public sealed class LocalStatusServer : BackgroundService
                     .then(function(j){ location.href = '/config/arpa?msg=' + encodeURIComponent(j.message || 'OK.'); })
                     .catch(function(e){ setStatus(String(e), false); });
                 }
+                loadLojas();
               </script>
             </body>
             </html>
             """;
 
         await WriteHtmlAsync(response, html, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lista de Lojas/Estoque cadastradas no ERP, para o formulario de
+    /// conexao popular o campo "Loja/Estoque" como uma lista em vez de texto
+    /// livre. Falha (offline, nao provisionado etc.) devolve <c>ok:false</c>
+    /// com <c>error</c> — a tela cai para digitacao manual nesse caso.
+    /// </summary>
+    private async Task HandleConfigArpaLojasAsync(HttpListenerResponse response, CancellationToken cancellationToken)
+    {
+        var result = await _arpaLojaListClient.FetchAsync(cancellationToken);
+        if (!result.Succeeded)
+        {
+            await WriteJsonAsync(response, HttpStatusCode.OK, new { ok = false, error = result.Error }, cancellationToken);
+            return;
+        }
+
+        await WriteJsonAsync(
+            response,
+            HttpStatusCode.OK,
+            new
+            {
+                ok = true,
+                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome }),
+            },
+            cancellationToken);
     }
 
     private async Task HandleConfigArpaPostAsync(HttpListenerContext context, string action, CancellationToken cancellationToken)
@@ -1454,6 +1611,30 @@ public sealed class LocalStatusServer : BackgroundService
                 }
 
                 var existing = string.IsNullOrWhiteSpace(V("id")) ? null : _arpaConnectionsStore.Get(V("id"));
+                var lojaCodigo = V("loja_codigo");
+
+                // Uma Loja/Estoque do ERP so pode estar vinculada a uma conexao Arpa por
+                // vez - senao os dois lados escrevem estoque/vendas na mesma Loja e o
+                // dado fica ambiguo sobre qual conexao e a fonte. Comparacao por nome
+                // (case-insensitive), que e como o loja_codigo e resolvido no ERP.
+                if (!string.IsNullOrWhiteSpace(lojaCodigo))
+                {
+                    var conflicting = _arpaConnectionsStore.ReadAll().FirstOrDefault(c =>
+                        c.Id != (existing?.Id ?? string.Empty)
+                        && !string.IsNullOrWhiteSpace(c.LojaCodigo)
+                        && string.Equals(c.LojaCodigo.Trim(), lojaCodigo.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                    if (conflicting is not null)
+                    {
+                        await WriteJsonAsync(
+                            context.Response,
+                            HttpStatusCode.Conflict,
+                            new { ok = false, message = $"A Loja/Estoque '{lojaCodigo}' ja esta vinculada a conexao '{conflicting.Nome}'. Cada Loja/Estoque so pode estar em uma conexao." },
+                            cancellationToken);
+                        return;
+                    }
+                }
+
                 var connection = new ArpaLocalConnection
                 {
                     Id = V("id"),
@@ -1464,7 +1645,7 @@ public sealed class LocalStatusServer : BackgroundService
                     Username = V("username"),
                     // senha em branco no form de edicao mantem a atual
                     Password = string.IsNullOrEmpty(V("password")) && existing is not null ? existing.Password : V("password"),
-                    LojaCodigo = V("loja_codigo"),
+                    LojaCodigo = lojaCodigo,
                     ControlaEstoque = B("controla_estoque"),
                     SyncProdutos = B("sync_produtos"),
                     SyncClientes = B("sync_clientes"),
@@ -1485,6 +1666,23 @@ public sealed class LocalStatusServer : BackgroundService
             {
                 var removed = _arpaConnectionsStore.Delete(V("id"));
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = removed, message = removed ? "Conexao removida." : "Conexao nao encontrada." }, cancellationToken);
+                return;
+            }
+
+            case "set-enabled":
+            {
+                var enabled = B("enabled");
+                _arpaSettingsStore.SetEnabledOverride(enabled);
+                if (enabled)
+                {
+                    _manualSyncSignal.TrySignal();
+                }
+
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    new { ok = true, message = enabled ? "Coletor Arpa ativado." : "Coletor Arpa desativado." },
+                    cancellationToken);
                 return;
             }
 

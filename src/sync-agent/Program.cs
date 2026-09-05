@@ -78,11 +78,13 @@ builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaFinanceiroPayloadNorma
 builder.Services.AddSingleton<ArpaPayloadNormalizerRegistry>();
 builder.Services.AddSingleton<ArpaConnectionStringProvider>();
 builder.Services.AddSingleton<ArpaConnectionsStore>();
+builder.Services.AddSingleton<ArpaCollectorSettingsStore>();
 builder.Services.AddSingleton<ArpaDdlRunner>();
 builder.Services.AddSingleton<ProvisioningStore>();
 builder.Services.AddSingleton<EffectiveSyncAgentConfigurationProvider>();
 builder.Services.AddSingleton<ErpActivationClient>();
 builder.Services.AddSingleton<ArpaConnectionConfigClient>();
+builder.Services.AddSingleton<ArpaLojaListClient>();
 builder.Services.AddSingleton<ArpaRemoteConfigCache>();
 builder.Services.AddSingleton<EffectiveArpaCollectorConfigurationProvider>();
 builder.Services.AddSingleton<ArpaCollector>();
@@ -113,6 +115,8 @@ builder.Services.AddHttpClient(PdvCustomerSnapshotHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpActivationHttpClient.Name);
 builder.Services.AddHttpClient(ArpaConnectionConfigHttpClient.Name)
+    .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
+builder.Services.AddHttpClient(ArpaLojaListHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpLatestPackageHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);

@@ -15,7 +15,11 @@ nao mais so no `appsettings.json` nem no `ArpaControlConexao` do ERP.
 
 - **Multi-conexao:** uma conexao por Loja/Estoque do ERP. O campo
   *Loja/Estoque (nome no ERP)* vai como `loja_codigo` nos eventos de estoque
-  (o ERP resolve/cria a Loja por nome).
+  (o ERP resolve/cria a Loja por nome). A partir de 1.6.2 esse campo e um
+  **dropdown** com as Lojas cadastradas no ERP (`GET
+  /v1/sync/agents/{id}/lojas`), com opcao de digitar manualmente se o ERP
+  estiver fora do ar; e **uma mesma Loja nao pode ser vinculada a duas
+  conexoes** (o save recusa com HTTP 409).
 - **O que sincronizar:** toggles Produtos / Clientes / Estoque / **Vendas** /
   **Financeiro**. O agente monta a query padrao contra `sync_export.<view>`
   (`produtos`, `clientes`, `estoque`, `vendas`, `financeiro`). O `payload_json`
@@ -35,8 +39,12 @@ nao mais so no `appsettings.json` nem no `ArpaControlConexao` do ERP.
 - **Migracao:** uma instalacao antiga com `ArpaCollector:ConnectionString`
   estatica e importada para o store como conexao "Padrao" no primeiro start;
   ajuste a Loja e os toggles pela tela.
-- `ArpaCollector:Enabled=true` no `appsettings.json` continua sendo o
-  interruptor geral do coletor.
+- **Interruptor geral:** a partir de 1.6.2 o botao *Ativar coletor* /
+  *Desativar coletor* na propria tela liga e desliga a coleta na hora, sem
+  editar arquivo nem reiniciar o servico. A preferencia fica em
+  `arpa-collector-settings.json` (JSON simples, sem segredo) no diretorio de
+  secrets e tem precedencia sobre `ArpaCollector:Enabled` do `appsettings.json`.
+  Enquanto o botao nunca foi usado, vale o `appsettings.json` (padrao `false`).
 - `UseRemoteConfig=true` (buscar do ERP) segue funcionando como legado, mas so
   quando o store local esta vazio.
 
@@ -317,4 +325,5 @@ derrubar o ciclo (heartbeat, vendas PDV e dispatcher continuam).
 | `42501: permission denied for relation sync_export.produtos` | As views existem mas o usuario read-only do agente nao tem `GRANT SELECT`. | Aplicar os grants do `sync-export-readonly-user-*.template.sql` como DBA. |
 | `42703: column "..." does not exist` | A view `sync_export` referencia colunas que nao existem no Arpa daquele cliente (schema divergente). | Regenerar a view a partir do diagnostico real e reaplicar. |
 | Coleta sempre pulada / `configuracao remota indisponivel` | `UseRemoteConfig=true` e o ERP nao respondeu `GET /v1/sync/agents/{id}/arpa-connection` (404 = conexao Arpa nao vinculada a instalacao, ou sem capability `arpa_collector`). | No ERP, vincular a `ArpaControlConexao` a esta instalacao (`sync_installation`) e conceder a capability. |
-| Cliente **nao usa** Arpa Control | O coletor nao deveria estar habilitado. | `ArpaCollector:Enabled=false` no `appsettings.json` (ou nao vincular conexao no ERP) e reiniciar `AraraSuiteSync`. |
+| Cliente **nao usa** Arpa Control | O coletor nao deveria estar habilitado. | Botao *Desativar coletor* em **Configuracoes > Arpa** (ou `ArpaCollector:Enabled=false` no `appsettings.json` se o botao nunca foi usado). |
+| `A Loja/Estoque 'X' ja esta vinculada a conexao 'Y'` (HTTP 409 ao salvar) | Duas conexoes apontando para a mesma Loja/Estoque do ERP. | Cada Loja/Estoque so pode estar em uma conexao. Ajuste o campo de uma delas ou remova a conexao duplicada. |

@@ -19,6 +19,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
     private readonly IOptionsMonitor<ArpaCollectorOptions> _options;
     private readonly ArpaConnectionStringProvider _localConnectionStringProvider;
     private readonly ArpaConnectionsStore _connectionsStore;
+    private readonly ArpaCollectorSettingsStore _settingsStore;
     private readonly ArpaConnectionConfigClient _remoteClient;
     private readonly ArpaRemoteConfigCache _remoteCache;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -32,6 +33,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
         IOptionsMonitor<ArpaCollectorOptions> options,
         ArpaConnectionStringProvider localConnectionStringProvider,
         ArpaConnectionsStore connectionsStore,
+        ArpaCollectorSettingsStore settingsStore,
         ArpaConnectionConfigClient remoteClient,
         ArpaRemoteConfigCache remoteCache)
     {
@@ -39,6 +41,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
         _options = options;
         _localConnectionStringProvider = localConnectionStringProvider;
         _connectionsStore = connectionsStore;
+        _settingsStore = settingsStore;
         _remoteClient = remoteClient;
         _remoteCache = remoteCache;
     }
@@ -46,7 +49,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
     public async Task<IReadOnlyList<EffectiveArpaCollectorConnection>> GetCurrentAsync(CancellationToken cancellationToken)
     {
         var options = _options.CurrentValue;
-        if (!options.Enabled)
+        if (!_settingsStore.IsEffectivelyEnabled())
         {
             return [];
         }
