@@ -32,13 +32,14 @@ public sealed class LocalStatusClient : IDisposable
             ?? throw new InvalidOperationException("Update-check response is empty.");
     }
 
-    public async Task<SyncNowResponse> TriggerUpdateAsync()
+    public async Task<SyncNowResponse> TriggerUpdateAsync(string version)
     {
-        using var response = await _httpClient.PostAsync("/update-now", content: null);
+        using var content = JsonContent.Create(new { version });
+        using var response = await _httpClient.PostAsync("/update-now", content);
         var body = await response.Content.ReadFromJsonAsync<SyncNowResponse>()
             ?? throw new InvalidOperationException("Update-now response is empty.");
 
-        if (response.StatusCode is not (System.Net.HttpStatusCode.Accepted or System.Net.HttpStatusCode.Conflict))
+        if (response.StatusCode is not (System.Net.HttpStatusCode.Accepted or System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.BadRequest))
         {
             response.EnsureSuccessStatusCode();
         }

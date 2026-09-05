@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using System.Linq;
 using SyncAgent.Configuration;
 using SyncAgent.Heartbeat;
 
@@ -59,52 +60,67 @@ public sealed class SelfUpdater
 
     /// <summary>
     /// Consulta sem efeito colateral (botao "Atualizar App" da bandeja, via
-    /// GET /update-check): retorna a versao instalada e a versao mais recente
-    /// publicada no ERP, sem baixar nem aplicar nada. A bandeja usa isso para
-    /// mostrar "versao atual x versao disponivel" e pedir confirmacao antes de
-    /// chamar POST /update-now.
+    /// GET /update-check): retorna a versao instalada e a lista de versoes
+    /// disponiveis para esta instalacao, sem baixar nem aplicar nada. A
+    /// bandeja usa isso pra mostrar as opcoes e deixar o dono da loja
+    /// escolher qual aplicar (nunca a instalacao decide sozinha "a mais
+    /// recente" — quem decide e o usuario, dentro do conjunto permitido pelo
+    /// ERP) antes de chamar POST /update-now com a versao escolhida.
+    ///
+    /// Defesa em profundidade (nunca confia cegamente no que veio pela
+    /// rede, mesmo que sync_api.get_available_packages, do lado erp, ja
+    /// devesse ter filtrado): refiltra downgrade aqui de novo, e descarta
+    /// (nao so ignora) qualquer pacote com Sha256 fora do formato esperado.
     /// </summary>
-    public async Task<UpdatePreview> PreviewLatestAsync(CancellationToken cancellationToken)
+    public async Task<UpdatePreview> PreviewAvailableAsync(CancellationToken cancellationToken)
     {
         var currentVersion = _options.CurrentValue.AgentVersion;
 
         if (!_options.CurrentValue.SelfUpdateEnabled)
         {
-            return new UpdatePreview(currentVersion, null, false, null, "self_update_disabled");
+            return new UpdatePreview(currentVersion, Array.Empty<AvailablePackageItem>(), "self_update_disabled");
         }
 
-        var result = await _latestPackageClient.FetchAsync(cancellationToken);
-        if (!result.Succeeded || result.Package is null)
+        var result = await _latestPackageClient.FetchAvailableAsync(cancellationToken);
+        if (!result.Succeeded || result.Packages is null)
         {
-            return new UpdatePreview(currentVersion, null, false, null, result.Error ?? "unknown");
+            return new UpdatePreview(currentVersion, Array.Empty<AvailablePackageItem>(), result.Error ?? "unknown");
         }
 
-        var latestVersion = result.Package.Version;
-        var updateAvailable = !string.Equals(currentVersion, latestVersion, StringComparison.OrdinalIgnoreCase);
-
-        // Pacote mal cadastrado no ERP (ex.: campo Sha256 preenchido com a URL do
-        // arquivo .sha256 em vez do hash) — avisa aqui, antes de a bandeja deixar
-        // o usuario confirmar um download que vai falhar la na frente.
-        if (updateAvailable && !Sha256HexPattern.IsMatch(result.Package.Sha256))
+        var packages = new List<AvailablePackageItem>();
+        foreach (var package in result.Packages)
         {
-            _logger.LogWarning(
-                "PreviewLatestAsync: pacote v{Version} tem Sha256 invalido no ERP ({Sha256Length} chars).",
-                latestVersion, result.Package.Sha256?.Length ?? 0);
-            return new UpdatePreview(currentVersion, latestVersion, false, null, "invalid_package_sha256");
+            if (AgentVersion.IsDowngradeOrSame(currentVersion, package.Version))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(package.Sha256) || !Sha256HexPattern.IsMatch(package.Sha256))
+            {
+                _logger.LogWarning(
+                    "PreviewAvailableAsync: pacote v{Version} tem Sha256 invalido no ERP ({Sha256Length} chars) — ocultado da lista.",
+                    package.Version, package.Sha256?.Length ?? 0);
+                continue;
+            }
+
+            packages.Add(package);
         }
 
-        return new UpdatePreview(currentVersion, latestVersion, updateAvailable, result.Package.ReleaseNotes, null);
+        return new UpdatePreview(currentVersion, packages, null);
     }
 
     /// <summary>
     /// Disparado sob demanda (botao "Atualizar App" da bandeja, via
-    /// POST /update-now): busca a versao mais recente publicada no ERP
-    /// (independente de qualquer pending_update ja agendado via heartbeat
-    /// para esta instalacao especificamente) e aplica se for diferente da
-    /// versao atual. Reporta progresso em UpdateProgressState para a
-    /// bandeja acompanhar via GET /update-status.
+    /// POST /update-now com a versao escolhida pelo usuario): consulta o ERP
+    /// de novo com dado fresco (nunca confia na lista que a UI ja tinha
+    /// mostrado antes) e recusa aplicar se a versao pedida nao estiver mais
+    /// disponivel, for downgrade/igual a atual, ou estiver marcada
+    /// `blocked` (incompatibilidade de ERP) — ultima linha de defesa,
+    /// independente de qualquer curadoria ou UI ja terem filtrado. Reporta
+    /// progresso em UpdateProgressState para a bandeja acompanhar via
+    /// GET /update-status.
     /// </summary>
-    public async Task CheckAndApplyLatestAsync(CancellationToken cancellationToken)
+    public async Task CheckAndApplyVersionAsync(string targetVersion, CancellationToken cancellationToken)
     {
         if (_progress.IsInProgress)
         {
@@ -112,24 +128,57 @@ public sealed class SelfUpdater
             return;
         }
 
-        _progress.Set(UpdateStatus.CheckingForUpdate, 0, "Consultando o ERP pela versao mais recente...");
+        if (string.IsNullOrWhiteSpace(targetVersion))
+        {
+            _progress.Set(UpdateStatus.Failed, 0, "Nenhuma versao foi selecionada.", error: "missing_version");
+            return;
+        }
 
-        var result = await _latestPackageClient.FetchAsync(cancellationToken);
-        if (!result.Succeeded || result.Package is null)
+        _progress.Set(UpdateStatus.CheckingForUpdate, 0, $"Consultando o ERP sobre a versao {targetVersion}...");
+
+        var result = await _latestPackageClient.FetchAvailableAsync(cancellationToken);
+        if (!result.Succeeded || result.Packages is null)
         {
             var message = result.Error == "no_package_published"
                 ? "Nenhuma versao publicada foi encontrada no ERP."
                 : $"Nao foi possivel consultar o ERP ({result.Error}).";
-            _logger.LogWarning("CheckAndApplyLatestAsync: falha ao buscar versao mais recente ({Error}).", result.Error);
+            _logger.LogWarning("CheckAndApplyVersionAsync: falha ao buscar pacotes disponiveis ({Error}).", result.Error);
             _progress.Set(UpdateStatus.Failed, 0, message, error: result.Error);
             return;
         }
 
-        var package = result.Package;
-        var currentVersion = _options.CurrentValue.AgentVersion;
-        if (string.Equals(currentVersion, package.Version, StringComparison.OrdinalIgnoreCase))
+        var package = result.Packages.FirstOrDefault(
+            p => string.Equals(p.Version, targetVersion, StringComparison.OrdinalIgnoreCase));
+        if (package is null)
         {
-            _progress.Set(UpdateStatus.UpToDate, 100, $"Ja esta na versao mais recente ({currentVersion}).", package.Version);
+            _progress.Set(
+                UpdateStatus.Failed,
+                0,
+                $"A versao {targetVersion} nao esta mais disponivel para esta instalacao.",
+                targetVersion,
+                "version_not_available");
+            return;
+        }
+
+        var currentVersion = _options.CurrentValue.AgentVersion;
+        if (AgentVersion.IsDowngradeOrSame(currentVersion, package.Version))
+        {
+            _logger.LogWarning(
+                "CheckAndApplyVersionAsync: recusando downgrade/versao igual ({Current} -> {Target}).",
+                currentVersion, package.Version);
+            _progress.Set(UpdateStatus.UpToDate, 100, $"Ja esta na versao {currentVersion}.", package.Version);
+            return;
+        }
+
+        if (package.Blocked)
+        {
+            var minimo = string.IsNullOrWhiteSpace(package.ErpMinimo) ? "uma versao mais recente" : package.ErpMinimo;
+            _progress.Set(
+                UpdateStatus.Failed,
+                0,
+                $"A versao {package.Version} exige o ERP na versao {minimo} ou superior. Atualize o ERP antes de aplicar esta versao.",
+                package.Version,
+                package.BlockedReason ?? "blocked");
             return;
         }
 
@@ -282,13 +331,16 @@ public sealed class SelfUpdater
 }
 
 /// <summary>
-/// Resultado de <see cref="SelfUpdater.PreviewLatestAsync"/>: versao instalada,
-/// versao publicada no ERP e se ha diferenca. <see cref="Error"/> preenchido
-/// quando nao foi possivel consultar o ERP (ou o self-update esta desabilitado).
+/// Resultado de <see cref="SelfUpdater.PreviewAvailableAsync"/>: versao
+/// instalada e a lista de versoes que podem ser oferecidas (ja sem
+/// downgrade/mesma versao, ja sem Sha256 invalido). <see cref="Packages"/>
+/// pode conter itens com <see cref="AvailablePackageItem.Blocked"/> = true
+/// (incompatibilidade de ERP) — a UI deve mostrar o motivo e nunca deixar
+/// aplicar. <see cref="Error"/> preenchido quando nao foi possivel consultar
+/// o ERP (ou o self-update esta desabilitado); nesse caso <see cref="Packages"/>
+/// vem vazio.
 /// </summary>
 public sealed record UpdatePreview(
     string CurrentVersion,
-    string? LatestVersion,
-    bool UpdateAvailable,
-    string? ReleaseNotes,
+    IReadOnlyList<AvailablePackageItem> Packages,
     string? Error);

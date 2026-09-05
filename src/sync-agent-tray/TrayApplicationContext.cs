@@ -156,16 +156,19 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OpenUpdateProgress()
     {
+        string? selectedVersion;
         using (var check = new UpdateAvailableDialog(_statusClient))
         {
-            if (check.ShowDialog() != DialogResult.OK)
+            if (check.ShowDialog() != DialogResult.OK || string.IsNullOrWhiteSpace(check.SelectedVersion))
             {
                 _ = RefreshStatusAsync();
                 return;
             }
+
+            selectedVersion = check.SelectedVersion;
         }
 
-        using var form = new UpdateProgressForm(_statusClient);
+        using var form = new UpdateProgressForm(_statusClient, selectedVersion);
         form.ShowDialog();
         _ = RefreshStatusAsync();
     }

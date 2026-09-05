@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -222,16 +223,22 @@ public sealed class LocalStatusServer : BackgroundService
 
             if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == "/update-check")
             {
-                var preview = await _selfUpdater.PreviewLatestAsync(cancellationToken);
+                var preview = await _selfUpdater.PreviewAvailableAsync(cancellationToken);
                 await WriteJsonAsync(
                     context.Response,
                     HttpStatusCode.OK,
                     new
                     {
                         current_version = preview.CurrentVersion,
-                        latest_version = preview.LatestVersion,
-                        update_available = preview.UpdateAvailable,
-                        release_notes = preview.ReleaseNotes,
+                        packages = preview.Packages.Select(p => new
+                        {
+                            version = p.Version,
+                            download_url = p.DownloadUrl,
+                            release_notes = p.ReleaseNotes,
+                            erp_minimo = p.ErpMinimo,
+                            blocked = p.Blocked,
+                            blocked_reason = p.BlockedReason,
+                        }),
                         error = preview.Error,
                     },
                     cancellationToken);
@@ -250,12 +257,37 @@ public sealed class LocalStatusServer : BackgroundService
                     return;
                 }
 
-                _ = Task.Run(() => _selfUpdater.CheckAndApplyLatestAsync(CancellationToken.None));
+                string? targetVersion;
+                try
+                {
+                    targetVersion = await ReadUpdateNowVersionAsync(context.Request, cancellationToken);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.BadRequest,
+                        new { accepted = false, message = ex.Message },
+                        cancellationToken);
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(targetVersion))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.BadRequest,
+                        new { accepted = false, message = "Corpo deve conter {\"version\": \"X.Y.Z\"} com a versao escolhida." },
+                        cancellationToken);
+                    return;
+                }
+
+                _ = Task.Run(() => _selfUpdater.CheckAndApplyVersionAsync(targetVersion, CancellationToken.None));
 
                 await WriteJsonAsync(
                     context.Response,
                     HttpStatusCode.Accepted,
-                    new { accepted = true, message = "Busca pela versao mais recente iniciada." },
+                    new { accepted = true, message = $"Atualizacao para a versao {targetVersion} iniciada." },
                     cancellationToken);
                 return;
             }
@@ -569,15 +601,15 @@ public sealed class LocalStatusServer : BackgroundService
                   <table>
                     <tr><th>Etapa</th><th>Descricao</th></tr>
                     <tr><td>1. Bandeja</td><td>Clique com o botao direito no icone da bandeja e escolha <strong>Atualizar App</strong>.</td></tr>
-                    <tr><td>2. Comparacao</td><td>A janela consulta o ERP e mostra a <strong>versao instalada</strong> e a <strong>versao disponivel</strong> (<code>is_current</code>). Se ja estiver na mais recente, informa e nao faz nada; caso contrario, pede confirmacao antes de baixar.</td></tr>
-                    <tr><td>3. Progresso</td><td>Confirmada a atualizacao, uma janela com barra de progresso acompanha download, verificacao de SHA256 e aplicacao em tempo real.</td></tr>
+                    <tr><td>2. Escolha</td><td>A janela consulta o ERP e mostra a <strong>versao instalada</strong> e a lista de <strong>versoes permitidas</strong> pelo ERP (nunca uma igual ou anterior a instalada; versoes que exigem um ERP mais novo aparecem desabilitadas com o motivo). Se nao houver nenhuma opcao, informa e nao faz nada; caso contrario, o usuario escolhe qual aplicar.</td></tr>
+                    <tr><td>3. Progresso</td><td>Escolhida a versao, uma janela com barra de progresso acompanha download, verificacao de SHA256 e aplicacao em tempo real.</td></tr>
                     <tr><td>4. Aplicacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico (mesmo mecanismo do fluxo administrativo, incluindo rollback automatico).</td></tr>
                     <tr><td>5. Retorno</td><td>Ao concluir, a bandeja reabre sozinha e mostra um aviso "Atualizacao concluida".</td></tr>
                   </table>
-                  <p style="margin-top:10px;">Se a versao instalada ja for a mais recente, o agente informa e nao baixa nada.</p>
+                  <p style="margin-top:10px;">Se nao houver versao permitida mais nova que a instalada, o agente informa e nao baixa nada. O SyncAgent nunca aplica downgrade, mesmo que alguem force via API local.</p>
                   <p>Endpoints locais usados por esse fluxo:</p>
                   <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-check" -Method Get
-            Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-now" -Method Post
+            Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-now" -Method Post -ContentType "application/json" -Body '{"version":"X.Y.Z"}'
             Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/update-status" -Method Get</pre>
                 </section>
 
@@ -1506,6 +1538,49 @@ public sealed class LocalStatusServer : BackgroundService
                 await WriteJsonAsync(context.Response, HttpStatusCode.NotFound, new { ok = false, message = "Acao desconhecida." }, cancellationToken);
                 return;
         }
+    }
+
+    private const int MaxUpdateNowBodyBytes = 4096;
+
+    /// <summary>
+    /// Le o corpo JSON de POST /update-now: <c>{"version": "X.Y.Z"}</c>, a
+    /// versao que o usuario escolheu na lista mostrada por GET /update-check.
+    /// Corpo vazio/ausente retorna null (tratado como erro pelo chamador,
+    /// nao aqui) — mantem a mesma convencao de erro dos outros handlers
+    /// (BadRequest com mensagem, nunca 500).
+    /// </summary>
+    private static async Task<string?> ReadUpdateNowVersionAsync(
+        HttpListenerRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.ContentLength64 > MaxUpdateNowBodyBytes)
+        {
+            throw new InvalidOperationException("Corpo da requisicao excedeu o tamanho maximo aceito.");
+        }
+
+        using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+        var body = await reader.ReadToEndAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        if (Encoding.UTF8.GetByteCount(body) > MaxUpdateNowBodyBytes)
+        {
+            throw new InvalidOperationException("Corpo da requisicao excedeu o tamanho maximo aceito.");
+        }
+
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(body);
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("Corpo deve ser um JSON valido: {\"version\": \"X.Y.Z\"}.");
+        }
+
+        return node?["version"]?.GetValue<string>();
     }
 
     private static Task<Dictionary<string, string>> ReadFormAsync(

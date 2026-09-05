@@ -488,12 +488,15 @@ Auto-update ("Atualizar App" na bandeja):
 1. `git tag vX.Y.Z && git push origin vX.Y.Z` no `pdv-local` -> o workflow
    builda e publica o Release (`pdv-local-vX.Y.Z.zip` + `.sha256` + o `.exe`).
 2. No admin do ERP de **cada** cliente -> `API de Sincronizacao > Pacotes de
-   atualizacao` -> Adicionar (versao/URL/SHA256) -> acao **"Marcar como versao
-   atual"**. Ou `python manage.py register_sync_package --pkg-version X.Y.Z
-   --url <zip> --sha256 <hash>` (marca sozinho).
+   atualizacao` -> Adicionar (versao/URL/SHA256) -> acao **"Permitir"**
+   (varias versoes podem ficar permitidas ao mesmo tempo). Ou
+   `python manage.py register_sync_package --pkg-version X.Y.Z --url <zip>
+   --sha256 <hash>` (ja registra permitido).
 3. Na maquina: bandeja -> **Atualizar App**. A janela consulta o ERP e mostra a
-   **versao instalada** e a **versao disponivel**; se ja estiver na mais recente,
-   avisa e nao baixa nada, senao pede confirmacao. Confirmada, baixa o `.zip` do
+   **versao instalada** e a lista de **versoes permitidas** (nunca uma igual
+   ou anterior a instalada; versoes que exigem um ERP mais novo aparecem
+   desabilitadas com o motivo). Se nao houver nenhuma opcao, avisa e nao baixa
+   nada; senao o usuario escolhe qual aplicar. Escolhida, baixa o `.zip` do
    GitHub, confere o SHA256 e roda `self-update.ps1` (backup + troca de `PDV`/
    `Sync\Agent`/`Sync\Tray` + rollback automatico). `appsettings.json` e
    credenciais preservados.

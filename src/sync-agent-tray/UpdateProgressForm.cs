@@ -19,6 +19,7 @@ internal sealed class UpdateProgressForm : Form
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly LocalStatusClient _statusClient;
+    private readonly string _targetVersion;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private readonly Label _messageLabel;
     private readonly ProgressBar _bar;
@@ -26,9 +27,10 @@ internal sealed class UpdateProgressForm : Form
     private bool _seenApplyingPhase;
     private bool _finished;
 
-    public UpdateProgressForm(LocalStatusClient statusClient)
+    public UpdateProgressForm(LocalStatusClient statusClient, string targetVersion)
     {
         _statusClient = statusClient;
+        _targetVersion = targetVersion;
 
         Text = "Atualizar App";
         Width = 440;
@@ -41,7 +43,7 @@ internal sealed class UpdateProgressForm : Form
 
         _messageLabel = new Label
         {
-            Text = "Iniciando atualizacao...",
+            Text = $"Iniciando atualizacao para a versao {targetVersion}...",
             Dock = DockStyle.Top,
             Height = 48,
             TextAlign = ContentAlignment.MiddleCenter,
@@ -87,7 +89,7 @@ internal sealed class UpdateProgressForm : Form
     {
         try
         {
-            var result = await _statusClient.TriggerUpdateAsync();
+            var result = await _statusClient.TriggerUpdateAsync(_targetVersion);
             if (!result.Accepted)
             {
                 ShowTerminal(result.Message, success: false);
