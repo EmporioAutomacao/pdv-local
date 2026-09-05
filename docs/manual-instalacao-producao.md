@@ -487,11 +487,19 @@ Auto-update ("Atualizar App" na bandeja):
 
 1. `git tag vX.Y.Z && git push origin vX.Y.Z` no `pdv-local` -> o workflow
    builda e publica o Release (`pdv-local-vX.Y.Z.zip` + `.sha256` + o `.exe`).
-2. No admin do ERP de **cada** cliente -> `API de Sincronizacao > Pacotes de
-   atualizacao` -> Adicionar (versao/URL/SHA256) -> acao **"Permitir"**
-   (varias versoes podem ficar permitidas ao mesmo tempo). Ou
-   `python manage.py register_sync_package --pkg-version X.Y.Z --url <zip>
-   --sha256 <hash>` (ja registra permitido).
+2. **Recomendado**: no painel de controle (`erp-control-plane`) -> pagina do
+   `Cliente` -> aba `Versoes do SyncAgent/PDV` -> cadastrar a versao em
+   `Clientes > Versoes do Agente` (uma vez, vale pra todos os clientes) e
+   marca-la como permitida para aquele cliente -> botao `Sincronizar Versoes
+   com o ERP` (ou deixa o push automatico acontecer sozinho). Ver
+   `docs/registry/release-curadoria-versoes-syncagent.md` no repo
+   `erp-control-plane`.
+   Alternativa direta no admin do ERP de **cada** cliente (sem passar pelo
+   painel de controle -- fallback manual, avisa quando pode ser sobrescrito
+   pelo proximo push): `API de Sincronizacao > Pacotes de atualizacao` ->
+   Adicionar (versao/URL/SHA256) -> acao **"Permitir"** (varias versoes podem
+   ficar permitidas ao mesmo tempo). Ou `python manage.py register_sync_package
+   --pkg-version X.Y.Z --url <zip> --sha256 <hash>` (ja registra permitido).
 3. Na maquina: bandeja -> **Atualizar App**. A janela consulta o ERP e mostra a
    **versao instalada** e a lista de **versoes permitidas** (nunca uma igual
    ou anterior a instalada; versoes que exigem um ERP mais novo aparecem
