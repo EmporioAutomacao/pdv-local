@@ -509,6 +509,14 @@ Auto-update ("Atualizar App" na bandeja):
    `Sync\Agent`/`Sync\Tray` + rollback automatico). `appsettings.json` e
    credenciais preservados.
 
+   **PDV App + Sync Agent + bandeja andam juntos.** O `.zip` tem um `payload/`
+   unico com os tres componentes e **um** numero de versao (o arquivo
+   `Sync\Agent\VERSION`, comum aos tres). Nao da para atualizar so um: o
+   `self-update.ps1` para o servico, faz backup dos tres, troca os tres e, se o
+   servico nao subir, faz rollback dos tres - tudo atomico. Por isso os tres
+   `.csproj` (`SyncAgent`, `SyncAgent.Tray`, `PdvLocal.App`) sao sempre
+   bumpados para o mesmo numero.
+
 `404 no_package_published` / *"Nenhuma versao publicada foi encontrada no ERP"*
 = nenhum pacote marcado como atual **nesse** ERP (o campo `is_current` nao e
 editavel no formulario - so a acao ou o comando marcam). Guia:

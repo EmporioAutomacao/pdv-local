@@ -29,6 +29,11 @@ Contratos usados a partir de `../sync`:
 - `POST /v1/sync/events:batch`
 - `POST /v1/sync/agents/{instanceId}/heartbeat`
 - `GET /v1/sync/agents/{instanceId}/status`
+- `GET /v1/sync/agents/{instanceId}/arpa-connection` (config remota, legado)
+- `GET /v1/sync/agents/{instanceId}/lojas` (lista de Lojas/Estoque do ERP para
+  a aba Configuracoes > Arpa; contrato 2.7.0)
+- `GET /v1/sync/agents/{instanceId}/available-packages` (versoes permitidas no
+  "Atualizar App"; contrato 2.6.0)
 - `POST /v1/sync/reconciliation:summary`
 - `schemas/events/v1/event-envelope.schema.json`
 - `schemas/events/v1/events-batch.schema.json`
@@ -82,7 +87,10 @@ Responsabilidades:
 - executar ciclos `startup`, `scheduled` e `manual`;
 - validar configuracao obrigatoria;
 - persistir identidade em `sync_agent.agent_state` com chave `agent.identity`;
-- coletar dados do Arpa quando `ArpaCollector:Enabled=true`;
+- coletar dados do Arpa quando o coletor estiver ativo (botao em
+  Configuracoes > Arpa a partir de 1.6.2, ou `ArpaCollector:Enabled=true` no
+  `appsettings.json` quando o botao nunca foi usado - ver
+  `docs/sync-agent-configuracoes-arpa.md`);
 - normalizar payloads para contrato canonico v1;
 - gravar eventos no outbox local;
 - enviar lotes para o ERP quando `ErpDispatcher:Enabled=true`;

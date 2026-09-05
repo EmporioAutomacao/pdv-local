@@ -42,6 +42,7 @@ Instalacao em producao: `docs/manual-instalacao-producao.md`.
 - Manual tecnico consolidado: `docs/sync-agent-sprint-1-manual.md`.
 - Runbook de incidentes: `docs/sync-agent-runbook-incidentes.md`.
 - Readiness do piloto tecnico: `docs/sync-agent-piloto-readiness.md`.
+- Tela Configuracoes > Arpa (liga/desliga, conexoes, Loja do ERP): `docs/sync-agent-configuracoes-arpa.md`.
 - Preparacao do coletor Arpa: `docs/arpa-collector-piloto.md`.
 - Politica de seguranca Arpa read-only: `docs/arpa-readonly-security-policy.md`.
 - Decisao de watermark de produtos Arpa: `docs/arpa-produtos-watermark-decision.md`.
