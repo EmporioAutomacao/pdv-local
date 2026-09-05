@@ -26,11 +26,18 @@ internal sealed class UpdateAvailableDialog : Form
 
     public string? SelectedVersion { get; private set; }
 
-    public UpdateAvailableDialog(LocalStatusClient statusClient)
+    /// <summary>Título da janela com a versão instalada no final (ex.: "Atualizar
+    /// App V.: 1.6.0"). Usado aqui e em <see cref="UpdateProgressForm"/> pra
+    /// identificar de relance qual instalação está naquela tela — útil quando há
+    /// prints/telas de mais de uma máquina abertas ao mesmo tempo.</summary>
+    internal static string BuildTitle(string? currentVersion) =>
+        string.IsNullOrWhiteSpace(currentVersion) ? "Atualizar App" : $"Atualizar App V.: {currentVersion}";
+
+    public UpdateAvailableDialog(LocalStatusClient statusClient, string? currentVersion = null)
     {
         _statusClient = statusClient;
 
-        Text = "Atualizar App";
+        Text = BuildTitle(currentVersion);
         Width = 480;
         Height = 360;
         StartPosition = FormStartPosition.CenterScreen;
@@ -134,6 +141,11 @@ internal sealed class UpdateAvailableDialog : Form
             ShowInfo($"Nao foi possivel consultar as versoes disponiveis: {ex.Message}");
             return;
         }
+
+        // Fonte de verdade sobre a versao instalada e esta resposta (nao o valor
+        // recebido no construtor, que veio do ultimo /status em cache e pode estar
+        // desatualizado ou ausente na primeira abertura).
+        Text = BuildTitle(result.CurrentVersion);
 
         if (!string.IsNullOrEmpty(result.Error))
         {

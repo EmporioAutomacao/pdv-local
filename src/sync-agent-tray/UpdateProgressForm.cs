@@ -27,12 +27,12 @@ internal sealed class UpdateProgressForm : Form
     private bool _seenApplyingPhase;
     private bool _finished;
 
-    public UpdateProgressForm(LocalStatusClient statusClient, string targetVersion)
+    public UpdateProgressForm(LocalStatusClient statusClient, string targetVersion, string? currentVersion = null)
     {
         _statusClient = statusClient;
         _targetVersion = targetVersion;
 
-        Text = "Atualizar App";
+        Text = UpdateAvailableDialog.BuildTitle(currentVersion);
         Width = 440;
         Height = 160;
         StartPosition = FormStartPosition.CenterScreen;
