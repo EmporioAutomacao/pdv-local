@@ -72,7 +72,7 @@ Campos do formulario:
 | **Nome** | Rotulo livre da conexao (ex.: "Loja Centro"). Ao escolher a Loja no dropdown, e pre-preenchido com o nome dela se estiver vazio. |
 | **Loja/Estoque (nome no ERP)** | Dropdown - ver secao 3. |
 | **Host / Porta / Database** | Conexao Postgres do Arpa Control. |
-| **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 4). Senha em branco na edicao mantem a atual. |
+| **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 4). Ao **editar** uma conexao a Senha vem em branco (nunca vai para o navegador) e assim fica: *Salvar* e *Testar conexao* usam a senha ja guardada. So digite para trocar. |
 | **Batch size** | Linhas por lote na leitura das views (default 5000). |
 | **Produtos / Clientes / Estoque / Vendas / Financeiro** | O que essa conexao sincroniza. O agente monta a query padrao contra `sync_export.<view>`. |
 | **Controla o estoque desta Loja** | Quando marcado, eventos `estoque` desta conexao gravam o saldo na Loja; senao so cadastro. |

@@ -1505,7 +1505,7 @@ public sealed class LocalStatusServer : BackgroundService
 
                 function fd(){ return new URLSearchParams(new FormData(document.getElementById('connform'))); }
                 function setStatus(t, ok){ var s=document.getElementById('status'); s.textContent=t; s.style.color = ok ? '#166534' : '#92400e'; }
-                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); }
+                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('f_pass').placeholder=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); }
                 function editConn(id){
                   var c = CONNS[id]; if(!c) return;
                   document.getElementById('f_id').value = c.id;
@@ -1515,7 +1515,8 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_port').value = c.port || 5432;
                   document.getElementById('f_db').value = c.database || '';
                   document.getElementById('f_user').value = c.username || '';
-                  document.getElementById('f_pass').value = c.password || '';
+                  document.getElementById('f_pass').value = '';
+                  document.getElementById('f_pass').placeholder = 'senha atual mantida - digite so para trocar';
                   document.getElementById('f_batch').value = c.batchSize || 5000;
                   document.getElementById('f_produtos').checked = !!c.syncProdutos;
                   document.getElementById('f_clientes').checked = !!c.syncClientes;
@@ -1695,8 +1696,22 @@ public sealed class LocalStatusServer : BackgroundService
 
             case "test":
             {
+                // Na edicao de uma conexao existente a Senha vem em branco (nunca
+                // vai para o navegador); usa a senha guardada para o teste, igual
+                // ao "save".
+                var existingForTest = string.IsNullOrWhiteSpace(V("id")) ? null : _arpaConnectionsStore.Get(V("id"));
+                var testPassword = string.IsNullOrEmpty(V("password")) && existingForTest is not null
+                    ? existingForTest.Password
+                    : V("password");
+
+                if (string.IsNullOrEmpty(testPassword))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = false, message = "Informe a senha do usuario para testar a conexao." }, cancellationToken);
+                    return;
+                }
+
                 var result = await _arpaDdlRunner.TestConnectionAsync(
-                    V("host"), I("port", 5432), V("database"), V("username"), V("password"),
+                    V("host"), I("port", 5432), V("database"), V("username"), testPassword,
                     B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"), B("sync_financeiro"),
                     cancellationToken);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);

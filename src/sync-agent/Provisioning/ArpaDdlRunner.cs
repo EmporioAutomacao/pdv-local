@@ -284,7 +284,19 @@ public sealed partial class ArpaDdlRunner
     }
 
     private static string BuildConnectionString(string host, int port, string database, string username, string password)
-        => new NpgsqlConnectionStringBuilder
+    {
+        // Senha vazia + Postgres do Arpa oferecendo SSPI/GSS no pg_hba faz o
+        // Npgsql negociar auth integrada do Windows e conectar como a conta da
+        // maquina (o servico roda como LocalSystem => "MAQUINA$"), gerando um
+        // "role \"MAQUINA$\" does not exist" (SqlState 28000) confuso. O Npgsql
+        // 8 nao tem mais opt-out de SSPI na connection string, entao a defesa e
+        // nao tentar conectar sem senha - os callers ja barram isso.
+        if (string.IsNullOrEmpty(password))
+        {
+            throw new InvalidOperationException("Senha nao informada para a conexao com o Postgres do Arpa.");
+        }
+
+        return new NpgsqlConnectionStringBuilder
         {
             Host = host,
             Port = port <= 0 ? 5432 : port,
@@ -294,9 +306,17 @@ public sealed partial class ArpaDdlRunner
             Timeout = 10,
             CommandTimeout = 30,
         }.ConnectionString;
+    }
 
     private static string Describe(Exception ex) => ex switch
     {
+        // Senha ausente/incorreta. O caso mais comum: editar uma conexao
+        // existente (o campo Senha vem em branco de proposito) e clicar
+        // "Testar" sem redigitar.
+        PostgresException { SqlState: "28P01" } => "Senha incorreta para o usuario informado.",
+        PostgresException { SqlState: "28000" } pg when pg.MessageText.Contains('$')
+            => "Senha nao informada. Ao editar uma conexao existente o campo Senha vem em branco - "
+               + "digite a senha de novo para testar (o botao Salvar, esse sim, mantem a senha atual).",
         PostgresException pg => $"{pg.SqlState}: {pg.MessageText}",
         _ => ex.Message,
     };
