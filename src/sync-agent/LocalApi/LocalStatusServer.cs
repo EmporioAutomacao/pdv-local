@@ -1395,10 +1395,10 @@ public sealed class LocalStatusServer : BackgroundService
 
                     <details>
                       <summary>Preparar banco Arpa (requer credencial DBA)</summary>
-                      <p class="muted">Usa uma credencial de administrador do Postgres do Arpa apenas para este comando. Nao e gravada.</p>
+                      <p class="muted">Usa uma credencial de administrador do Postgres do Arpa apenas para este comando. Nao e gravada. Deixe a Senha DBA em branco se esse Postgres usa <code>trust</code>/<code>peer</code> (sem senha).</p>
                       <div class="row2">
                         <div><label for="f_dbauser">Usuario DBA</label><input type="text" id="f_dbauser" name="dba_user" autocomplete="off" placeholder="postgres"></div>
-                        <div><label for="f_dbapass">Senha DBA</label><input type="password" id="f_dbapass" name="dba_password" autocomplete="off"></div>
+                        <div><label for="f_dbapass">Senha DBA <span class="muted">(em branco = sem senha)</span></label><input type="password" id="f_dbapass" name="dba_password" autocomplete="off" placeholder="(em branco se trust/peer)"></div>
                       </div>
                       <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap">
                         <button type="button" class="secondary" onclick="act('prepare-views')">Preparar views sync_export</button>
@@ -1698,15 +1698,17 @@ public sealed class LocalStatusServer : BackgroundService
             {
                 // Na edicao de uma conexao existente a Senha vem em branco (nunca
                 // vai para o navegador); usa a senha guardada para o teste, igual
-                // ao "save".
+                // ao "save". Senha vazia e permitida (Postgres do Arpa com
+                // trust/peer) - o ArpaDdlRunner devolve mensagem clara se o
+                // servidor exigir auth integrada do Windows.
                 var existingForTest = string.IsNullOrWhiteSpace(V("id")) ? null : _arpaConnectionsStore.Get(V("id"));
                 var testPassword = string.IsNullOrEmpty(V("password")) && existingForTest is not null
                     ? existingForTest.Password
                     : V("password");
 
-                if (string.IsNullOrEmpty(testPassword))
+                if (string.IsNullOrWhiteSpace(V("username")))
                 {
-                    await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = false, message = "Informe a senha do usuario para testar a conexao." }, cancellationToken);
+                    await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = false, message = "Informe o usuario (read-only) para testar a conexao." }, cancellationToken);
                     return;
                 }
 
@@ -1720,9 +1722,11 @@ public sealed class LocalStatusServer : BackgroundService
 
             case "prepare-views":
             {
-                if (string.IsNullOrWhiteSpace(V("dba_user")) || string.IsNullOrEmpty(V("dba_password")))
+                // Senha DBA vazia e permitida (Arpa com trust/peer para o
+                // postgres, comum em instalacoes locais).
+                if (string.IsNullOrWhiteSpace(V("dba_user")))
                 {
-                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe usuario e senha DBA." }, cancellationToken);
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe o usuario DBA." }, cancellationToken);
                     return;
                 }
 
@@ -1734,9 +1738,9 @@ public sealed class LocalStatusServer : BackgroundService
 
             case "create-user":
             {
-                if (string.IsNullOrWhiteSpace(V("dba_user")) || string.IsNullOrEmpty(V("dba_password")))
+                if (string.IsNullOrWhiteSpace(V("dba_user")))
                 {
-                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe usuario e senha DBA." }, cancellationToken);
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe o usuario DBA." }, cancellationToken);
                     return;
                 }
 

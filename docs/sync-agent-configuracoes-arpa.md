@@ -108,7 +108,11 @@ texto livre e um typo criava uma Loja nova sem querer no ERP.
 
 Bloco recolhivel para o primeiro setup de uma conexao. Pede uma credencial de
 **administrador do Postgres do Arpa**, usada **so naquele comando** e **nunca
-gravada**.
+gravada**. A **Senha DBA pode ficar em branco** se esse Postgres usa
+`trust`/`peer` (comum em Arpa local - sem senha para o `postgres`); so o
+**Usuario DBA** e obrigatorio. Se o servidor exigir autenticacao integrada do
+Windows, o teste falha com mensagem explicando (o servico roda como LocalSystem
+e nao consegue usar essa auth).
 
 - **Preparar views sync_export**: cria o schema `sync_export` e as views
   `produtos`/`clientes`/`estoque`/`vendas`/`financeiro` a partir do template
