@@ -30,6 +30,7 @@ public sealed class Worker : BackgroundService
     private readonly ErpActivationClient _erpActivationClient;
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
+    private readonly ArpaSyncRunLog _arpaSyncRunLog;
     private readonly SelfUpdater _selfUpdater;
 
     public Worker(
@@ -49,6 +50,7 @@ public sealed class Worker : BackgroundService
         ErpActivationClient erpActivationClient,
         ManualSyncSignal manualSyncSignal,
         SyncAgentRuntimeState runtimeState,
+        ArpaSyncRunLog arpaSyncRunLog,
         SelfUpdater selfUpdater)
     {
         _logger = logger;
@@ -67,6 +69,7 @@ public sealed class Worker : BackgroundService
         _erpActivationClient = erpActivationClient;
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
+        _arpaSyncRunLog = arpaSyncRunLog;
         _selfUpdater = selfUpdater;
     }
 
@@ -91,6 +94,7 @@ public sealed class Worker : BackgroundService
             catch (Exception ex)
             {
                 _runtimeState.MarkCycleFailed(DateTimeOffset.UtcNow, trigger, ex.Message);
+                _arpaSyncRunLog.EndRun($"Sincronizacao interrompida: {ex.Message}");
                 _logger.LogWarning(ex, "Sync cycle failed. The agent will retry on the next interval.");
             }
 
@@ -129,9 +133,23 @@ public sealed class Worker : BackgroundService
             effectiveOptions.AgentVersion,
             cancellationToken);
 
+        _arpaSyncRunLog.BeginRun(trigger);
         var collectorSummary = await _arpaCollector.CollectAsync(cancellationToken);
         var pdvSalesPublishSummary = await _pdvSalesPublisher.PublishAsync(cancellationToken);
+        if (pdvSalesPublishSummary.Enabled && pdvSalesPublishSummary.Published > 0)
+        {
+            _arpaSyncRunLog.Add("info", $"Vendas do PDV enviadas: {pdvSalesPublishSummary.Published}.");
+        }
+
         var dispatchSummary = await _erpEventDispatcher.DispatchAsync(cancellationToken);
+        if (dispatchSummary.Enabled)
+        {
+            _arpaSyncRunLog.Add(
+                "info",
+                $"Envio ao ERP: {dispatchSummary.Sent} enviado(s), {dispatchSummary.Accepted} aceito(s), "
+                + $"{dispatchSummary.Rejected} rejeitado(s), {dispatchSummary.Failed} com falha.");
+        }
+
         var reconciliationWindowEnd = DateTimeOffset.UtcNow;
         var reconciliationWindowStart = reconciliationWindowEnd.AddHours(-24);
         var reconciliationSummary = await _localStore.RunLocalReconciliationAsync(
@@ -147,6 +165,12 @@ public sealed class Worker : BackgroundService
         var pdvProductSnapshotSummary = await _pdvProductSnapshotClient.ImportAsync(cancellationToken);
         var pdvPaymentMethodsSnapshotSummary = await _pdvPaymentMethodsSnapshotClient.ImportAsync(cancellationToken);
         var pdvCustomerSnapshotSummary = await _pdvCustomerSnapshotClient.ImportAsync(cancellationToken);
+
+        AppendSnapshotLine("Operadores do PDV (do ERP)", pdvOperatorSnapshotSummary.Enabled, pdvOperatorSnapshotSummary.Imported, pdvOperatorSnapshotSummary.Succeeded);
+        AppendSnapshotLine("Produtos do PDV (do ERP)", pdvProductSnapshotSummary.Enabled, pdvProductSnapshotSummary.Imported, pdvProductSnapshotSummary.Succeeded);
+        AppendSnapshotLine("Formas de pagamento do PDV (do ERP)", pdvPaymentMethodsSnapshotSummary.Enabled, pdvPaymentMethodsSnapshotSummary.Imported, pdvPaymentMethodsSnapshotSummary.Succeeded);
+        AppendSnapshotLine("Clientes do PDV (do ERP)", true, pdvCustomerSnapshotSummary.Imported, pdvCustomerSnapshotSummary.Succeeded);
+
         var storeStatus = await _localStore.GetStatusAsync(cancellationToken);
         var connectivity = ResolveConnectivity(dispatchSummary, storeStatus);
         var heartbeatSummary = await _erpHeartbeatClient.SendAsync(
@@ -158,7 +182,10 @@ public sealed class Worker : BackgroundService
         {
             var triggered = await _selfUpdater.ApplyIfNeededAsync(pendingUpdate, cancellationToken);
             if (triggered)
+            {
+                _arpaSyncRunLog.EndRun("Atualizacao do aplicativo iniciada - a sincronizacao continua apos o reinicio.");
                 return;
+            }
         }
 
         _logger.LogInformation(
@@ -220,11 +247,28 @@ public sealed class Worker : BackgroundService
         if (lastError is null)
         {
             _runtimeState.MarkCycleSucceeded(DateTimeOffset.UtcNow, trigger);
+            _arpaSyncRunLog.EndRun(
+                $"Sincronizacao concluida. {storeStatus.PendingOutboxEvents} evento(s) ainda pendente(s) de confirmacao do ERP.");
         }
         else
         {
             _runtimeState.MarkCycleFailed(DateTimeOffset.UtcNow, trigger, lastError);
+            _arpaSyncRunLog.EndRun($"Sincronizacao terminou com erro: {lastError}");
         }
+    }
+
+    private void AppendSnapshotLine(string label, bool enabled, int imported, bool succeeded)
+    {
+        if (!enabled)
+        {
+            return;
+        }
+
+        _arpaSyncRunLog.Add(
+            succeeded ? "info" : "warn",
+            succeeded
+                ? $"{label}: {imported} atualizado(s)."
+                : $"{label}: falhou.");
     }
 
     private static string ResolveConnectivity(

@@ -26,6 +26,7 @@ public sealed class LocalStatusServer : BackgroundService
     private const string ConfigPath = "/config";
     private const string ConfigArpaPath = "/config/arpa";
     private const string ConfigArpaLojasPath = "/config/arpa/lojas";
+    private const string ConfigArpaSyncLogPath = "/config/arpa/sync-log";
     private const string LogsPath = "/logs";
     private const string HelpPath = "/help";
     private const string StatusPath = "/status";
@@ -61,6 +62,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly LocalSyncStore _localStore;
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
+    private readonly ArpaSyncRunLog _arpaSyncRunLog;
     private readonly SelfUpdater _selfUpdater;
     private readonly UpdateProgressState _updateProgress;
 
@@ -85,6 +87,7 @@ public sealed class LocalStatusServer : BackgroundService
         LocalSyncStore localStore,
         ManualSyncSignal manualSyncSignal,
         SyncAgentRuntimeState runtimeState,
+        ArpaSyncRunLog arpaSyncRunLog,
         SelfUpdater selfUpdater,
         UpdateProgressState updateProgress)
     {
@@ -101,6 +104,7 @@ public sealed class LocalStatusServer : BackgroundService
         _localStore = localStore;
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
+        _arpaSyncRunLog = arpaSyncRunLog;
         _selfUpdater = selfUpdater;
         _updateProgress = updateProgress;
     }
@@ -175,6 +179,30 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaLojasPath)
             {
                 await HandleConfigArpaLojasAsync(context.Response, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaSyncLogPath)
+            {
+                var log = _arpaSyncRunLog.Snapshot();
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    new
+                    {
+                        run_id = log.RunId,
+                        running = log.Running,
+                        started_at_utc = log.StartedAtUtc,
+                        finished_at_utc = log.FinishedAtUtc,
+                        trigger = log.Trigger,
+                        lines = log.Lines.Select(l => new
+                        {
+                            at = l.AtUtc.ToLocalTime().ToString("HH:mm:ss"),
+                            level = l.Level,
+                            message = l.Message,
+                        }),
+                    },
+                    cancellationToken);
                 return;
             }
 
@@ -581,7 +609,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
@@ -1243,7 +1271,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <td>{{Html(c.Username)}}</td>
                   <td style="white-space:nowrap">
                     <button type="button" class="mini" onclick="editConn('{{Html(c.Id)}}')">Editar</button>
-                    <button type="button" class="mini" onclick="postAct('sync-now','{{Html(c.Id)}}')">Sincronizar</button>
+                    <button type="button" class="mini" onclick="startSync()">Sincronizar</button>
                     <button type="button" class="mini danger" onclick="if(confirm('Remover a conexao {{Html(c.Nome)}}?'))postAct('delete','{{Html(c.Id)}}')">Remover</button>
                   </td>
                 </tr>
@@ -1328,6 +1356,8 @@ public sealed class LocalStatusServer : BackgroundService
                 details { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
                 summary { cursor: pointer; font-weight: 600; color: #334155; }
                 select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; }
+                #synclog { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; margin: 10px 0 0; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+                #synclog .warn { color: #fbbf24; }
               </style>
             </head>
             <body>
@@ -1351,6 +1381,14 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><th>Nome</th><th>Banco</th><th>Loja</th><th>Sincroniza</th><th>Usuario</th><th></th></tr>
                     {{rows}}
                   </table>
+                </section>
+
+                <section class="panel" id="synclogpanel" hidden>
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap">
+                    <h2 style="margin:0">Sincronizacao</h2>
+                    <button type="button" id="synclogclose" class="secondary" onclick="closeSyncLog()" hidden>Fechar</button>
+                  </div>
+                  <pre id="synclog">Iniciando...</pre>
                 </section>
 
                 <section class="panel">
@@ -1501,6 +1539,62 @@ public sealed class LocalStatusServer : BackgroundService
                     .then(function(r){ return r.json(); })
                     .then(function(j){ LOJAS = (j.ok && j.lojas) ? j.lojas : []; populateLojaSelect(selectedNome); })
                     .catch(function(){ LOJAS = []; populateLojaSelect(selectedNome); });
+                }
+
+                var SYNCLOG_TIMER = null;
+                var SYNCLOG_BASELINE = -1;
+                var SYNCLOG_STARTED = false;
+                var SYNCLOG_WAITS = 0;
+
+                function renderSyncLog(j){
+                  var el = document.getElementById('synclog');
+                  if(!j.lines || !j.lines.length){ el.textContent = SYNCLOG_STARTED ? '(sem linhas)' : 'Aguardando o agente iniciar a sincronizacao...'; return; }
+                  el.innerHTML = j.lines.map(function(l){
+                    var txt = l.at + '  ' + l.message;
+                    var esc = txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    return l.level === 'warn' ? '<span class="warn">' + esc + '</span>' : esc;
+                  }).join('\n');
+                  el.scrollTop = el.scrollHeight;
+                }
+
+                function pollSyncLog(){
+                  fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
+                    if(j.run_id > SYNCLOG_BASELINE){ SYNCLOG_STARTED = true; }
+                    if(SYNCLOG_STARTED){ renderSyncLog(j); }
+                    else {
+                      SYNCLOG_WAITS++;
+                      document.getElementById('synclog').textContent =
+                        SYNCLOG_WAITS > 40
+                          ? 'O agente ainda nao comecou (pode haver outra sincronizacao em andamento). A tela continua acompanhando.'
+                          : 'Aguardando o agente iniciar a sincronizacao...';
+                    }
+                    if(SYNCLOG_STARTED && !j.running){
+                      clearInterval(SYNCLOG_TIMER); SYNCLOG_TIMER = null;
+                      document.getElementById('synclogclose').hidden = false;
+                    }
+                  }).catch(function(){ /* API pode cair momentaneamente; proxima poll tenta */ });
+                }
+
+                function startSync(){
+                  var panel = document.getElementById('synclogpanel');
+                  panel.hidden = false;
+                  document.getElementById('synclogclose').hidden = true;
+                  document.getElementById('synclog').textContent = 'Solicitando sincronizacao...';
+                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0;
+                  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
+                    SYNCLOG_BASELINE = j.run_id;
+                    return fetch('/config/arpa/sync-now', { method:'POST' });
+                  }).then(function(){
+                    if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); }
+                    SYNCLOG_TIMER = setInterval(pollSyncLog, 1000);
+                    pollSyncLog();
+                  }).catch(function(e){ document.getElementById('synclog').textContent = 'Falha ao solicitar: ' + e; });
+                }
+
+                function closeSyncLog(){
+                  if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); SYNCLOG_TIMER = null; }
+                  document.getElementById('synclogpanel').hidden = true;
                 }
 
                 function fd(){ return new URLSearchParams(new FormData(document.getElementById('connform'))); }

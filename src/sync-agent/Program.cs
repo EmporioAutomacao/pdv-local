@@ -122,6 +122,7 @@ builder.Services.AddHttpClient(ErpLatestPackageHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddSingleton<ManualSyncSignal>();
 builder.Services.AddSingleton<SyncAgentRuntimeState>();
+builder.Services.AddSingleton<ArpaSyncRunLog>();
 builder.Services.AddSingleton<SelfUpdater>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService<LocalStatusServer>();

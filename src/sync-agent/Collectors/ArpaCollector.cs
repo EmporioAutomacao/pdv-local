@@ -5,6 +5,7 @@ using SyncAgent.Contracts;
 using SyncAgent.Normalizers;
 using SyncAgent.Persistence;
 using SyncAgent.Provisioning;
+using SyncAgent.Runtime;
 using SyncAgent.Utilities;
 
 namespace SyncAgent.Collectors;
@@ -18,26 +19,47 @@ public sealed class ArpaCollector
     private readonly EffectiveArpaCollectorConfigurationProvider _effectiveCollectorConfigProvider;
     private readonly LocalSyncStore _localStore;
     private readonly ArpaPayloadNormalizerRegistry _normalizers;
+    private readonly ArpaSyncRunLog _runLog;
 
     public ArpaCollector(
         ILogger<ArpaCollector> logger,
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
         EffectiveArpaCollectorConfigurationProvider effectiveCollectorConfigProvider,
         LocalSyncStore localStore,
-        ArpaPayloadNormalizerRegistry normalizers)
+        ArpaPayloadNormalizerRegistry normalizers,
+        ArpaSyncRunLog runLog)
     {
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
         _effectiveCollectorConfigProvider = effectiveCollectorConfigProvider;
         _localStore = localStore;
         _normalizers = normalizers;
+        _runLog = runLog;
     }
+
+    private static string EntityLabel(string entityType) => entityType switch
+    {
+        "produto" => "Produtos",
+        "cliente" => "Clientes",
+        "estoque" => "Estoque",
+        "venda" => "Vendas",
+        "financeiro" => "Financeiro",
+        _ => entityType,
+    };
+
+    private static string Summarize(Exception ex) => ex switch
+    {
+        NpgsqlException { InnerException: { } inner } => inner.Message,
+        Npgsql.PostgresException pg => $"{pg.SqlState}: {pg.MessageText}",
+        _ => ex.Message,
+    };
 
     public async Task<ArpaCollectorRunSummary> CollectAsync(CancellationToken cancellationToken)
     {
         var connections = await _effectiveCollectorConfigProvider.GetCurrentAsync(cancellationToken);
         if (connections.Count == 0)
         {
+            _runLog.Add("info", "Coletor Arpa desativado ou sem conexoes - nada a coletar.");
             return ArpaCollectorRunSummary.Disabled;
         }
 
@@ -48,6 +70,8 @@ public sealed class ArpaCollector
 
         foreach (var connection in connections)
         {
+            _runLog.Add("info", $"Conexao \"{connection.Nome}\": lendo do Arpa...");
+
             NpgsqlDataSource dataSource;
             try
             {
@@ -57,6 +81,7 @@ public sealed class ArpaCollector
             {
                 failedEntities += connection.Entities.Count;
                 totalEntities += connection.Entities.Count;
+                _runLog.Add("warn", $"Conexao \"{connection.Nome}\": nao foi possivel abrir - {ex.Message}");
                 _logger.LogWarning(ex, "Arpa collector: conexao '{Nome}' invalida e pulada nesta execucao.", connection.Nome);
                 continue;
             }
@@ -71,6 +96,9 @@ public sealed class ArpaCollector
                         var entitySummary = await CollectEntityAsync(dataSource, connection, entity, cancellationToken);
                         totalCollected += entitySummary.Collected;
                         totalInserted += entitySummary.Inserted;
+                        _runLog.Add(
+                            "info",
+                            $"  {EntityLabel(entity.EntityType)}: {entitySummary.Collected} lido(s), {entitySummary.Inserted} novo(s)/alterado(s).");
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
@@ -82,6 +110,7 @@ public sealed class ArpaCollector
                         // negada, schema divergente) nao deve derrubar o ciclo inteiro -
                         // heartbeat, envio de vendas PDV e dispatcher precisam continuar.
                         failedEntities++;
+                        _runLog.Add("warn", $"  {EntityLabel(entity.EntityType)}: falhou - {Summarize(ex)}");
                         _logger.LogWarning(
                             ex,
                             "Arpa collector: conexao '{Nome}' entidade '{EntityName}' falhou e foi pulada nesta execucao.",

@@ -78,8 +78,16 @@ Campos do formulario:
 | **Controla o estoque desta Loja** | Quando marcado, eventos `estoque` desta conexao gravam o saldo na Loja; senao so cadastro. |
 | **Ativa** | Desmarcar pausa so essa conexao, sem apagar. |
 
-Botoes por linha: **Editar**, **Sincronizar** (dispara um ciclo agora),
-**Remover**.
+Botoes por linha: **Editar**, **Sincronizar**, **Remover**.
+
+**Sincronizar** (1.6.6+) dispara um ciclo agora e abre um painel de **log ao
+vivo** logo abaixo da tabela, mostrando linha a linha o que esta acontecendo:
+por entidade (`Produtos: N lido(s), M novo(s)/alterado(s)`, idem
+Clientes/Estoque/Vendas/Financeiro), o envio ao ERP (`aceitos`, `rejeitados`,
+`falhas`), os snapshots que vem do ERP (operadores/produtos/pagamentos/clientes
+do PDV) e o resultado final. Se ja houver uma sincronizacao em andamento, o
+painel espera ela comecar. O botao **Fechar** aparece ao concluir.
+Endpoint: `GET /config/arpa/sync-log` (JSON: `run_id`, `running`, `lines`).
 
 Botoes do formulario: **Salvar**, **Testar conexao** (valida credencial +
 presenca das views `sync_export`), **Limpar**.
@@ -127,6 +135,7 @@ e nao consegue usar essa auth).
 |---|---|---|
 | GET | `/config/arpa` | HTML da tela |
 | GET | `/config/arpa/lojas` | Lista de Lojas do ERP (proxy autenticado para `GET /v1/sync/agents/{id}/lojas`). `{ok:false}` quando offline/nao provisionado. |
+| GET | `/config/arpa/sync-log` | Log ao vivo da ultima sincronizacao (`run_id`, `running`, `lines[]`). |
 | POST | `/config/arpa/set-enabled` | `enabled=true|false` - grava `arpa-collector-settings.json` |
 | POST | `/config/arpa/save` | Cria/edita conexao. **409** se a Loja ja estiver em outra conexao. |
 | POST | `/config/arpa/delete` | Remove conexao (`id`) |
