@@ -96,28 +96,42 @@ function Copy-TreeWithRetry {
 }
 
 function Stop-ClientApps {
-    # taskkill /F e mais confiavel que Stop-Process quando o script roda como
-    # LocalSystem (Sessao 0) e o alvo (PDV App / bandeja) esta na sessao do
-    # usuario logado. Sem /T de proposito - nao queremos matar processo-pai.
-    # Repete kill + verificacao ate os processos sumirem de fato (o antigo
-    # Start-Sleep 4 fixo nao dava conta e a copia da Tray falhava com o
-    # arquivo em uso).
-    $exeNames  = @('PdvLocal.App.exe', 'SyncAgent.Tray.exe')
-    $procMatch = { $_.ProcessName -in @('PdvLocal.App', 'SyncAgent.Tray') -or $_.ProcessName -like 'SYNCAG~*' -or $_.ProcessName -like 'PDVLOC~*' }
+    # Encerra PDV App e bandeja e espera os handles serem liberados, repetindo
+    # ate os processos sumirem de fato (o antigo Start-Sleep 4 fixo nao dava
+    # conta e a copia da Tray falhava com o arquivo em uso).
+    #
+    # IMPORTANTE: este script roda com $ErrorActionPreference='Stop'. Chamar
+    # `taskkill.exe /IM <nome>` para um processo que NAO existe (o PDV App
+    # geralmente nao esta aberto) faz o taskkill escrever no stderr, o que sob
+    # 'Stop' vira erro terminante e mata o script no passo 3. Por isso:
+    #   - forcamos 'Continue' localmente;
+    #   - matamos por PID (sempre valido, vindo de $alive) e nao por /IM;
+    #   - engolimos qualquer saida/erro do taskkill.
+    $prevEA = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $procMatch = { $_.ProcessName -in @('PdvLocal.App', 'SyncAgent.Tray') -or $_.ProcessName -like 'SYNCAG~*' -or $_.ProcessName -like 'PDVLOC~*' }
 
-    for ($round = 1; $round -le 15; $round++) {
-        $alive = Get-Process -ErrorAction SilentlyContinue | Where-Object $procMatch
-        if (-not $alive) {
-            if ($round -gt 1) { Write-Log "PDV App e bandeja encerrados (verificacao $round)." }
-            Start-Sleep -Seconds 2   # folga final para o antivirus soltar o handle da DLL
-            return
+        for ($round = 1; $round -le 15; $round++) {
+            $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object $procMatch)
+            if ($alive.Count -eq 0) {
+                if ($round -gt 1) { Write-Log "PDV App e bandeja encerrados (verificacao $round)." }
+                Start-Sleep -Seconds 2   # folga final para o antivirus soltar o handle da DLL
+                return
+            }
+
+            foreach ($proc in $alive) {
+                try { cmd.exe /c "taskkill /F /PID $($proc.Id) >nul 2>&1" | Out-Null } catch { }
+                try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
+            }
+            Start-Sleep -Seconds 2
         }
-        foreach ($n in $exeNames) { & taskkill.exe /F /IM $n 2>&1 | Out-Null }
-        $alive | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
-    }
 
-    Write-Log "PDV App/bandeja ainda em execucao apos ~30s - a copia sera tentada mesmo assim (com retry)." 'Error'
+        Write-Log "PDV App/bandeja ainda em execucao apos ~30s - a copia sera tentada mesmo assim (com retry)." 'Error'
+    }
+    finally {
+        $ErrorActionPreference = $prevEA
+    }
 }
 
 function Restore-Backup {
@@ -213,6 +227,29 @@ function Start-TrayIfNotRunning {
     }
 }
 
+# Rede de seguranca: qualquer erro nao tratado (ex.: uma linha que escapou do
+# $ErrorActionPreference='Stop') NAO pode deixar o servico parado com a
+# recuperacao automatica desabilitada (passo 4) - isso e o "servico Stopped
+# para sempre". O trap religa a recuperacao, tenta subir o servico e marca
+# rolled_back antes de sair.
+$script:backupDir = $null
+trap {
+    Write-Log "ERRO nao tratado no auto-update: $_" 'Error'
+    try { cmd.exe /c "sc.exe failure ""$ServiceName"" reset= 86400 actions= restart/60000/restart/60000/restart/300000 >nul 2>&1" | Out-Null } catch { }
+    if ($script:backupDir -and (Test-Path $script:backupDir)) {
+        try { Restore-Backup $script:backupDir } catch { }
+    }
+    try { cmd.exe /c "sc.exe start ""$ServiceName"" >nul 2>&1" | Out-Null } catch { }
+    try {
+        $payload = [ordered]@{ status='failed'; step='rolled_back'; step_number=10; total_steps=$totalSteps
+            message="Auto-update abortado por erro inesperado. Versao anterior mantida."; version=$Version
+            timestamp_utc=(Get-Date).ToUniversalTime().ToString('o') }
+        $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $statusFile -Encoding UTF8 -Force
+    } catch { }
+    try { Start-TrayIfNotRunning } catch { }
+    exit 1
+}
+
 # --- 1. Verificar hash SHA256 (dupla verificacao) ---
 Write-ProgressStatus -StepNumber 1 -StepName 'starting' -Message "Iniciando auto-update para versao $Version."
 Write-Log "Pacote: $ZipPath"
@@ -238,8 +275,11 @@ Write-ProgressStatus -StepNumber 3 -StepName 'stopping_apps' -Message "Encerrand
 Stop-ClientApps
 
 # --- 4. Desabilitar recuperacao automatica temporariamente ---
+# cmd.exe /c "... >nul 2>&1" engole qualquer stderr do sc.exe: sob
+# $ErrorActionPreference='Stop', um native command escrevendo no stderr vira
+# erro terminante e derruba o script.
 Write-ProgressStatus -StepNumber 4 -StepName 'disabling_recovery' -Message "Desabilitando recuperacao automatica do servico..."
-& sc.exe failure $ServiceName reset= 0 actions= "" | Out-Null
+cmd.exe /c "sc.exe failure ""$ServiceName"" reset= 0 actions= """" >nul 2>&1" | Out-Null
 
 # --- 5. Backup dos binarios atuais ---
 $oldVersion = 'unknown'
@@ -248,6 +288,7 @@ if (Test-Path $versionFile) { $oldVersion = (Get-Content $versionFile -Raw).Trim
 
 $backupRoot = Join-Path $InstallRoot 'Backups'
 $backupDir  = Join-Path $backupRoot $oldVersion
+$script:backupDir = $backupDir
 New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
 Write-ProgressStatus -StepNumber 5 -StepName 'backing_up' -Message "Fazendo backup da versao '$oldVersion' em $backupDir..."
@@ -262,7 +303,7 @@ foreach ($comp in $components) {
 
 # --- 6. Extrair pacote novo ---
 $extractDir = Join-Path $env:TEMP "pdv-extract\$Version"
-if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue }
 Write-ProgressStatus -StepNumber 6 -StepName 'extracting' -Message "Extraindo pacote..."
 Expand-Archive -Path $ZipPath -DestinationPath $extractDir -Force
 
@@ -290,12 +331,12 @@ try {
 
 # --- 8. Re-habilitar recuperacao automatica ---
 Write-ProgressStatus -StepNumber 8 -StepName 'enabling_recovery' -Message "Reabilitando recuperacao automatica do servico..."
-& sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/300000 | Out-Null
+cmd.exe /c "sc.exe failure ""$ServiceName"" reset= 86400 actions= restart/60000/restart/60000/restart/300000 >nul 2>&1" | Out-Null
 
 # --- 9. Iniciar servico ---
 function Start-ServiceWithRetry {
     param([string]$Name, [int]$TimeoutSeconds = 60)
-    & sc.exe start $Name 2>&1 | Out-Null
+    cmd.exe /c "sc.exe start ""$Name"" >nul 2>&1" | Out-Null
     for ($t = 0; $t -lt $TimeoutSeconds; $t += 5) {
         Start-Sleep -Seconds 5
         $s = Get-Service -Name $Name -ErrorAction SilentlyContinue
@@ -312,7 +353,7 @@ if ($success) {
     } else {
         $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         Write-Log "Servico nao iniciou em 60s (status=$($svc.Status)). Restaurando backup." 'Error'
-        & sc.exe stop $ServiceName 2>&1 | Out-Null
+        cmd.exe /c "sc.exe stop ""$ServiceName"" >nul 2>&1" | Out-Null
         Start-Sleep -Seconds 5
         Restore-Backup $backupDir
         Start-ServiceWithRetry $ServiceName 30 | Out-Null

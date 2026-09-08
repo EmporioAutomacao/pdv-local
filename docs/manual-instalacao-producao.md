@@ -525,17 +525,28 @@ editavel no formulario - so a acao ou o comando marcam). Guia:
 O canal administrativo (`Instalacoes do SyncAgent` -> "Solicitar atualizacao")
 continua em paralelo, agendando uma versao especifica via heartbeat.
 
-*Janela "Atualizar App" parada em "Baixando ... 97%" + balao "nao foi possivel
-consultar o servico local" repetindo, e o servico fica **Stopped*** (visto ate
-1.6.2): o `self-update.ps1` nao conseguia matar a bandeja/PDV a tempo e a copia
-de `Sync\Tray\SyncAgent.Tray.dll` falhava com "arquivo em uso" -> rollback.
-Contorno: fechar a bandeja, `Start-Service AraraSuiteSync`, tentar de novo com a
-bandeja fechada. **Corrigido na 1.6.3** (kill via `taskkill` com verificacao +
-copia com retry/backoff; janela nao congela mais). Como o hop 1.6.2 -> 1.6.3
-ainda roda o `self-update.ps1` **antigo** (o instalado), pode precisar do
-contorno uma ultima vez; a partir da 1.6.3 o agente extrai o `self-update.ps1`
-do proprio pacote baixado, entao correcoes no script passam a valer ja na
-atualizacao que as entrega.
+*Janela "Atualizar App" parada + servico fica **Stopped**, `update-status.json`
+congelado no passo 3 ("Encerrando PDV App e bandeja..."):*
+
+- **Ate 1.6.2:** o `self-update.ps1` nao matava a bandeja a tempo e a copia de
+  `Sync\Tray\SyncAgent.Tray.dll` falhava com "arquivo em uso".
+- **1.6.3 a 1.6.6:** BUG pior introduzido junto com o retry — o `Stop-ClientApps`
+  chamava `taskkill /IM PdvLocal.App.exe`; com o PDV App fechado (comum), o
+  taskkill escrevia no stderr, e sob `$ErrorActionPreference='Stop'` isso virava
+  erro terminante que **matava o script no passo 3, sempre**. O servico ficava
+  Stopped com a recuperacao automatica desabilitada.
+- **Corrigido de vez na 1.6.7:** `Stop-ClientApps` mata por PID (nunca `/IM`) via
+  `cmd /c "... >nul 2>&1"` (engole stderr), com `ErrorActionPreference` local;
+  todas as chamadas `sc.exe` idem; um `trap` religa a recuperacao + restaura o
+  backup + sobe o servico se qualquer erro escapar. E o `SelfUpdater` lanca o
+  script via **Agendador de Tarefas** (fora do job do servico), nao mais como
+  filho direto.
+
+Contorno para maquinas presas em ≤1.6.6: rodar `PdvLocalInstaller-vX.Y.Z.exe`
+(ou `PdvLocalInstaller-vX.Y.Z.exe --auto` para rollout sem clique — 1.6.7+). O
+`.exe` roda o `self-update.ps1` de um processo proprio e ja funcionava. A partir
+da 1.6.7 o hop 1.6.6 -> 1.6.7 pela bandeja ja usa o script novo (extraido do
+pacote), entao nao precisa mais do contorno.
 
 Endpoints uteis do dashboard/API local (sempre `127.0.0.1:47891`):
 

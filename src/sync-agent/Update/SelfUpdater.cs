@@ -347,22 +347,101 @@ public sealed class SelfUpdater
         }
     }
 
-    private static void LaunchUpdateScript(string scriptPath, string zipPath, string version, string installRoot)
+    private void LaunchUpdateScript(string scriptPath, string zipPath, string version, string installRoot)
     {
-        var args = $"-NonInteractive -ExecutionPolicy Bypass -File \"{scriptPath}\"" +
-                   $" -ZipPath \"{zipPath}\"" +
-                   $" -Version \"{version}\"" +
-                   $" -InstallRoot \"{installRoot}\"" +
-                   $" -ServiceName \"AraraSuiteSync\"";
+        var psArgs = $"-NonInteractive -ExecutionPolicy Bypass -File \"{scriptPath}\"" +
+                     $" -ZipPath \"{zipPath}\"" +
+                     $" -Version \"{version}\"" +
+                     $" -InstallRoot \"{installRoot}\"" +
+                     $" -ServiceName \"AraraSuiteSync\"";
 
-        var psi = new ProcessStartInfo("powershell.exe", args)
+        // NAO lancar como filho direto (Process.Start): o SyncAgent roda como
+        // Windows Service e, quando o servico para (StopApplication logo abaixo),
+        // o Windows encerra o job object do servico e mata o powershell filho no
+        // meio da troca de binarios. O script tem que sobreviver a parada do
+        // servico. Solucao: rodar via Agendador de Tarefas (processo do Task
+        // Scheduler, fora do job do servico) - mesmo padrao que o proprio
+        // self-update.ps1 usa para relancar a bandeja.
+        if (TryLaunchViaScheduledTask(psArgs))
+        {
+            return;
+        }
+
+        _logger.LogWarning("Self-update: fallback para Process.Start (schtasks falhou) - o script pode nao sobreviver a parada do servico.");
+        Process.Start(new ProcessStartInfo("powershell.exe", psArgs)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
+            WindowStyle = ProcessWindowStyle.Hidden,
+        });
+    }
 
-        Process.Start(psi);
+    private bool TryLaunchViaScheduledTask(string powershellArgs)
+    {
+        try
+        {
+            // Um .cmd num diretorio sem espacos evita a briga do schtasks /TR
+            // com aspas e caminhos com espaco; o comando complexo (com
+            // "C:\Program Files\...") vai DENTRO do .cmd, onde aspas funcionam.
+            var runnerDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
+            Directory.CreateDirectory(runnerDir);
+            var runnerCmd = Path.Combine(runnerDir, $"araras-selfupdate-{Guid.NewGuid():N}.cmd");
+            File.WriteAllText(runnerCmd, $"@echo off\r\npowershell.exe {powershellArgs}\r\ndel \"%~f0\"\r\n");
+
+            var taskName = $"AraraSuiteSyncSelfUpdate-{Guid.NewGuid():N}"[..48];
+
+            if (!RunSchtasks($"/Create /TN \"{taskName}\" /TR \"{runnerCmd}\" /SC ONCE /ST 23:59 /RU SYSTEM /RL HIGHEST /F"))
+            {
+                TryDeleteFile(runnerCmd);
+                return false;
+            }
+
+            var ran = RunSchtasks($"/Run /TN \"{taskName}\"");
+            // Apagar a definicao da tarefa nao mata a instancia ja em execucao.
+            RunSchtasks($"/Delete /TN \"{taskName}\" /F");
+
+            if (!ran)
+            {
+                TryDeleteFile(runnerCmd);
+            }
+
+            return ran;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Self-update: falha ao agendar o script via Task Scheduler.");
+            return false;
+        }
+    }
+
+    private bool RunSchtasks(string arguments)
+    {
+        using var process = Process.Start(new ProcessStartInfo("schtasks.exe", arguments)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        });
+
+        if (process is null)
+        {
+            return false;
+        }
+
+        process.WaitForExit(15_000);
+        if (!process.HasExited)
+        {
+            return false;
+        }
+
+        return process.ExitCode == 0;
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); } catch { /* melhor esforco */ }
     }
 }
 
