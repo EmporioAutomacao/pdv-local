@@ -108,7 +108,8 @@ BEGIN
         v_tz := 'Etc/GMT+3';
     END;
 
-    -- =================== PRODUTOS ===================
+    -- =================== PRODUTOS + ESTOQUE ===================
+  BEGIN
     p_t := sync_export._first_table(ARRAY['produtos', 'produto']);
     IF p_t IS NULL THEN
         RAISE NOTICE 'sync_export: tabela de produtos nao encontrada; produtos e estoque pulados.';
@@ -230,8 +231,12 @@ BEGIN
             END IF;
         END IF;
     END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export: produtos/estoque nao criados (%).', SQLERRM;
+  END;
 
     -- =================== CLIENTES ===================
+  BEGIN
     c_t := sync_export._first_table(ARRAY['clientes', 'cliente']);
     IF c_t IS NULL THEN
         RAISE NOTICE 'sync_export: tabela de clientes nao encontrada; clientes pulado.';
@@ -294,6 +299,9 @@ BEGIN
             RAISE NOTICE 'sync_export.clientes criada (occurred_at via %).', src;
         END IF;
     END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export: clientes nao criado (%).', SQLERRM;
+  END;
 END;
 $sync_export$;
 
@@ -324,7 +332,7 @@ BEGIN
             WHERE v.codigo IS NOT NULL
         $v$;
         RAISE NOTICE 'sync_export.vendas criada.';
-    EXCEPTION WHEN undefined_table OR undefined_column THEN
+    EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'sync_export.vendas pulada (%).', SQLERRM;
     END;
 
@@ -347,7 +355,7 @@ BEGIN
             WHERE r.codigo IS NOT NULL
         $f$;
         RAISE NOTICE 'sync_export.financeiro criada.';
-    EXCEPTION WHEN undefined_table OR undefined_column THEN
+    EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'sync_export.financeiro pulada (%).', SQLERRM;
     END;
 END;
