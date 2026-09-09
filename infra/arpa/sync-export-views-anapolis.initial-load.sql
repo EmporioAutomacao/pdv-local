@@ -38,3 +38,30 @@ SELECT
 FROM public."clientes"
 WHERE "codigo" IS NOT NULL;
 
+-- Estoque: neste Arpa (legado, PG 9.6) o saldo fica na propria tabela
+-- produtos (loja unica). Aplicado em 2026-09-08 direto no Arpa 192.168.0.4.
+-- Sem coluna temporal -> timestamp fixo (carga inicial); mudancas continuas
+-- de saldo nao sincronizam sem uma fonte de alteracao real.
+CREATE OR REPLACE VIEW sync_export.estoque AS
+SELECT
+    "codigo"::text AS entity_key,
+    TIMESTAMPTZ '2000-01-01 00:00:00+00' AS occurred_at_utc,
+    jsonb_build_object(
+        'codigo', "codigo",
+        'quantidade', "quantidade",
+        'estoqueminimo', "estoqueminimo",
+        'estoquemaximo', "estoquemaximo",
+        'localizacao', "localizacao"
+    )::text AS payload_json,
+    concat('arpa-estoque-', "codigo")::text AS trace_id
+FROM public."produtos"
+WHERE "codigo" IS NOT NULL;
+
+GRANT USAGE ON SCHEMA sync_export TO ararasuite_sync_ro;
+GRANT SELECT ON sync_export.produtos, sync_export.clientes, sync_export.estoque TO ararasuite_sync_ro;
+
+-- Vendas / Financeiro: NAO mapeados. O schema deste Arpa (150+ tabelas,
+-- notas/parcelas/faturas/caixa) precisa de um projeto de mapeamento
+-- dedicado - toggles Vendas/Financeiro devem ficar DESMARCADOS na conexao
+-- ate isso existir. A fonte de vendas novas passa a ser o proprio PDV Local.
+
