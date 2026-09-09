@@ -557,6 +557,25 @@ public sealed class LocalSyncStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Apaga os watermarks do coletor Arpa de uma conexao
+    /// (<c>collector.arpa.&lt;connectionId&gt;.&lt;entidade&gt;.watermark</c>).
+    /// Sem o registro, <see cref="GetDateTimeOffsetStateAsync"/> devolve o
+    /// default (epoch) e o coletor re-le tudo. Usado pelo botao "Sincronizar
+    /// tudo" (Configuracoes &gt; Arpa) para backfill / corrigir erros.
+    /// </summary>
+    public async Task<int> ResetArpaWatermarksAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            DELETE FROM sync_agent.agent_state
+            WHERE state_key LIKE 'collector.arpa.' || @conn || '.%'
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("conn", connectionId);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<DateTimeOffset> GetDateTimeOffsetStateAsync(
         string stateKey,
         DateTimeOffset defaultValue,

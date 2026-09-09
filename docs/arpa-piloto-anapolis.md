@@ -21,10 +21,12 @@ Arpa -> SyncAgent -> ERP
 
 ## Artefatos
 
-SQL de views para carga inicial controlada:
+SQL de views — **arquivo unico e generico** (introspecta o schema, gera views
+incrementais com preco; roda pelo botao "Preparar views" ou pelo script de
+preparo do piloto):
 
 ```text
-infra/arpa/sync-export-views-anapolis.initial-load.sql
+infra/arpa/sync-export-views.sql
 ```
 
 Template para usuario runtime read-only:
@@ -133,13 +135,15 @@ Status de preparacao real em 31/05/2026:
 - banco `anapolis` acessado em `192.168.0.4:5432` com DBA temporario
   `postgres` sem senha;
 - schema `sync_export` criado;
-- views `sync_export.produtos` e `sync_export.clientes` criadas/substituidas;
-- usuario runtime `sync_agent_anapolis_ro` criado/ajustado;
-- senha runtime forte gerada e mantida em `.secrets/arpa/anapolis-runtime-password.txt`;
-- permissoes read-only validadas com sucesso;
-- preflight das views validado com sucesso;
-- `sync_export.clientes.occurred_at_utc` usa `COALESCE(datacad, timestamp fixo)`
-  para nao perder clientes sem data de cadastro durante carga inicial.
+- views `sync_export.produtos`, `.clientes` e `.estoque` criadas/substituidas
+  pelo script unico (1.6.9+): `occurred_at_utc` vem das tabelas de log
+  `alterados` / `alterados_clientes` / `produtos_altera_quantidade` ->
+  **sincronizacao incremental** (preco, saldo, cadastro). `produtos` inclui
+  `precocusto`/`precovenda`. Fuso fixo `Etc/GMT+3` (o `America/Sao_Paulo` do
+  PG 9.6 do Arpa aplica DST fantasma e erra 1h no verao).
+- usuario runtime read-only criado/ajustado, com `GRANT SELECT` nas views
+  (o proprio "Preparar views" ja concede);
+- vendas/financeiro: sem tabelas mapeaveis nesse Arpa -> toggles desmarcados.
 
 Status de seguranca em 01/06/2026:
 
@@ -171,7 +175,7 @@ Usar usuario DBA/admin, nao o usuario runtime do SyncAgent:
 ```powershell
 $env:ARPA_SYNC_READONLY_PASSWORD = "<senha-ddl-temporaria>"
 .\infra\windows\apply-arpa-sync-export-views.ps1 `
-  -SqlFile ".\infra\arpa\sync-export-views-anapolis.initial-load.sql" `
+  -SqlFile ".\infra\arpa\sync-export-views.sql" `
   -PostgresHost "192.168.0.4" `
   -DatabaseName "anapolis" `
   -ExpectedDatabaseName "anapolis" `
@@ -316,7 +320,8 @@ Nao prosseguir se:
 
 - o usuario read-only tiver qualquer permissao de escrita;
 - o preflight das views falhar;
-- `sync_export.produtos` usar timestamp fixo fora da janela de carga inicial;
+- `sync_export.produtos`/`.clientes` cairem no timestamp fixo (deveriam usar as
+  tabelas de log `alterados`/`alterados_clientes` — conferir na definicao da view);
 - houver dead-letter apos a coleta local;
 - houver duvida sobre aplicar em `anapolis`.
 - a senha DBA precisar ficar salva em arquivo ou no `appsettings.json`.

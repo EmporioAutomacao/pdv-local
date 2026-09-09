@@ -78,7 +78,7 @@ Campos do formulario:
 | **Controla o estoque desta Loja** | Quando marcado, eventos `estoque` desta conexao gravam o saldo na Loja; senao so cadastro. |
 | **Ativa** | Desmarcar pausa so essa conexao, sem apagar. |
 
-Botoes por linha: **Editar**, **Sincronizar**, **Remover**.
+Botoes por linha: **Editar**, **Sincronizar**, **Sincronizar tudo**, **Remover**.
 
 **Sincronizar** (1.6.6+) dispara um ciclo agora e abre um painel de **log ao
 vivo** logo abaixo da tabela, mostrando linha a linha o que esta acontecendo:
@@ -88,6 +88,12 @@ Clientes/Estoque/Vendas/Financeiro), o envio ao ERP (`aceitos`, `rejeitados`,
 do PDV) e o resultado final. Se ja houver uma sincronizacao em andamento, o
 painel espera ela comecar. O botao **Fechar** aparece ao concluir.
 Endpoint: `GET /config/arpa/sync-log` (JSON: `run_id`, `running`, `lines`).
+
+**Sincronizar tudo** (1.6.9+) **zera os marcadores (watermarks)** desta conexao
+e dispara um ciclo — a coleta re-le e re-envia **todo** o cadastro ao ERP
+(produtos, clientes, estoque). Use para backfill ou para corrigir dados errados
+no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam a 500/lote).
+Endpoint: `POST /config/arpa/full-resync` (`id`).
 
 Botoes do formulario: **Salvar**, **Testar conexao** (valida credencial +
 presenca das views `sync_export`), **Limpar**.
@@ -122,10 +128,18 @@ gravada**. A **Senha DBA pode ficar em branco** se esse Postgres usa
 Windows, o teste falha com mensagem explicando (o servico roda como LocalSystem
 e nao consegue usar essa auth).
 
-- **Preparar views sync_export**: cria o schema `sync_export` e as views
-  `produtos`/`clientes`/`estoque`/`vendas`/`financeiro` a partir do template
-  generico. Se o schema real do Arpa nao bater com o template, use o fluxo de
-  diagnostico de `docs/arpa-collector-piloto.md`.
+- **Preparar views sync_export** (1.6.9+): roda `infra/arpa/sync-export-views.sql`
+  — um **script unico e generico** que **introspecta o schema real** do Arpa
+  (nomes de tabela/coluna variam entre versoes) e cria `sync_export.produtos`
+  (com preco), `.clientes` e `.estoque`. `occurred_at_utc` vem, em ordem: da
+  tabela de log de alteracao (`alterados`/`alterados_clientes`/
+  `produtos_altera_quantidade` -> sincronizacao **incremental** de verdade),
+  senao de uma coluna temporal na propria tabela, senao timestamp fixo (carga
+  inicial). `vendas`/`financeiro` so sao criadas se as tabelas padrao existirem
+  (nao existem no Arpa Sistemas legado -> deixe esses toggles desmarcados).
+  A **mesma passada** ja concede leitura das views ao Usuario da conexao. A
+  mensagem lista o que foi criado e o que foi pulado. Nao precisa mais editar
+  SQL por cliente.
 - **Criar usuario read-only**: cria um role so-leitura com `GRANT SELECT` nas
   views, para usar em Usuario/Senha da conexao.
 
@@ -140,8 +154,9 @@ e nao consegue usar essa auth).
 | POST | `/config/arpa/save` | Cria/edita conexao. **409** se a Loja ja estiver em outra conexao. |
 | POST | `/config/arpa/delete` | Remove conexao (`id`) |
 | POST | `/config/arpa/sync-now` | Dispara um ciclo |
+| POST | `/config/arpa/full-resync` | Zera os watermarks da conexao (`id`) + dispara ciclo — re-envia tudo |
 | POST | `/config/arpa/test` | Testa conexao |
-| POST | `/config/arpa/prepare-views` | Cria views (credencial DBA no corpo) |
+| POST | `/config/arpa/prepare-views` | Roda o script unico de views + GRANT ao Usuario (credencial DBA no corpo) |
 | POST | `/config/arpa/create-user` | Cria role read-only (credencial DBA no corpo) |
 
 ## Arquivos nesta maquina
@@ -156,8 +171,9 @@ Ambos no diretorio de `Provisioning:ProtectedFile` (padrao:
 
 ## Ver tambem
 
-- `docs/arpa-collector-piloto.md` - preparo de views por diagnostico, usuario
-  read-only, preflight, troubleshooting de erros de coleta.
+- `infra/arpa/sync-export-views.sql` - o script unico e generico das views.
+- `docs/arpa-collector-piloto.md` - usuario read-only, preflight, troubleshooting
+  de erros de coleta.
 - `docs/arpa-readonly-security-policy.md` - politica de acesso read-only.
 - `docs/sync-agent-runbook-incidentes.md` - triagem de falhas.
 - `../sync/openapi/erp-api-v1.yaml` - contrato do endpoint `/lojas`

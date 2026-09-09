@@ -6,7 +6,7 @@ public sealed class ErpDispatcherOptions
 
     public bool Enabled { get; set; }
 
-    public int BatchSize { get; set; } = 50;
+    public int BatchSize { get; set; } = 500;
 
     public int TimeoutSeconds { get; set; } = 30;
 

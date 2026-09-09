@@ -1,3 +1,7 @@
+# LEGADO. O botao "Preparar views" (Configuracoes > Arpa) ja introspecta o
+# schema e cria as views (infra/arpa/sync-export-views.sql). Este exportador de
+# diagnostico so serve para depurar quando a introspeccao automatica falha.
+
 param(
     [string]$PostgresHost = "",
     [int]$PostgresPort = 5432,

@@ -1,3 +1,9 @@
+# LEGADO. O caminho padrao agora e o botao "Preparar views" (Configuracoes >
+# Arpa), que roda infra/arpa/sync-export-views.sql - um unico script
+# introspectivo, generico e incremental, aplicado por conexao com credencial
+# DBA transitoria. Este gerador manual so serve para depuracao / casos em que a
+# introspeccao automatica nao cobre o schema.
+
 param(
     [Parameter(Mandatory = $true)]
     [string]$DiagnosticsFile,

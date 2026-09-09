@@ -8,7 +8,7 @@ param(
     [string]$RuntimeUser = "sync_agent_anapolis_ro",
     [string]$RuntimePasswordEnvironmentVariable = "ARPA_SYNC_READONLY_PASSWORD",
     [string]$GeneratedRuntimePasswordFile = ".\.secrets\arpa\anapolis-runtime-password.txt",
-    [string]$ViewsSqlFile = ".\infra\arpa\sync-export-views-anapolis.initial-load.sql",
+    [string]$ViewsSqlFile = ".\infra\arpa\sync-export-views.sql",
     [string]$PsqlPath = "psql",
     [switch]$AllowEmptyDbaPassword,
     [switch]$GenerateRuntimePassword,

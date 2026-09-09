@@ -1272,6 +1272,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <td style="white-space:nowrap">
                     <button type="button" class="mini" onclick="editConn('{{Html(c.Id)}}')">Editar</button>
                     <button type="button" class="mini" onclick="startSync()">Sincronizar</button>
+                    <button type="button" class="mini" onclick="fullResync('{{Html(c.Id)}}')">Sincronizar tudo</button>
                     <button type="button" class="mini danger" onclick="if(confirm('Remover a conexao {{Html(c.Nome)}}?'))postAct('delete','{{Html(c.Id)}}')">Remover</button>
                   </td>
                 </tr>
@@ -1592,6 +1593,26 @@ public sealed class LocalStatusServer : BackgroundService
                   }).catch(function(e){ document.getElementById('synclog').textContent = 'Falha ao solicitar: ' + e; });
                 }
 
+                function fullResync(id){
+                  if(!confirm('Re-enviar TODOS os dados desta conexao ao ERP? Zera os marcadores e pode gerar milhares de eventos.')) return;
+                  var panel = document.getElementById('synclogpanel');
+                  panel.hidden = false;
+                  document.getElementById('synclogclose').hidden = true;
+                  document.getElementById('synclog').textContent = 'Zerando marcadores...';
+                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0;
+                  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
+                    SYNCLOG_BASELINE = j.run_id;
+                    var b = new URLSearchParams(); b.set('id', id);
+                    return fetch('/config/arpa/full-resync', { method:'POST', body: b });
+                  }).then(function(r){ return r.json(); }).then(function(j){
+                    document.getElementById('synclog').textContent = (j.message || 'OK') + '\nAguardando o agente iniciar...';
+                    if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); }
+                    SYNCLOG_TIMER = setInterval(pollSyncLog, 1000);
+                    pollSyncLog();
+                  }).catch(function(e){ document.getElementById('synclog').textContent = 'Falha: ' + e; });
+                }
+
                 function closeSyncLog(){
                   if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); SYNCLOG_TIMER = null; }
                   document.getElementById('synclogpanel').hidden = true;
@@ -1824,9 +1845,36 @@ public sealed class LocalStatusServer : BackgroundService
                     return;
                 }
 
+                // Passa o usuario runtime da conexao (campo Usuario) para o
+                // PrepareViews ja conceder leitura das views a ele.
+                var runtimeUser = V("username");
+                if (string.IsNullOrWhiteSpace(runtimeUser) && !string.IsNullOrWhiteSpace(V("id")))
+                {
+                    runtimeUser = _arpaConnectionsStore.Get(V("id"))?.Username;
+                }
+
                 var result = await _arpaDdlRunner.PrepareViewsAsync(
-                    V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"), cancellationToken);
+                    V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"), runtimeUser, cancellationToken);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
+                return;
+            }
+
+            case "full-resync":
+            {
+                var id = V("id");
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Conexao nao informada." }, cancellationToken);
+                    return;
+                }
+
+                var cleared = await _localStore.ResetArpaWatermarksAsync(id, cancellationToken);
+                _manualSyncSignal.TrySignal();
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    new { ok = true, message = $"{cleared} marcador(es) zerado(s). A proxima sincronizacao re-le e re-envia tudo desta conexao ao ERP." },
+                    cancellationToken);
                 return;
             }
 
