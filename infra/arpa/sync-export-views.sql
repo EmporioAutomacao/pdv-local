@@ -310,6 +310,9 @@ $sync_export$;
 -- existir. Caso contrario ficam ausentes e os toggles Vendas/Financeiro da
 -- conexao devem ficar desmarcados.
 DO $vf$
+DECLARE
+    fin_receber_sql text;
+    fin_pagar_sql   text := '';
 BEGIN
     BEGIN
         EXECUTE $v$
@@ -336,27 +339,61 @@ BEGIN
         RAISE NOTICE 'sync_export.vendas pulada (%).', SQLERRM;
     END;
 
-    BEGIN
-        EXECUTE $f$
-            CREATE OR REPLACE VIEW sync_export.financeiro AS
-            SELECT r.codigo::text AS entity_key,
-                COALESCE(r.updated_at_utc, r.datapagamento, r.vencimento, now())::timestamptz AS occurred_at_utc,
+    -- financeiro: contas_receber (natureza=receber) + contas_pagar
+    -- (natureza=pagar, so se a tabela existir). O ERP grava TituloReceber /
+    -- TituloPagar conforme `natureza`. entity_key do pagar leva prefixo 'pag-'
+    -- para nao colidir com o codigo de um titulo a receber homonimo.
+    fin_receber_sql := $f$
+        SELECT r.codigo::text AS entity_key,
+            COALESCE(r.updated_at_utc, r.datapagamento, r.vencimento, now())::timestamptz AS occurred_at_utc,
+            jsonb_build_object(
+                'titulo_externo_id', r.codigo, 'natureza', 'receber',
+                'codigo_venda_arpa', r.codpedido, 'cliente_documento', c.cnpj_cpf,
+                'cliente_nome', c.nome, 'especie_pagamento', r.forma_pagamento,
+                'valor_base', r.valor, 'valor_recebido', r.valorpago,
+                'vencimento', r.vencimento, 'data_recebimento', r.datapagamento,
+                'status', r.status, 'documento', r.documento
+            )::text AS payload_json,
+            concat('arpa-financeiro-', r.codigo)::text AS trace_id
+        FROM public.contas_receber r
+        LEFT JOIN public.clientes c ON c.codigo = r.codcliente
+        WHERE r.codigo IS NOT NULL
+    $f$;
+
+    IF to_regclass('public.contas_pagar') IS NOT NULL THEN
+        fin_pagar_sql := $fp$
+            UNION ALL
+            SELECT ('pag-' || p.codigo)::text AS entity_key,
+                COALESCE(p.updated_at_utc, p.datapagamento, p.vencimento, now())::timestamptz AS occurred_at_utc,
                 jsonb_build_object(
-                    'titulo_externo_id', r.codigo, 'natureza', 'receber',
-                    'codigo_venda_arpa', r.codpedido, 'cliente_documento', c.cnpj_cpf,
-                    'cliente_nome', c.nome, 'especie_pagamento', r.forma_pagamento,
-                    'valor_base', r.valor, 'valor_recebido', r.valorpago,
-                    'vencimento', r.vencimento, 'data_recebimento', r.datapagamento,
-                    'status', r.status, 'documento', r.documento
+                    'titulo_externo_id', p.codigo, 'natureza', 'pagar',
+                    'compra_externa_id', p.codpedido, 'documento', p.documento,
+                    'fornecedor_codigo', p.codfornecedor, 'fornecedor_nome', f.nome,
+                    'especie_pagamento', p.forma_pagamento,
+                    'valor_base', p.valor, 'valor_pago', p.valorpago,
+                    'vencimento', p.vencimento, 'data_pagamento', p.datapagamento,
+                    'emissao', p.dataemissao, 'status', p.status
                 )::text AS payload_json,
-                concat('arpa-financeiro-', r.codigo)::text AS trace_id
-            FROM public.contas_receber r
-            LEFT JOIN public.clientes c ON c.codigo = r.codcliente
-            WHERE r.codigo IS NOT NULL
-        $f$;
-        RAISE NOTICE 'sync_export.financeiro criada.';
+                concat('arpa-financeiro-pag-', p.codigo)::text AS trace_id
+            FROM public.contas_pagar p
+            LEFT JOIN public.clientes f ON f.codigo = p.codfornecedor
+            WHERE p.codigo IS NOT NULL
+        $fp$;
+    END IF;
+
+    BEGIN
+        EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql || fin_pagar_sql;
+        RAISE NOTICE 'sync_export.financeiro criada%.',
+            CASE WHEN fin_pagar_sql <> '' THEN ' (receber + pagar)' ELSE ' (receber)' END;
     EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'sync_export.financeiro pulada (%).', SQLERRM;
+        -- o ramo de contas_pagar bateu num schema diferente do template;
+        -- recria so com contas_receber para nao regredir o que ja funcionava.
+        BEGIN
+            EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql;
+            RAISE NOTICE 'sync_export.financeiro criada (receber; pagar pulado: %).', SQLERRM;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'sync_export.financeiro pulada (%).', SQLERRM;
+        END;
     END;
 END;
 $vf$;

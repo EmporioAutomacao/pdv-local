@@ -7,8 +7,10 @@ namespace SyncAgent.Normalizers;
 /// formato consumido por <c>sync_api.domain_processor.apply_financeiro</c>
 /// (chaves <c>titulo_externo_id</c>, <c>natureza</c>, <c>codigo_venda_arpa</c>,
 /// <c>valor_base</c>, <c>vencimento</c>, <c>valor_recebido</c>...). O
-/// normalizador so garante a chave de identidade e <c>natureza=receber</c>
-/// (o contrato v1 so aceita titulos a receber).
+/// normalizador so garante a chave de identidade e, quando a view nao informa
+/// <c>natureza</c>, assume <c>receber</c>. A view pode emitir <c>natureza=pagar</c>
+/// (linhas de <c>contas_pagar</c>) — o ERP grava <c>financeiro.TituloPagar</c>
+/// (contrato Sync 2.9.0).
 /// </summary>
 public sealed class ArpaFinanceiroPayloadNormalizer : IArpaPayloadNormalizer
 {

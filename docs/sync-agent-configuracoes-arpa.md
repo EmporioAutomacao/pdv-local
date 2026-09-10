@@ -75,6 +75,7 @@ Campos do formulario:
 | **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 4). Ao **editar** uma conexao a Senha vem em branco (nunca vai para o navegador) e assim fica: *Salvar* e *Testar conexao* usam a senha ja guardada. So digite para trocar. |
 | **Batch size** | Linhas por lote na leitura das views (default 5000). |
 | **Produtos / Clientes / Estoque / Vendas / Financeiro** | O que essa conexao sincroniza. O agente monta a query padrao contra `sync_export.<view>`. |
+| ~~Cobranca~~ | `entity_type=cobranca` (contrato Sync 2.10.0) esta pronto no ERP e no agente (property `SyncCobranca`, normalizer, entity build), mas **ainda sem checkbox** no dashboard: falta a view `sync_export.cobranca` (schema de contas bancarias do Arpa varia muito — ver `infra/arpa/sync-export-views-contract.sql`). |
 | **Controla o estoque desta Loja** | Quando marcado, eventos `estoque` desta conexao gravam o saldo na Loja; senao so cadastro. |
 | **Ativa** | Desmarcar pausa so essa conexao, sem apagar. |
 
@@ -137,6 +138,10 @@ e nao consegue usar essa auth).
   senao de uma coluna temporal na propria tabela, senao timestamp fixo (carga
   inicial). `vendas`/`financeiro` so sao criadas se as tabelas padrao existirem
   (nao existem no Arpa Sistemas legado -> deixe esses toggles desmarcados).
+  `sync_export.financeiro` cobre **contas a receber e a pagar** (o payload leva
+  `natureza` = `receber` | `pagar`; o ERP grava `TituloReceber`/`TituloPagar`).
+  O ramo de `contas_pagar` so entra se a tabela existir e, se o schema divergir
+  do template, e pulado sem derrubar o de `contas_receber`.
   A **mesma passada** ja concede leitura das views ao Usuario da conexao. A
   mensagem lista o que foi criado e o que foi pulado. Nao precisa mais editar
   SQL por cliente.

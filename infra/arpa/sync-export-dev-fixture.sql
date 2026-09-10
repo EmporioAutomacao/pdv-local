@@ -30,3 +30,27 @@ SELECT
         'ativo', true
     )::text AS payload_json,
     'fixture-cliente-piloto-001'::text AS trace_id;
+
+-- financeiro: um titulo a receber e um a pagar (natureza no payload)
+CREATE OR REPLACE VIEW sync_export.financeiro AS
+SELECT
+    'PILOTO-REC-001'::text AS entity_key,
+    (now() AT TIME ZONE 'UTC')::timestamptz AS occurred_at_utc,
+    jsonb_build_object(
+        'titulo_externo_id', 'PILOTO-REC-001', 'natureza', 'receber',
+        'cliente_documento', '12345678000199', 'cliente_nome', 'Cliente Piloto Sync',
+        'valor_base', '150.00', 'valor_recebido', '0.00',
+        'vencimento', '2026-10-10', 'status', 'a_receber'
+    )::text AS payload_json,
+    'fixture-financeiro-rec-001'::text AS trace_id
+UNION ALL
+SELECT
+    'pag-PILOTO-PAG-001'::text AS entity_key,
+    (now() AT TIME ZONE 'UTC')::timestamptz AS occurred_at_utc,
+    jsonb_build_object(
+        'titulo_externo_id', 'PILOTO-PAG-001', 'natureza', 'pagar',
+        'fornecedor_codigo', '1', 'fornecedor_nome', 'Fornecedor Piloto',
+        'documento', 'NF 001', 'valor_base', '90.00', 'valor_pago', '0.00',
+        'vencimento', '2026-10-15', 'status', 'aberto'
+    )::text AS payload_json,
+    'fixture-financeiro-pag-001'::text AS trace_id;

@@ -44,6 +44,13 @@ public sealed record ArpaLocalConnection
 
     public bool SyncFinanceiro { get; init; }
 
+    /// <summary>
+    /// Contas bancarias de cobranca (<c>entity_type=cobranca</c>, contrato Sync
+    /// 2.10.0). Requer a view <c>sync_export.cobranca</c> — ainda nao gerada pelo
+    /// script padrao (ver <c>infra/arpa/sync-export-views-contract.sql</c>).
+    /// </summary>
+    public bool SyncCobranca { get; init; }
+
     public int BatchSize { get; init; } = 5000;
 
     public bool Enabled { get; init; } = true;

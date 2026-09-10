@@ -135,11 +135,17 @@ WHERE v.codigo IS NOT NULL;
 -- View: sync_export.financeiro
 -- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
 -- payload_json JA no formato consumido por sync_api.domain_processor.apply_financeiro:
---   titulo_externo_id, natureza='receber' (contrato v1 so aceita a receber),
---   codigo_venda_arpa (link com a venda), cliente_documento, cliente_nome,
---   cliente_codigo, especie_pagamento/forma_pagamento, valor_base, multa, juros,
---   valor_recebido/valor_pago, valor_atual, vencimento, data_recebimento,
---   status, nosso_numero, linha_digitavel, codigo_barras, url_boleto (opcionais).
+--   titulo_externo_id, natureza ('receber' -> TituloReceber | 'pagar' -> TituloPagar;
+--   ausente = receber), e conforme a natureza:
+--     receber: codigo_venda_arpa, cliente_documento, cliente_nome, cliente_codigo,
+--       especie_pagamento/forma_pagamento, valor_base, multa, juros,
+--       valor_recebido/valor_pago, valor_atual, vencimento, data_recebimento,
+--       status, nosso_numero, linha_digitavel, codigo_barras, url_boleto.
+--     pagar: compra_externa_id, documento, fornecedor_codigo, fornecedor_nome,
+--       emissao, vencimento, valor_base, multa, juros, valor_pago, data_pagamento,
+--       historico_codigo, historico_analitico, status, tem_quitacao.
+-- entity_key do pagar deve levar prefixo 'pag-' para nao colidir com um titulo
+-- a receber de mesmo codigo (a view do agente une as duas fontes com UNION ALL).
 /*
 CREATE OR REPLACE VIEW sync_export.financeiro AS
 SELECT
@@ -162,5 +168,75 @@ SELECT
     concat('arpa-financeiro-', r.codigo)::text AS trace_id
 FROM public.contas_receber r
 LEFT JOIN public.clientes c ON c.codigo = r.codcliente
-WHERE r.codigo IS NOT NULL;
+WHERE r.codigo IS NOT NULL
+UNION ALL
+SELECT
+    ('pag-' || p.codigo)::text AS entity_key,
+    COALESCE(p.updated_at_utc, p.datapagamento, p.vencimento, now())::timestamptz AS occurred_at_utc,
+    jsonb_build_object(
+        'titulo_externo_id', p.codigo,
+        'natureza', 'pagar',
+        'compra_externa_id', p.codpedido,
+        'documento', p.documento,
+        'fornecedor_codigo', p.codfornecedor,
+        'fornecedor_nome', f.nome,
+        'valor_base', p.valor,
+        'valor_pago', p.valorpago,
+        'vencimento', p.vencimento,
+        'data_pagamento', p.datapagamento,
+        'emissao', p.dataemissao,
+        'status', p.status
+    )::text AS payload_json,
+    concat('arpa-financeiro-pag-', p.codigo)::text AS trace_id
+FROM public.contas_pagar p
+LEFT JOIN public.clientes f ON f.codigo = p.codfornecedor
+WHERE p.codigo IS NOT NULL;
+*/
+
+-- View: sync_export.cobranca   (entity_type=cobranca, contrato Sync 2.10.0)
+-- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
+-- O ERP grava cobranca.ContaCobranca (+ cedente + vinculo Arpa + credencial
+-- CNAB240) via sync_api.domain_processor.apply_cobranca -> reaproveita
+-- cobranca.services.arpa._normalize_arpa_cobranca_row +
+-- importar_contas_cobranca_arpa_payloads. O payload leva as chaves CRUAS (o ERP
+-- infere identidade do banco, limpa digitos e monta cedente):
+--   externo_id, nome_exibicao, banco_codigo, banco_nome, agencia, agencia_digito,
+--   conta, conta_digito, carteira, variacao_carteira, convenio,
+--   codigo_beneficiario, posto, cooperativa, sigla, instrucao_padrao,
+--   cedente_nome, cedente_documento, cedente_email, cedente_telefone,
+--   cedente_cidade, cedente_uf, ativo_raw, padrao_raw.
+-- Obrigatorio no minimo: agencia, conta e (banco_codigo OU banco_nome).
+--
+-- ATENCAO: o schema de cobranca do Arpa varia muito (tabela de contas bancarias,
+-- convenios, cedente as vezes em tabela separada). O bloco DO de
+-- sync-export-views.sql ainda NAO cria esta view -- portar a introspecao de
+-- cobranca/services/arpa.py (_find_arpa_cobranca_source /
+-- _find_arpa_cobranca_join_source / _infer_bank_identity) exige validar contra
+-- um Arpa real primeiro (usar export_arpa_schema_diagnostics). Enquanto isso o
+-- toggle "Cobranca" fica indisponivel; o ERP ja aceita o evento.
+/*
+CREATE OR REPLACE VIEW sync_export.cobranca AS
+SELECT
+    b.codigo::text AS entity_key,
+    COALESCE(b.updated_at_utc, now())::timestamptz AS occurred_at_utc,
+    jsonb_build_object(
+        'externo_id', b.codigo,
+        'nome_exibicao', b.descricao,
+        'banco_codigo', b.banco,
+        'banco_nome', b.nomebanco,
+        'agencia', b.agencia,
+        'agencia_digito', b.agenciadv,
+        'conta', b.conta,
+        'conta_digito', b.contadv,
+        'carteira', b.carteira,
+        'convenio', b.convenio,
+        'codigo_beneficiario', b.codcedente,
+        'cedente_nome', b.cedente,
+        'cedente_documento', b.cnpjcedente,
+        'ativo_raw', b.ativo,
+        'padrao_raw', b.padrao
+    )::text AS payload_json,
+    concat('arpa-cobranca-', b.codigo)::text AS trace_id
+FROM public.contas_bancarias b
+WHERE b.codigo IS NOT NULL;
 */
