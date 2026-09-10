@@ -149,7 +149,9 @@ public sealed class ErpHeartbeatClient
                 heartbeatResponse.NextPollSeconds,
                 heartbeatResponse.PendingUpdate?.Version);
 
-            return new HeartbeatSummary(true, true, heartbeatResponse.NextPollSeconds, null, heartbeatResponse.PendingUpdate);
+            return new HeartbeatSummary(
+                true, true, heartbeatResponse.NextPollSeconds, null,
+                heartbeatResponse.PendingUpdate, heartbeatResponse.PendingResyncs);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -182,7 +184,8 @@ public sealed record HeartbeatSummary(
     bool Succeeded,
     int? NextPollSeconds,
     string? LastError,
-    PendingUpdateCommand? PendingUpdate = null)
+    PendingUpdateCommand? PendingUpdate = null,
+    IReadOnlyList<PendingResyncCommand>? PendingResyncs = null)
 {
     public static HeartbeatSummary Disabled { get; } = new(false, false, null, null);
 }
@@ -215,10 +218,18 @@ public sealed record HeartbeatArpaConnection(
 public sealed record HeartbeatResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("next_poll_seconds")] int? NextPollSeconds,
-    [property: JsonPropertyName("pending_update")] PendingUpdateCommand? PendingUpdate = null);
+    [property: JsonPropertyName("pending_update")] PendingUpdateCommand? PendingUpdate = null,
+    [property: JsonPropertyName("pending_resyncs")] IReadOnlyList<PendingResyncCommand>? PendingResyncs = null);
 
 public sealed record PendingUpdateCommand(
     [property: JsonPropertyName("version")] string Version,
     [property: JsonPropertyName("download_url")] string DownloadUrl,
     [property: JsonPropertyName("sha256")] string Sha256,
     [property: JsonPropertyName("release_notes")] string? ReleaseNotes = null);
+
+public sealed record PendingResyncCommand(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("source_system")] string SourceSystem,
+    [property: JsonPropertyName("entity_type")] string EntityType,
+    [property: JsonPropertyName("entity_key")] string EntityKey,
+    [property: JsonPropertyName("key_field")] string KeyField);

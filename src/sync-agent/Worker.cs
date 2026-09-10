@@ -32,6 +32,8 @@ public sealed class Worker : BackgroundService
     private readonly SyncAgentRuntimeState _runtimeState;
     private readonly ArpaSyncRunLog _arpaSyncRunLog;
     private readonly SelfUpdater _selfUpdater;
+    private readonly ArpaResyncProcessor _arpaResyncProcessor;
+    private readonly ErpResyncAckClient _erpResyncAckClient;
 
     public Worker(
         ILogger<Worker> logger,
@@ -51,7 +53,9 @@ public sealed class Worker : BackgroundService
         ManualSyncSignal manualSyncSignal,
         SyncAgentRuntimeState runtimeState,
         ArpaSyncRunLog arpaSyncRunLog,
-        SelfUpdater selfUpdater)
+        SelfUpdater selfUpdater,
+        ArpaResyncProcessor arpaResyncProcessor,
+        ErpResyncAckClient erpResyncAckClient)
     {
         _logger = logger;
         _options = options;
@@ -71,6 +75,8 @@ public sealed class Worker : BackgroundService
         _runtimeState = runtimeState;
         _arpaSyncRunLog = arpaSyncRunLog;
         _selfUpdater = selfUpdater;
+        _arpaResyncProcessor = arpaResyncProcessor;
+        _erpResyncAckClient = erpResyncAckClient;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -177,6 +183,21 @@ public sealed class Worker : BackgroundService
             storeStatus,
             connectivity,
             cancellationToken);
+
+        if (heartbeatSummary.PendingResyncs is { Count: > 0 } pendingResyncs)
+        {
+            var items = pendingResyncs
+                .Select(r => new ResyncItem(r.Id, r.SourceSystem, r.EntityType, r.EntityKey, r.KeyField))
+                .ToList();
+            var resyncResults = await _arpaResyncProcessor.ProcessAsync(items, cancellationToken);
+            await _erpResyncAckClient.AckAsync(resyncResults, cancellationToken);
+            var done = resyncResults.Count(r => r.Status == "done");
+            _arpaSyncRunLog.Add("info", $"Re-sync sob demanda: {done}/{items.Count} registro(s) re-emitido(s).");
+            if (done > 0)
+            {
+                _manualSyncSignal.TrySignal();
+            }
+        }
 
         if (heartbeatSummary.PendingUpdate is { } pendingUpdate)
         {
