@@ -20,7 +20,8 @@ Configuracoes > Arpa
 └── Adicionar / Editar conexao (form)
       Nome, Loja/Estoque (dropdown do ERP),
       Host/Porta/Database, Usuario/Senha (read-only), Batch size,
-      toggles: Produtos / Clientes / Estoque / Vendas / Financeiro,
+      toggles: Produtos / Clientes / Estoque / Vendas / Financeiro / Cobranca /
+      Plano de historicos,
       "Controla o estoque desta Loja", "Ativa"
       [Salvar] [Testar conexao] [Limpar]
       > Preparar banco Arpa (requer credencial DBA)
@@ -75,7 +76,8 @@ Campos do formulario:
 | **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 4). Ao **editar** uma conexao a Senha vem em branco (nunca vai para o navegador) e assim fica: *Salvar* e *Testar conexao* usam a senha ja guardada. So digite para trocar. |
 | **Batch size** | Linhas por lote na leitura das views (default 5000). |
 | **Produtos / Clientes / Estoque / Vendas / Financeiro** | O que essa conexao sincroniza. O agente monta a query padrao contra `sync_export.<view>`. |
-| ~~Cobranca~~ | `entity_type=cobranca` (contrato Sync 2.10.0) esta pronto no ERP e no agente (property `SyncCobranca`, normalizer, entity build), mas **ainda sem checkbox** no dashboard: falta a view `sync_export.cobranca` (schema de contas bancarias do Arpa varia muito — ver `infra/arpa/sync-export-views-contract.sql`). |
+| **Cobranca** | Contas bancarias de cobranca (`entity_type=cobranca`, contrato Sync 2.10.0) → `cobranca.ContaCobranca` no ERP. View `sync_export.cobranca` **best-effort** (o schema de contas bancarias do Arpa varia muito) — se nao bater, aparece "pulada" no log e o toggle nao coleta nada. |
+| **Plano de historicos** | Catalogo de planos de historico financeiro (`entity_type=plano_historico`, contrato Sync 2.11.0) → `financeiro.PlanoHistoricoFinanceiro`. View `sync_export.plano_historico` **best-effort**. |
 | **Controla o estoque desta Loja** | Quando marcado, eventos `estoque` desta conexao gravam o saldo na Loja; senao so cadastro. |
 | **Ativa** | Desmarcar pausa so essa conexao, sem apagar. |
 

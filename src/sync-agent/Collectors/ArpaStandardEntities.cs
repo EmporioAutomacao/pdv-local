@@ -24,7 +24,8 @@ public static class ArpaStandardEntities
         bool estoque,
         bool vendas = false,
         bool financeiro = false,
-        bool cobranca = false)
+        bool cobranca = false,
+        bool planoHistorico = false)
     {
         var entities = new List<ArpaEntityCollectorOptions>();
 
@@ -56,6 +57,11 @@ public static class ArpaStandardEntities
         if (cobranca)
         {
             entities.Add(Make("cobranca", "cobranca"));
+        }
+
+        if (planoHistorico)
+        {
+            entities.Add(Make("plano_historico", "plano_historico"));
         }
 
         return entities;

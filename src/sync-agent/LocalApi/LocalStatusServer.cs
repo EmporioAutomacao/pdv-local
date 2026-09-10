@@ -1260,6 +1260,8 @@ public sealed class LocalStatusServer : BackgroundService
                 c.SyncEstoque ? "Estoque" : null,
                 c.SyncVendas ? "Vendas" : null,
                 c.SyncFinanceiro ? "Financeiro" : null,
+                c.SyncCobranca ? "Cobranca" : null,
+                c.SyncPlanoHistorico ? "Plano-hist" : null,
             }.Where(t => t is not null));
 
             rows.Append($$"""
@@ -1299,6 +1301,8 @@ public sealed class LocalStatusServer : BackgroundService
                     syncEstoque = c.SyncEstoque,
                     syncVendas = c.SyncVendas,
                     syncFinanceiro = c.SyncFinanceiro,
+                    syncCobranca = c.SyncCobranca,
+                    syncPlanoHistorico = c.SyncPlanoHistorico,
                     batchSize = c.BatchSize,
                     enabled = c.Enabled,
                 }),
@@ -1422,6 +1426,8 @@ public sealed class LocalStatusServer : BackgroundService
                       <label><input type="checkbox" id="f_estoque" name="sync_estoque"> Estoque</label>
                       <label><input type="checkbox" id="f_vendas" name="sync_vendas"> Vendas</label>
                       <label><input type="checkbox" id="f_financeiro" name="sync_financeiro"> Financeiro</label>
+                      <label><input type="checkbox" id="f_cobranca" name="sync_cobranca"> Cobranca</label>
+                      <label><input type="checkbox" id="f_plano_hist" name="sync_plano_historico"> Plano de historicos</label>
                       <label><input type="checkbox" id="f_controla" name="controla_estoque"> Controla o estoque desta Loja</label>
                       <label><input type="checkbox" id="f_enabled" name="enabled" checked> Ativa</label>
                     </div>
@@ -1638,6 +1644,8 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_estoque').checked = !!c.syncEstoque;
                   document.getElementById('f_vendas').checked = !!c.syncVendas;
                   document.getElementById('f_financeiro').checked = !!c.syncFinanceiro;
+                  document.getElementById('f_cobranca').checked = !!c.syncCobranca;
+                  document.getElementById('f_plano_hist').checked = !!c.syncPlanoHistorico;
                   document.getElementById('f_controla').checked = !!c.controlaEstoque;
                   document.getElementById('f_enabled').checked = !!c.enabled;
                   document.getElementById('formtitle').textContent = 'Editar conexao: ' + (c.nome||'');
@@ -1768,6 +1776,8 @@ public sealed class LocalStatusServer : BackgroundService
                     SyncEstoque = B("sync_estoque"),
                     SyncVendas = B("sync_vendas"),
                     SyncFinanceiro = B("sync_financeiro"),
+                    SyncCobranca = B("sync_cobranca"),
+                    SyncPlanoHistorico = B("sync_plano_historico"),
                     BatchSize = I("batch_size", 5000),
                     Enabled = B("enabled"),
                 };

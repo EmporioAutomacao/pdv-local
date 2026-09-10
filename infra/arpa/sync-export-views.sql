@@ -397,3 +397,147 @@ BEGIN
     END;
 END;
 $vf$;
+
+-- =================== COBRANCA / PLANO HISTORICO (best-effort) ===================
+-- entity_type=cobranca (contrato Sync 2.10.0) e plano_historico (2.11.0). Payload
+-- em chaves cruas; o ERP normaliza (infere banco, limpa digitos, monta cedente /
+-- recalcula codigo_erp). So criadas se as tabelas padrao existirem.
+DO $cob$
+DECLARE
+    v_tz  text := 'Etc/GMT+3';
+    fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
+    t text; pairs text; sql text;
+    c_ext text; c_nome text; c_bcod text; c_bnome text; c_ag text; c_agdv text;
+    c_cta text; c_ctadv text; c_cart text; c_varc text; c_conv text; c_benef text;
+    c_posto text; c_coop text; c_sigla text; c_instr text;
+    c_cednome text; c_ceddoc text; c_cedmail text; c_cedtel text; c_cedcid text; c_ceduf text;
+    c_ativo text; c_padr text; c_upd text;
+    p_code text; p_ana text; p_desc text; p_ta text; p_es text; p_padr text;
+    p_calc text; p_tipo text; p_oper text; p_ativo text;
+BEGIN
+    BEGIN
+        IF current_setting('TimeZone') IS NOT NULL
+           AND position('/' in current_setting('TimeZone')) = 0
+           AND upper(current_setting('TimeZone')) NOT IN ('GMT','UTC','UCT','ZULU','GREENWICH','LOCALTIME','FACTORY') THEN
+            v_tz := current_setting('TimeZone');
+        END IF;
+    EXCEPTION WHEN OTHERS THEN v_tz := 'Etc/GMT+3';
+    END;
+
+  BEGIN
+    t := sync_export._first_table(ARRAY['ctabancarias','contas_bancarias','conta_bancaria','contabancaria',
+        'contas_cobranca','conta_cobranca','cadastro_bancos','bancos_conta','contasbancarias']);
+    IF t IS NULL THEN
+        RAISE NOTICE 'sync_export.cobranca pulada (tabela de contas bancarias nao encontrada).';
+    ELSE
+        c_ext    := sync_export._pick(t, ARRAY['id','codigo','cod_conta','conta_id','id_conta','registro_id']);
+        c_nome   := sync_export._pick(t, ARRAY['nome_exibicao','descricao','nome','conta_nome','descricao_conta','apelido']);
+        c_bcod   := sync_export._pick(t, ARRAY['banco_codigo','codigo_banco','cod_banco','banco_numero','banco']);
+        c_bnome  := sync_export._pick(t, ARRAY['banco_nome','nome_banco','descricao_banco']);
+        c_ag     := sync_export._pick(t, ARRAY['agencia','ag','codigo_agencia','agencia_numero']);
+        c_agdv   := sync_export._pick(t, ARRAY['agencia_digito','digito_agencia','dv_agencia','agencia_dv']);
+        c_cta    := sync_export._pick(t, ARRAY['conta','numero_conta','num_conta','conta_numero']);
+        c_ctadv  := sync_export._pick(t, ARRAY['conta_digito','digito_conta','dv_conta','conta_dv']);
+        c_cart   := sync_export._pick(t, ARRAY['carteira','codigo_carteira','cod_carteira']);
+        c_varc   := sync_export._pick(t, ARRAY['variacao_carteira','variacao','carteira_variacao']);
+        c_conv   := sync_export._pick(t, ARRAY['convenio','codigo_convenio','cod_convenio']);
+        c_benef  := sync_export._pick(t, ARRAY['codigo_beneficiario','cod_beneficiario','codigo_transmissao','beneficiario_codigo']);
+        c_posto  := sync_export._pick(t, ARRAY['posto','codigo_posto']);
+        c_coop   := sync_export._pick(t, ARRAY['cooperativa','codigo_cooperativa']);
+        c_sigla  := sync_export._pick(t, ARRAY['sigla','apelido_banco','nome_curto']);
+        c_instr  := sync_export._pick(t, ARRAY['instrucao_padrao','instrucao_boleto','instrucoes','mensagem_boleto']);
+        c_cednome:= sync_export._pick(t, ARRAY['cedente_nome','nome_cedente','cedente','beneficiario','razao_social']);
+        c_ceddoc := sync_export._pick(t, ARRAY['cedente_documento','documento_cedente','cnpj','cnpj_cpf','cpf_cnpj','documento']);
+        c_cedmail:= sync_export._pick(t, ARRAY['cedente_email','email_cedente','email']);
+        c_cedtel := sync_export._pick(t, ARRAY['cedente_telefone','telefone_cedente','telefone','fone']);
+        c_cedcid := sync_export._pick(t, ARRAY['cedente_cidade','cidade_cedente','cidade']);
+        c_ceduf  := sync_export._pick(t, ARRAY['cedente_uf','uf_cedente','uf','estado']);
+        c_ativo  := sync_export._pick(t, ARRAY['ativo','habilitado','status','enabled']);
+        c_padr   := sync_export._pick(t, ARRAY['padrao','default','is_default','principal']);
+        c_upd    := sync_export._pick(t, ARRAY['updated_at_utc','atualizado_em','updated_at','data_alteracao']);
+
+        IF c_ext IS NULL OR c_ag IS NULL OR c_cta IS NULL OR (c_bcod IS NULL AND c_bnome IS NULL) THEN
+            RAISE NOTICE 'sync_export.cobranca pulada (tabela % sem id/agencia/conta/banco).', t;
+        ELSE
+            pairs := format('''externo_id'', b.%I, ''agencia'', b.%I, ''conta'', b.%I', c_ext, c_ag, c_cta);
+            IF c_nome    IS NOT NULL THEN pairs := pairs || format(', ''nome_exibicao'', b.%I', c_nome); END IF;
+            IF c_bcod    IS NOT NULL THEN pairs := pairs || format(', ''banco_codigo'', b.%I', c_bcod); END IF;
+            IF c_bnome   IS NOT NULL THEN pairs := pairs || format(', ''banco_nome'', b.%I', c_bnome); END IF;
+            IF c_agdv    IS NOT NULL THEN pairs := pairs || format(', ''agencia_digito'', b.%I', c_agdv); END IF;
+            IF c_ctadv   IS NOT NULL THEN pairs := pairs || format(', ''conta_digito'', b.%I', c_ctadv); END IF;
+            IF c_cart    IS NOT NULL THEN pairs := pairs || format(', ''carteira'', b.%I', c_cart); END IF;
+            IF c_varc    IS NOT NULL THEN pairs := pairs || format(', ''variacao_carteira'', b.%I', c_varc); END IF;
+            IF c_conv    IS NOT NULL THEN pairs := pairs || format(', ''convenio'', b.%I', c_conv); END IF;
+            IF c_benef   IS NOT NULL THEN pairs := pairs || format(', ''codigo_beneficiario'', b.%I', c_benef); END IF;
+            IF c_posto   IS NOT NULL THEN pairs := pairs || format(', ''posto'', b.%I', c_posto); END IF;
+            IF c_coop    IS NOT NULL THEN pairs := pairs || format(', ''cooperativa'', b.%I', c_coop); END IF;
+            IF c_sigla   IS NOT NULL THEN pairs := pairs || format(', ''sigla'', b.%I', c_sigla); END IF;
+            IF c_instr   IS NOT NULL THEN pairs := pairs || format(', ''instrucao_padrao'', b.%I', c_instr); END IF;
+            IF c_cednome IS NOT NULL THEN pairs := pairs || format(', ''cedente_nome'', b.%I', c_cednome); END IF;
+            IF c_ceddoc  IS NOT NULL THEN pairs := pairs || format(', ''cedente_documento'', b.%I', c_ceddoc); END IF;
+            IF c_cedmail IS NOT NULL THEN pairs := pairs || format(', ''cedente_email'', b.%I', c_cedmail); END IF;
+            IF c_cedtel  IS NOT NULL THEN pairs := pairs || format(', ''cedente_telefone'', b.%I', c_cedtel); END IF;
+            IF c_cedcid  IS NOT NULL THEN pairs := pairs || format(', ''cedente_cidade'', b.%I', c_cedcid); END IF;
+            IF c_ceduf   IS NOT NULL THEN pairs := pairs || format(', ''cedente_uf'', b.%I', c_ceduf); END IF;
+            IF c_ativo   IS NOT NULL THEN pairs := pairs || format(', ''ativo_raw'', b.%I', c_ativo); END IF;
+            IF c_padr    IS NOT NULL THEN pairs := pairs || format(', ''padrao_raw'', b.%I', c_padr); END IF;
+
+            sql := 'CREATE OR REPLACE VIEW sync_export.cobranca AS SELECT '
+                || format('b.%I::text', c_ext) || ' AS entity_key, '
+                || COALESCE(CASE WHEN c_upd IS NOT NULL
+                       THEN 'COALESCE(' || sync_export._occurred_expr('b', t, c_upd, v_tz) || ', ' || fixed || ')' END, fixed)
+                || ' AS occurred_at_utc, jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                || format('(''arpa-cobranca-'' || b.%I)::text', c_ext) || ' AS trace_id '
+                || format('FROM public.%I b WHERE b.%I IS NOT NULL', t, c_ext);
+            EXECUTE sql;
+            RAISE NOTICE 'sync_export.cobranca criada (tabela %).', t;
+        END IF;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export.cobranca pulada (%).', SQLERRM;
+  END;
+
+  BEGIN
+    t := sync_export._first_table(ARRAY['plano_historicos','plano_historico','planohistoricos','planohistorico',
+        'historicos','historico','historicos_financeiro','historico_financeiro']);
+    IF t IS NULL THEN
+        RAISE NOTICE 'sync_export.plano_historico pulada (tabela de historicos nao encontrada).';
+    ELSE
+        p_code  := sync_export._pick(t, ARRAY['codigo','cod_historico','id','historico']);
+        p_desc  := sync_export._pick(t, ARRAY['descricao','nome','historico_descricao','descricao_historico']);
+        p_ana   := sync_export._pick(t, ARRAY['analitico','nivel','conta_analitica','contabil','mascara','plano']);
+        p_ta    := sync_export._pick(t, ARRAY['tipo_ta','t_a','ta','tipo_analitico','tipoa','ta_tipo']);
+        p_es    := sync_export._pick(t, ARRAY['es','e_s','entrada_saida','tipo_es']);
+        p_padr  := sync_export._pick(t, ARRAY['padrao','default','is_default']);
+        p_calc  := sync_export._pick(t, ARRAY['calc_c_oper','calc_coper','calculo_c_oper','calcoper','calcula']);
+        p_tipo  := sync_export._pick(t, ARRAY['tipo_lancamento','tipo_operacao','tipooperacao']);
+        p_oper  := sync_export._pick(t, ARRAY['ope','oper','operador','operacao_aux']);
+        p_ativo := sync_export._pick(t, ARRAY['ativo','habilitado','status']);
+
+        IF p_code IS NULL OR p_desc IS NULL THEN
+            RAISE NOTICE 'sync_export.plano_historico pulada (tabela % sem codigo/descricao).', t;
+        ELSE
+            pairs := format('''codigo'', h.%I::text, ''descricao'', h.%I', p_code, p_desc);
+            IF p_ana   IS NOT NULL THEN pairs := pairs || format(', ''analitico'', h.%I::text', p_ana); END IF;
+            IF p_ta    IS NOT NULL THEN pairs := pairs || format(', ''tipo_ta'', h.%I::text', p_ta); END IF;
+            IF p_es    IS NOT NULL THEN pairs := pairs || format(', ''natureza_es'', h.%I::text', p_es); END IF;
+            IF p_padr  IS NOT NULL THEN pairs := pairs || format(', ''padrao'', h.%I::text', p_padr); END IF;
+            IF p_calc  IS NOT NULL THEN pairs := pairs || format(', ''calc_c_oper'', h.%I::text', p_calc); END IF;
+            IF p_tipo  IS NOT NULL THEN pairs := pairs || format(', ''tipo'', h.%I::text', p_tipo); END IF;
+            IF p_oper  IS NOT NULL THEN pairs := pairs || format(', ''operacao'', h.%I::text', p_oper); END IF;
+            IF p_ativo IS NOT NULL THEN pairs := pairs || format(', ''ativo'', h.%I::text', p_ativo); END IF;
+
+            sql := 'CREATE OR REPLACE VIEW sync_export.plano_historico AS SELECT '
+                || format('h.%I::text', p_code) || ' AS entity_key, '
+                || fixed || ' AS occurred_at_utc, jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                || format('(''arpa-plano-hist-'' || h.%I)::text', p_code) || ' AS trace_id '
+                || format('FROM public.%I h WHERE h.%I IS NOT NULL', t, p_code);
+            EXECUTE sql;
+            RAISE NOTICE 'sync_export.plano_historico criada (tabela %; occurred_at fixo).', t;
+        END IF;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export.plano_historico pulada (%).', SQLERRM;
+  END;
+END;
+$cob$;

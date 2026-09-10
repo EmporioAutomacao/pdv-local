@@ -46,10 +46,16 @@ public sealed record ArpaLocalConnection
 
     /// <summary>
     /// Contas bancarias de cobranca (<c>entity_type=cobranca</c>, contrato Sync
-    /// 2.10.0). Requer a view <c>sync_export.cobranca</c> — ainda nao gerada pelo
-    /// script padrao (ver <c>infra/arpa/sync-export-views-contract.sql</c>).
+    /// 2.10.0). View <c>sync_export.cobranca</c> best-effort — pulada se o schema
+    /// de contas bancarias do Arpa nao bater com o template.
     /// </summary>
     public bool SyncCobranca { get; init; }
+
+    /// <summary>
+    /// Catalogo de planos de historico financeiro (<c>entity_type=plano_historico</c>,
+    /// contrato Sync 2.11.0). View <c>sync_export.plano_historico</c> best-effort.
+    /// </summary>
+    public bool SyncPlanoHistorico { get; init; }
 
     public int BatchSize { get; init; } = 5000;
 

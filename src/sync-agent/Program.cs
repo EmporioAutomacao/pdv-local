@@ -76,6 +76,7 @@ builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaEstoquePayloadNormaliz
 builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaVendaPayloadNormalizer>();
 builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaFinanceiroPayloadNormalizer>();
 builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaCobrancaPayloadNormalizer>();
+builder.Services.AddSingleton<IArpaPayloadNormalizer, ArpaPlanoHistoricoPayloadNormalizer>();
 builder.Services.AddSingleton<ArpaPayloadNormalizerRegistry>();
 builder.Services.AddSingleton<ArpaConnectionStringProvider>();
 builder.Services.AddSingleton<ArpaConnectionsStore>();

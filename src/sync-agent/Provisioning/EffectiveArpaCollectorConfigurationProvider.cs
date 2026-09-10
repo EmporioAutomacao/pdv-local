@@ -149,7 +149,8 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
             connection.SyncEstoque,
             connection.SyncVendas,
             connection.SyncFinanceiro,
-            connection.SyncCobranca);
+            connection.SyncCobranca,
+            connection.SyncPlanoHistorico);
 
         return new EffectiveArpaCollectorConnection(
             connection.Id,
