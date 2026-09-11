@@ -128,16 +128,11 @@ D:\GitHub\erp\venv\Scripts\python.exe D:\GitHub\erp\manage.py test sync_api.test
 
 ## VM Windows de homologacao
 
-> **Nomenclatura (2026-08):** o instalador/empacotamento passaram a usar
-> `C:\Program Files\AraraSuite.com.br\` (`PDV\` e `Sync\Agent\`/`Sync\Tray\`
-> como subpastas) e o servico Windows `AraraSuiteSync` (nome de exibicao
-> `AraraSuite Sync`) como padrao para **instalacoes novas**. A VM abaixo foi
-> instalada antes dessa mudanca e nao foi migrada (decisao explicita — sem
-> migracao automatica de instalacoes existentes), entao continua em
-> `C:\Program Files\PDVLocal\` com o servico `PDV Local Sync Agent` ate ser
-> reinstalada. Os comandos desta secao refletem o estado real dessa VM
-> especifica; para uma instalacao nova, troque os caminhos/nome do servico
-> pelos novos.
+> **Atualizado em 2026-09-10:** a VM abaixo ja foi reinstalada com a
+> nomenclatura nova (`C:\Program Files\AraraSuite.com.br\` com `PDV\` e
+> `Sync\Agent\`/`Sync\Tray\` como subpastas, servico `AraraSuiteSync`). A
+> tabela abaixo reflete o estado real observado nessa data — confirme com
+> `Get-Service` antes de assumir que nao mudou de novo.
 
 | Item | Valor atual |
 | --- | --- |
@@ -145,11 +140,13 @@ D:\GitHub\erp\venv\Scripts\python.exe D:\GitHub\erp\manage.py test sync_api.test
 | IP | `192.168.0.184` |
 | Protocolo | WinRM HTTP |
 | Porta | `5985` |
-| Usuario operacional | `codex_sync` |
-| Servico SyncAgent (nesta VM) | `PDV Local Sync Agent` |
-| Instalacao SyncAgent (nesta VM) | `C:\Program Files\PDVLocal\SyncAgent` |
+| Usuario operacional | `Suporte` |
+| Servico SyncAgent (nesta VM) | `AraraSuiteSync` (nome de exibicao `AraraSuite Sync`) |
+| Instalacao SyncAgent (nesta VM) | `C:\Program Files\AraraSuite.com.br\Sync\Agent` |
 | Dashboard local na VM | `http://127.0.0.1:47891/` |
 | Banco local SyncAgent | PostgreSQL 17 + pgvector 0.8.0 |
+| ERP ativado (2026-09-10) | `https://demo.ararasuite.com.br` (tenant `507f781b-57c2-4c91-9ff4-0ffe89aff235`) — nao mais o Docker integrado abaixo; validar via `/status` antes de assumir. |
+| Conexao Arpa configurada | `"Geral"`, id `e869c02b89ac45238f4ab5304962f584` (ver `GET /config/arpa`). |
 
 ## Ambiente Docker integrado CP + ERP
 
@@ -189,13 +186,14 @@ Nome: Desenvolvimento
 ERP: http://192.168.0.31:8002
 ```
 
-O SyncAgent da VM `192.168.0.184` foi ativado contra esse ERP com:
-
-```text
-InstanceId: syncagent-vm-erp
-TenantId: f39436d5-d521-47a2-9fa9-b0a75d98d399
-ERP API: http://192.168.0.31:8002
-```
+Em algum momento o SyncAgent da VM `192.168.0.184` ja foi ativado contra esse
+ERP com `InstanceId: syncagent-vm-erp`, `TenantId:
+f39436d5-d521-47a2-9fa9-b0a75d98d399`, `ERP API: http://192.168.0.31:8002`.
+**Isso nao reflete mais o estado atual** — em 2026-09-10 a VM estava ativada
+contra `https://demo.ararasuite.com.br` (ver tabela da VM acima). Confirme
+sempre via `GET /status` antes de assumir contra qual ERP a VM esta
+apontada; reativar contra o docker integrado exige gerar um novo codigo de
+ativacao nesse ERP e repetir o fluxo de `/setup`.
 
 Para acesso externo ao Docker Desktop, liberar no Windows da maquina
 `192.168.0.31`:
@@ -223,7 +221,7 @@ usar HTTPS.
 Senha: nao versionar. Antes de conectar, defina em uma sessao PowerShell local:
 
 ```powershell
-$env:SYNC_VM_PASSWORD = '<senha-do-usuario-codex_sync>'
+$env:SYNC_VM_PASSWORD = '<senha-do-usuario-Suporte>'
 ```
 
 Para persistir a senha no perfil do usuario Windows da maquina local, sem
@@ -232,7 +230,7 @@ gravar no repositorio:
 ```powershell
 [Environment]::SetEnvironmentVariable(
     "SYNC_VM_PASSWORD",
-    "<senha-do-usuario-codex_sync>",
+    "<senha-do-usuario-Suporte>",
     "User"
 )
 ```
@@ -249,11 +247,11 @@ if ([string]::IsNullOrWhiteSpace($env:SYNC_VM_PASSWORD)) {
 
 ```powershell
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential('codex_sync', $sec)
+$cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 
 Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic -ScriptBlock {
     hostname
-    Get-Service 'PDV Local Sync Agent'
+    Get-Service 'AraraSuiteSync'
 }
 ```
 
@@ -283,10 +281,10 @@ netstat -ano | findstr ":5985"
 
 ```powershell
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential('codex_sync', $sec)
+$cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 
 Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic -ScriptBlock {
-    $service = Get-Service 'PDV Local Sync Agent'
+    $service = Get-Service 'AraraSuiteSync'
     $root = Invoke-WebRequest -Uri 'http://127.0.0.1:47891/' -UseBasicParsing -TimeoutSec 10
     $status = Invoke-WebRequest -Uri 'http://127.0.0.1:47891/status' -UseBasicParsing -TimeoutSec 10
 
@@ -310,12 +308,12 @@ Exemplo para alterar a conexao read-only do Arpa:
 
 ```powershell
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential('codex_sync', $sec)
+$cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 
 Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic -ScriptBlock {
     $ErrorActionPreference = 'Stop'
 
-    $path = 'C:\Program Files\PDVLocal\SyncAgent\appsettings.json'
+    $path = 'C:\Program Files\AraraSuite.com.br\Sync\Agent\appsettings.json'
     $backup = "$path.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
     Copy-Item -LiteralPath $path -Destination $backup -Force
 
@@ -323,12 +321,12 @@ Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Bas
     $json.ArpaCollector.ConnectionString = 'Host=192.168.0.31;Port=5432;Database=control;Username=sync_agent_anapolis_ro'
     $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
 
-    Restart-Service 'PDV Local Sync Agent' -Force
+    Restart-Service 'AraraSuiteSync' -Force
     Start-Sleep -Seconds 4
 
     [pscustomobject]@{
         Backup = $backup
-        ServiceStatus = (Get-Service 'PDV Local Sync Agent').Status.ToString()
+        ServiceStatus = (Get-Service 'AraraSuiteSync').Status.ToString()
         ConnectionString = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).ArpaCollector.ConnectionString
     }
 }
@@ -336,54 +334,70 @@ Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Bas
 
 ## Publicar nova build do SyncAgent na VM
 
-Este fluxo preserva o `appsettings.json` instalado.
+Este fluxo preserva o `appsettings.json`/`appsettings.Development.json`
+instalados.
+
+> **Pegadinha confirmada em 2026-09-10:** `dotnet publish` gera uma pasta
+> `runtimes\win\lib\net8.0\` com `System.Diagnostics.EventLog.dll`,
+> `System.Diagnostics.EventLog.Messages.dll` e
+> `System.ServiceProcess.ServiceController.dll` especificas do RID `win`.
+> O `.deps.json` resolve `System.ServiceProcess.ServiceController` **so**
+> por esse caminho RID-specific — uma copia solta na raiz do install dir
+> nao e suficiente. Sem essa pasta o servico Windows sobe e crasha na
+> hora com `System.IO.FileNotFoundException` (visto no Event Log,
+> provider `.NET Runtime`, id 1026) ao chamar `AddWindowsService`. Copie
+> `runtimes\win\lib\net8.0\*.dll` para
+> `<installDir>\runtimes\win\lib\net8.0\` junto com os binarios soltos.
+>
+> Se a ferramenta que estiver rodando o deploy bloquear `Remove-Item` em
+> caminhos `C:\Program Files\...` (classificador de seguranca local), use
+> uma pasta de staging remota com timestamp exclusivo em vez de apagar a
+> anterior, e substitua os arquivos existentes por `Copy-Item -Force` em
+> vez de `Remove-Item` + `Copy-Item` recursivo.
 
 ```powershell
 $publishDir = 'D:\GitHub\pdv-local\artifacts\sync-agent\manual-publish'
 dotnet publish D:\GitHub\pdv-local\src\sync-agent\SyncAgent.csproj -c Release -o $publishDir
 
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential('codex_sync', $sec)
+$cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 $session = New-PSSession -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic
 
 try {
-    $remoteTemp = 'C:\ProgramData\PDVLocal\deploy\sync-agent-manual'
-    $installDir = 'C:\Program Files\PDVLocal\SyncAgent'
+    $stamp = Get-Date -Format yyyyMMddHHmmss
+    $remoteTemp = "C:\ProgramData\AraraSuite.com.br\deploy\sync-agent-manual-$stamp"
+    $installDir = 'C:\Program Files\AraraSuite.com.br\Sync\Agent'
 
     Invoke-Command -Session $session -ScriptBlock {
         param($remoteTemp)
-        if (Test-Path -LiteralPath $remoteTemp) {
-            Remove-Item -LiteralPath $remoteTemp -Recurse -Force
-        }
         New-Item -ItemType Directory -Path $remoteTemp -Force | Out-Null
     } -ArgumentList $remoteTemp
 
-    Copy-Item -Path (Join-Path $publishDir '*') -Destination $remoteTemp -ToSession $session -Recurse -Force
+    # Raiz (dlls/exe/json/pdb) + a pasta runtimes\win\lib\net8.0 (ver nota acima).
+    Copy-Item -Path (Join-Path $publishDir '*.dll'), (Join-Path $publishDir '*.exe'), (Join-Path $publishDir '*.json'), (Join-Path $publishDir '*.pdb') -Destination $remoteTemp -ToSession $session -Force
+    Invoke-Command -Session $session -ScriptBlock { param($remoteTemp) New-Item -ItemType Directory -Path (Join-Path $remoteTemp 'runtimes\win\lib\net8.0') -Force | Out-Null } -ArgumentList $remoteTemp
+    Copy-Item -Path (Join-Path $publishDir 'runtimes\win\lib\net8.0\*.dll') -Destination (Join-Path $remoteTemp 'runtimes\win\lib\net8.0') -ToSession $session -Force
 
     Invoke-Command -Session $session -ScriptBlock {
         param($remoteTemp, $installDir)
         $ErrorActionPreference = 'Stop'
-        $serviceName = 'PDV Local Sync Agent'
-        $backupDir = "C:\ProgramData\PDVLocal\backups\SyncAgent-bin-$(Get-Date -Format yyyyMMdd-HHmmss)"
+        $serviceName = 'AraraSuiteSync'
+        $backupDir = "C:\ProgramData\AraraSuite.com.br\backups\SyncAgent-bin-$(Get-Date -Format yyyyMMdd-HHmmss)"
 
         Stop-Service $serviceName -Force
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $installDir '*') -Destination $backupDir -Recurse -Force
+        Get-ChildItem -LiteralPath $installDir -File | Copy-Item -Destination $backupDir -Force
 
-        Get-ChildItem -LiteralPath $remoteTemp -File | Where-Object { $_.Name -ne 'appsettings.json' } | ForEach-Object {
+        Get-ChildItem -LiteralPath $remoteTemp -File | Where-Object { $_.Name -ne 'appsettings.json' -and $_.Name -ne 'appsettings.Development.json' } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $installDir $_.Name) -Force
         }
 
-        Get-ChildItem -LiteralPath $remoteTemp -Directory | ForEach-Object {
-            $target = Join-Path $installDir $_.Name
-            if (Test-Path -LiteralPath $target) {
-                Remove-Item -LiteralPath $target -Recurse -Force
-            }
-            Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse -Force
-        }
+        $runtimesTarget = Join-Path $installDir 'runtimes\win\lib\net8.0'
+        New-Item -ItemType Directory -Path $runtimesTarget -Force | Out-Null
+        Get-ChildItem -LiteralPath (Join-Path $remoteTemp 'runtimes\win\lib\net8.0') -File | Copy-Item -Destination $runtimesTarget -Force
 
         Start-Service $serviceName
-        Start-Sleep -Seconds 4
+        Start-Sleep -Seconds 5
 
         [pscustomobject]@{
             ServiceStatus = (Get-Service $serviceName).Status.ToString()
@@ -426,8 +440,10 @@ Suite UIAutomation do novo fluxo (login -> caixa -> venda -> pagamento):
 
 Pre-requisitos na VM:
 
-1. PDV App v1.1.0+ instalado em `C:\Program Files\PDVLocal\PDVApp`
-   (via auto-update do SyncAgent ou copia manual preservando `appsettings.json`).
+1. PDV App v1.1.0+ instalado em `C:\Program Files\AraraSuite.com.br\PDV`
+   (nome exato da subpasta nao reconfirmado nesta VM apos a migracao de
+   nomenclatura — valide com `Get-ChildItem` antes de assumir; via
+   auto-update do SyncAgent ou copia manual preservando `appsettings.json`).
 2. Operador de teste com senha conhecida. O script usa `admin` /
    `Homolog@2026` por padrao (parametros `-OperatorLogin` / `-OperatorPassword`).
    Para definir o hash no banco local da VM, gere com o Django do ERP:
@@ -444,7 +460,7 @@ Pre-requisitos na VM:
 
    Atencao: o proximo snapshot de operadores do ERP pode sobrescrever o hash.
 3. Executar em sessao interativa via `schtasks /Create ... /IT /RU Suporte` e
-   `/Run`; coletar `C:\ProgramData\PDVLocal\Homologation\ui-refactor-2026-07\results.json`.
+   `/Run`; coletar `C:\ProgramData\AraraSuite.com.br\Homologation\ui-refactor-2026-07\results.json`.
 
 ### Deploy do PDV App v1.1.0 via auto-update (sem WinRM)
 
@@ -483,7 +499,7 @@ Para SyncAgent:
 
 1. `dotnet build D:\GitHub\pdv-local\src\sync-agent\SyncAgent.csproj`
 2. Publicar se a VM precisa ser atualizada.
-3. Validar `Get-Service 'PDV Local Sync Agent'`.
+3. Validar `Get-Service 'AraraSuiteSync'`.
 4. Validar `http://127.0.0.1:47891/` e `/status` dentro da VM.
 5. Confirmar que `appsettings.json` foi preservado ou alterado com backup.
 
