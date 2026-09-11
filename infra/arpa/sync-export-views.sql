@@ -305,14 +305,37 @@ BEGIN
 END;
 $sync_export$;
 
--- =================== VENDAS / FINANCEIRO (best-effort) ===================
--- So criadas se o schema padrao Arpa (pedidos/itenspedido/contas_receber)
--- existir. Caso contrario ficam ausentes e os toggles Vendas/Financeiro da
--- conexao devem ficar desmarcados.
+-- =================== VENDAS / FINANCEIRO ===================
+-- 1) Tenta primeiro o schema padrao historico (pedidos/itenspedido/
+--    contas_receber/contas_pagar com nomes fixos) - rapido, e o que ja
+--    funciona em clientes com esse layout.
+-- 2) Se a view ainda nao existir, cai num fallback dinamico
+--    (_first_table + _pick) que cobre outros layouts (ex.:
+--    cabecalho_ordem_servico/itens_os, parcelas/parcela) - a mesma
+--    introspeccao que o ERP ja usa nos importadores diretos legados
+--    (core/admin_views.py::_find_arpa_sales_source /
+--    _find_arpa_sales_items_source; financeiro/a_pagar.py e
+--    financeiro/a_receber.py::_consultar_titulos_*_arpa). So o essencial
+--    do payload do contrato Sync foi portado - sem boleto/duplicata/
+--    historico de cancelamento, que sao enriquecimento da tela do ERP,
+--    fora do escopo desta view.
 DO $vf$
 DECLARE
     fin_receber_sql text;
     fin_pagar_sql   text := '';
+    fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
+
+    v_t text; v_ord text; v_date text; v_cust text; v_status text; v_cancel text;
+    v_disc text; v_especie text; v_vend text;
+    it_t text; it_ord text; it_prod text; it_qty text; it_unit text; it_disc text;
+    cl_t text; cl_code text; cl_name text; cl_doc text;
+    fo_t text; fo_code text; fo_name text;
+    r_t text; r_code text; r_cust text; r_venc text; r_valor text; r_pago text;
+    r_datapg text; r_status text; r_doc text; r_forma text; r_ordem text;
+    p_t2 text; p_code2 text; p_forn text; p_venc2 text; p_valor2 text; p_pago2 text;
+    p_datapg2 text; p_status2 text; p_doc2 text; p_emissao2 text; p_ordem2 text;
+    pairs text; sql text; itens_expr text; cli_join text; cli_nome_expr text; cli_doc_expr text;
+    occ_expr text; receber_ok boolean := false; pagar_ok boolean := false;
 BEGIN
     BEGIN
         EXECUTE $v$
@@ -334,9 +357,89 @@ BEGIN
             LEFT JOIN public.clientes c ON c.codigo = v.codcliente
             WHERE v.codigo IS NOT NULL
         $v$;
-        RAISE NOTICE 'sync_export.vendas criada.';
+        RAISE NOTICE 'sync_export.vendas criada (schema padrao pedidos/itenspedido).';
     EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'sync_export.vendas pulada (%).', SQLERRM;
+        RAISE NOTICE 'sync_export.vendas (schema padrao) pulada (%).', SQLERRM;
+    END;
+
+    -- ---- fallback dinamico de VENDAS ----
+    BEGIN
+      IF to_regclass('sync_export.vendas') IS NULL THEN
+        v_t := sync_export._first_table(ARRAY['cabecalho_ordem_servico','cabecalho_os','cabecalho_venda',
+            'vendas','venda','pedidos','pedido']);
+        IF v_t IS NULL THEN
+            RAISE NOTICE 'sync_export.vendas pulada (tabela de vendas nao encontrada).';
+        ELSE
+            v_ord  := sync_export._pick(v_t, ARRAY['ordem','codigo','id','numero','pedido','os']);
+            v_date := sync_export._pick(v_t, ARRAY['dataordem','data_venda','data','emissao','data_emissao',
+                'data_abertura','abertura','data_cadastro','data_criacao','dt_cadastro','created_at','criado_em',
+                'data_fechamento','fechamento','data_finalizacao','data_finalizado','encerrado_em']);
+            IF v_ord IS NULL OR v_date IS NULL THEN
+                RAISE NOTICE 'sync_export.vendas pulada (tabela % sem coluna de ordem/data).', v_t;
+            ELSE
+                v_cust    := sync_export._pick(v_t, ARRAY['cliente','cod_cliente','id_cliente']);
+                v_status  := sync_export._pick(v_t, ARRAY['status','situacao']);
+                v_cancel  := sync_export._pick(v_t, ARRAY['data_cancelamento','cancelamento','data_cancelada','data_cancelado']);
+                v_disc    := sync_export._pick(v_t, ARRAY['desconto','desconto_total','valor_desconto','vlr_desconto']);
+                v_especie := sync_export._pick(v_t, ARRAY['especie','forma_pagamento','cod_especie']);
+                v_vend    := sync_export._pick(v_t, ARRAY['vendedor','cod_vendedor','id_vendedor']);
+
+                cl_t := sync_export._first_table(ARRAY['clientes','cliente']);
+                cli_join := ''; cli_nome_expr := 'NULL'; cli_doc_expr := 'NULL';
+                IF cl_t IS NOT NULL AND v_cust IS NOT NULL THEN
+                    cl_code := sync_export._pick(cl_t, ARRAY['codigo','id','cliente']);
+                    cl_name := sync_export._pick(cl_t, ARRAY['nome','razao','razao_social','fantasia']);
+                    cl_doc  := sync_export._pick(cl_t, ARRAY['cnpj_cpf','cpf_cnpj','cnpj','cpf','documento']);
+                    IF cl_code IS NOT NULL THEN
+                        cli_join := format(' LEFT JOIN public.%I cli ON CAST(cli.%I AS TEXT) = CAST(v.%I AS TEXT)', cl_t, cl_code, v_cust);
+                        IF cl_name IS NOT NULL THEN cli_nome_expr := format('cli.%I', cl_name); END IF;
+                        IF cl_doc  IS NOT NULL THEN cli_doc_expr  := format('cli.%I', cl_doc); END IF;
+                    END IF;
+                END IF;
+
+                it_t := sync_export._first_table(ARRAY['itens_ordem_servico','itens_os','itens_venda','itens_pedido',
+                    'item_ordem_servico','itens']);
+                itens_expr := '''[]''::jsonb';
+                IF it_t IS NOT NULL THEN
+                    it_ord := sync_export._pick(it_t, ARRAY['ordem','pedido','venda','id_ordem','os']);
+                    IF it_ord IS NOT NULL THEN
+                        it_prod := sync_export._pick(it_t, ARRAY['produto','cod_produto','id_produto','codigo_produto']);
+                        it_qty  := sync_export._pick(it_t, ARRAY['quantidade','qtd','qtde']);
+                        it_unit := sync_export._pick(it_t, ARRAY['valor_unitario','preco_unitario','unitario','preco','valor_unit']);
+                        it_disc := sync_export._pick(it_t, ARRAY['desconto','valor_desconto','vlr_desconto']);
+                        itens_expr := format(
+                            'COALESCE((SELECT jsonb_agg(jsonb_build_object(''codigo_produto_arpa'', %s, ''quantidade'', %s, ''valor_unitario'', %s, ''desconto'', %s)) FROM public.%I i WHERE CAST(i.%I AS TEXT) = CAST(v.%I AS TEXT)), ''[]''::jsonb)',
+                            CASE WHEN it_prod IS NOT NULL THEN format('i.%I', it_prod) ELSE 'NULL' END,
+                            CASE WHEN it_qty  IS NOT NULL THEN format('i.%I', it_qty)  ELSE 'NULL' END,
+                            CASE WHEN it_unit IS NOT NULL THEN format('i.%I', it_unit) ELSE 'NULL' END,
+                            CASE WHEN it_disc IS NOT NULL THEN format('i.%I', it_disc) ELSE 'NULL' END,
+                            it_t, it_ord, v_ord);
+                    END IF;
+                END IF;
+
+                pairs := format('''codigo_venda_arpa'', v.%I::text, ''data'', v.%I', v_ord, v_date);
+                IF v_status  IS NOT NULL THEN pairs := pairs || format(', ''status'', v.%I::text', v_status); END IF;
+                IF v_vend    IS NOT NULL THEN pairs := pairs || format(', ''vendedor_codigo'', v.%I::text', v_vend); END IF;
+                IF v_disc    IS NOT NULL THEN pairs := pairs || format(', ''desconto_total'', v.%I', v_disc); END IF;
+                IF v_especie IS NOT NULL THEN pairs := pairs || format(', ''especie_pagamento'', v.%I::text', v_especie); END IF;
+                pairs := pairs || format(', ''cliente_documento'', %s, ''cliente_nome'', %s', cli_doc_expr, cli_nome_expr);
+                pairs := pairs || format(', ''itens'', %s', itens_expr);
+
+                sql := 'CREATE OR REPLACE VIEW sync_export.vendas AS SELECT '
+                    || format('v.%I::text', v_ord) || ' AS entity_key, '
+                    || format('COALESCE(%s, %s)', sync_export._occurred_expr('v', v_t, v_date, 'Etc/GMT+3'), fixed) || ' AS occurred_at_utc, '
+                    || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                    || format('(''arpa-venda-'' || v.%I)::text', v_ord) || ' AS trace_id '
+                    || format('FROM public.%I v', v_t) || cli_join
+                    || format(' WHERE v.%I IS NOT NULL', v_ord)
+                    || CASE WHEN v_cancel IS NOT NULL THEN format(' AND v.%I IS NULL', v_cancel) ELSE '' END;
+                EXECUTE sql;
+                RAISE NOTICE 'sync_export.vendas criada (fallback dinamico, tabela %).', v_t;
+            END IF;
+        END IF;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'sync_export.vendas (fallback dinamico) pulada (%).', SQLERRM;
     END;
 
     -- financeiro: contas_receber (natureza=receber) + contas_pagar
@@ -383,7 +486,7 @@ BEGIN
 
     BEGIN
         EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql || fin_pagar_sql;
-        RAISE NOTICE 'sync_export.financeiro criada%.',
+        RAISE NOTICE 'sync_export.financeiro criada% (schema padrao).',
             CASE WHEN fin_pagar_sql <> '' THEN ' (receber + pagar)' ELSE ' (receber)' END;
     EXCEPTION WHEN OTHERS THEN
         -- o ramo de contas_pagar bateu num schema diferente do template;
@@ -392,8 +495,153 @@ BEGIN
             EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql;
             RAISE NOTICE 'sync_export.financeiro criada (receber; pagar pulado: %).', SQLERRM;
         EXCEPTION WHEN OTHERS THEN
-            RAISE NOTICE 'sync_export.financeiro pulada (%).', SQLERRM;
+            RAISE NOTICE 'sync_export.financeiro (schema padrao) pulada (%).', SQLERRM;
         END;
+    END;
+
+    -- ---- fallback dinamico de FINANCEIRO (receber + pagar) ----
+    BEGIN
+      IF to_regclass('sync_export.financeiro') IS NULL THEN
+        r_t := sync_export._first_table(ARRAY['parcelas','parcela','contas_receber','conta_receber',
+            'titulos_receber','titulo_receber','receber']);
+        IF r_t IS NULL THEN
+            RAISE NOTICE 'sync_export.financeiro (receber, fallback) pulada (tabela nao encontrada).';
+        ELSE
+            r_code  := sync_export._pick(r_t, ARRAY['codigo','id','parcela']);
+            r_venc  := sync_export._pick(r_t, ARRAY['vencimento','data_vencimento','vencto']);
+            r_valor := sync_export._pick(r_t, ARRAY['valor','valor_parcela','vlr_parcela','valor_original']);
+            IF r_code IS NULL OR r_venc IS NULL OR r_valor IS NULL THEN
+                RAISE NOTICE 'sync_export.financeiro (receber, fallback) pulada (tabela % sem codigo/vencimento/valor).', r_t;
+            ELSE
+                r_cust   := sync_export._pick(r_t, ARRAY['cliente','cd_cliente','cod_cliente','id_cliente']);
+                r_pago   := sync_export._pick(r_t, ARRAY['valor_pago','vlr_pago','pago','valor_recebido','valor_quitado']);
+                r_datapg := sync_export._pick(r_t, ARRAY['data_pagamento','data_pgto','quitacao','data_recebimento','recebimento']);
+                r_status := sync_export._pick(r_t, ARRAY['status','situacao']);
+                r_doc    := sync_export._pick(r_t, ARRAY['documento','numero_documento','nr_documento']);
+                r_forma  := sync_export._pick(r_t, ARRAY['forma_pagamento','especie','tipo_pagamento','meio_pagamento']);
+                r_ordem  := sync_export._pick(r_t, ARRAY['ordem','pedido','id_ordem','venda','id_venda','pedido_id','venda_id']);
+
+                cl_t := sync_export._first_table(ARRAY['clientes','cliente']);
+                cli_join := ''; cli_nome_expr := 'NULL'; cli_doc_expr := 'NULL';
+                IF cl_t IS NOT NULL AND r_cust IS NOT NULL THEN
+                    cl_code := sync_export._pick(cl_t, ARRAY['codigo','id','cliente']);
+                    cl_name := sync_export._pick(cl_t, ARRAY['nome','razao','razao_social','fantasia']);
+                    cl_doc  := sync_export._pick(cl_t, ARRAY['cnpj_cpf','cpf_cnpj','cnpj','cpf','documento']);
+                    IF cl_code IS NOT NULL THEN
+                        cli_join := format(' LEFT JOIN public.%I cli ON CAST(cli.%I AS TEXT) = CAST(r.%I AS TEXT)', cl_t, cl_code, r_cust);
+                        IF cl_name IS NOT NULL THEN cli_nome_expr := format('cli.%I', cl_name); END IF;
+                        IF cl_doc  IS NOT NULL THEN cli_doc_expr  := format('cli.%I', cl_doc); END IF;
+                    END IF;
+                END IF;
+
+                pairs := format('''titulo_externo_id'', r.%I::text, ''natureza'', ''receber''', r_code);
+                IF r_ordem  IS NOT NULL THEN pairs := pairs || format(', ''codigo_venda_arpa'', r.%I::text', r_ordem); END IF;
+                pairs := pairs || format(', ''cliente_documento'', %s, ''cliente_nome'', %s', cli_doc_expr, cli_nome_expr);
+                IF r_forma  IS NOT NULL THEN pairs := pairs || format(', ''especie_pagamento'', r.%I::text', r_forma); END IF;
+                pairs := pairs || format(', ''valor_base'', r.%I', r_valor);
+                IF r_pago   IS NOT NULL THEN pairs := pairs || format(', ''valor_recebido'', r.%I', r_pago); END IF;
+                pairs := pairs || format(', ''vencimento'', r.%I', r_venc);
+                IF r_datapg IS NOT NULL THEN pairs := pairs || format(', ''data_recebimento'', r.%I', r_datapg); END IF;
+                IF r_status IS NOT NULL THEN pairs := pairs || format(', ''status'', r.%I::text', r_status); END IF;
+                IF r_doc    IS NOT NULL THEN pairs := pairs || format(', ''documento'', r.%I::text', r_doc); END IF;
+
+                occ_expr := format('COALESCE(%s, %s',
+                    CASE WHEN r_datapg IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_datapg) ELSE 'NULL' END,
+                    CASE WHEN r_venc   IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_venc)   ELSE 'NULL' END);
+                occ_expr := occ_expr || ', ' || fixed || ')';
+
+                fin_receber_sql := 'SELECT '
+                    || format('r.%I::text', r_code) || ' AS entity_key, '
+                    || occ_expr || ' AS occurred_at_utc, '
+                    || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                    || format('(''arpa-financeiro-'' || r.%I)::text', r_code) || ' AS trace_id '
+                    || format('FROM public.%I r', r_t) || cli_join
+                    || format(' WHERE r.%I IS NOT NULL', r_code);
+                receber_ok := true;
+            END IF;
+        END IF;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'sync_export.financeiro (receber, fallback) pulada (%).', SQLERRM;
+    END;
+
+    BEGIN
+      IF receber_ok THEN
+        p_t2 := sync_export._first_table(ARRAY['contas_pagar','conta_pagar','parcelas_pagar','titulos_pagar',
+            'pagar','apagar','contasapagar']);
+        IF p_t2 IS NOT NULL THEN
+            p_code2  := sync_export._pick(p_t2, ARRAY['codigo','id','titulo','parcela']);
+            p_venc2  := sync_export._pick(p_t2, ARRAY['vencimento','data_vencimento','vencto']);
+            p_valor2 := sync_export._pick(p_t2, ARRAY['valor','valor_parcela','vlr_parcela','valor_original']);
+            IF p_code2 IS NOT NULL AND p_venc2 IS NOT NULL AND p_valor2 IS NOT NULL THEN
+                p_forn     := sync_export._pick(p_t2, ARRAY['fornecedor','cd_fornecedor','cod_fornecedor','id_fornecedor']);
+                p_pago2    := sync_export._pick(p_t2, ARRAY['valor_pago','vlr_pago','pago']);
+                p_datapg2  := sync_export._pick(p_t2, ARRAY['data_pagamento','data_pgto','quitacao']);
+                p_status2  := sync_export._pick(p_t2, ARRAY['status','situacao']);
+                p_doc2     := sync_export._pick(p_t2, ARRAY['documento','numero_documento','nr_documento']);
+                p_emissao2 := sync_export._pick(p_t2, ARRAY['emissao','data_emissao','dataemissao']);
+                p_ordem2   := sync_export._pick(p_t2, ARRAY['ordem','pedido','id_ordem','compra','id_compra','pedido_id']);
+
+                fo_t := sync_export._first_table(ARRAY['fornecedores','fornecedor']);
+                cli_join := ''; cli_nome_expr := '''Nao informado''';
+                IF fo_t IS NOT NULL AND p_forn IS NOT NULL THEN
+                    fo_code := sync_export._pick(fo_t, ARRAY['codigo','id','fornecedor']);
+                    fo_name := sync_export._pick(fo_t, ARRAY['nome','razao','razao_social','fantasia']);
+                    IF fo_code IS NOT NULL AND fo_name IS NOT NULL THEN
+                        cli_join := format(' LEFT JOIN public.%I forn ON CAST(forn.%I AS TEXT) = CAST(p.%I AS TEXT)', fo_t, fo_code, p_forn);
+                        cli_nome_expr := format('COALESCE(forn.%I, ''Nao informado'')', fo_name);
+                    END IF;
+                END IF;
+
+                pairs := format('''titulo_externo_id'', (''pag-'' || p.%I)::text, ''natureza'', ''pagar''', p_code2);
+                IF p_ordem2 IS NOT NULL THEN pairs := pairs || format(', ''compra_externa_id'', p.%I::text', p_ordem2); END IF;
+                IF p_doc2   IS NOT NULL THEN pairs := pairs || format(', ''documento'', p.%I::text', p_doc2); END IF;
+                IF p_forn   IS NOT NULL THEN pairs := pairs || format(', ''fornecedor_codigo'', p.%I::text', p_forn); END IF;
+                pairs := pairs || format(', ''fornecedor_nome'', %s', cli_nome_expr);
+                pairs := pairs || format(', ''valor_base'', p.%I', p_valor2);
+                IF p_pago2    IS NOT NULL THEN pairs := pairs || format(', ''valor_pago'', p.%I', p_pago2); END IF;
+                pairs := pairs || format(', ''vencimento'', p.%I', p_venc2);
+                IF p_datapg2  IS NOT NULL THEN pairs := pairs || format(', ''data_pagamento'', p.%I', p_datapg2); END IF;
+                IF p_emissao2 IS NOT NULL THEN pairs := pairs || format(', ''emissao'', p.%I', p_emissao2); END IF;
+                IF p_status2  IS NOT NULL THEN pairs := pairs || format(', ''status'', p.%I::text', p_status2); END IF;
+
+                occ_expr := format('COALESCE(%s, %s',
+                    CASE WHEN p_datapg2 IS NOT NULL THEN format('CAST(p.%I AS timestamptz)', p_datapg2) ELSE 'NULL' END,
+                    CASE WHEN p_venc2   IS NOT NULL THEN format('CAST(p.%I AS timestamptz)', p_venc2)   ELSE 'NULL' END);
+                occ_expr := occ_expr || ', ' || fixed || ')';
+
+                fin_pagar_sql := ' UNION ALL SELECT '
+                    || format('(''pag-'' || p.%I)::text', p_code2) || ' AS entity_key, '
+                    || occ_expr || ' AS occurred_at_utc, '
+                    || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                    || format('(''arpa-financeiro-pag-'' || p.%I)::text', p_code2) || ' AS trace_id '
+                    || format('FROM public.%I p', p_t2) || cli_join
+                    || format(' WHERE p.%I IS NOT NULL', p_code2);
+                pagar_ok := true;
+            END IF;
+        END IF;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'sync_export.financeiro (pagar, fallback) pulado (%).', SQLERRM;
+        fin_pagar_sql := '';
+        pagar_ok := false;
+    END;
+
+    BEGIN
+      IF receber_ok THEN
+        EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql || fin_pagar_sql;
+        RAISE NOTICE 'sync_export.financeiro criada% (fallback dinamico).',
+            CASE WHEN pagar_ok THEN ' (receber + pagar)' ELSE ' (receber)' END;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      IF receber_ok THEN
+        BEGIN
+            EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql;
+            RAISE NOTICE 'sync_export.financeiro criada (fallback dinamico, receber; pagar pulado: %).', SQLERRM;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'sync_export.financeiro (fallback dinamico) pulada (%).', SQLERRM;
+        END;
+      END IF;
     END;
 END;
 $vf$;
