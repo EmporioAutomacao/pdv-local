@@ -12,7 +12,8 @@ namespace SyncAgent.Provisioning;
 public sealed partial class ArpaDdlRunner
 {
     private const string ViewsResourceName = "SyncAgent.Arpa.sync-export-views.sql";
-    private static readonly string[] AllViewNames = ["produtos", "clientes", "estoque", "vendas", "financeiro"];
+    private static readonly string[] AllViewNames =
+        ["produtos", "clientes", "estoque", "vendas", "financeiro", "cobranca", "plano_historico"];
 
     private readonly ILogger<ArpaDdlRunner> _logger;
 
@@ -36,6 +37,7 @@ public sealed partial class ArpaDdlRunner
     public async Task<ArpaTestResult> TestConnectionAsync(
         string host, int port, string database, string username, string password,
         bool needProdutos, bool needClientes, bool needEstoque, bool needVendas, bool needFinanceiro,
+        bool needCobranca, bool needPlanoHistorico,
         CancellationToken cancellationToken)
     {
         try
@@ -48,6 +50,7 @@ public sealed partial class ArpaDdlRunner
             {
                 ("produtos", needProdutos), ("clientes", needClientes), ("estoque", needEstoque),
                 ("vendas", needVendas), ("financeiro", needFinanceiro),
+                ("cobranca", needCobranca), ("plano_historico", needPlanoHistorico),
             })
             {
                 if (!needed)

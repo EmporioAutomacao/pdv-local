@@ -1958,6 +1958,7 @@ public sealed class LocalStatusServer : BackgroundService
                 var result = await _arpaDdlRunner.TestConnectionAsync(
                     V("host"), I("port", 5432), V("database"), V("username"), testPassword,
                     B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"), B("sync_financeiro"),
+                    B("sync_cobranca"), B("sync_plano_historico"),
                     cancellationToken);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
                 return;
