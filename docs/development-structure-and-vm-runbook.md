@@ -493,6 +493,27 @@ Pre-requisitos na VM:
 - Views/grants pendentes devem ser gerados a partir do contrato em
   `infra\arpa\sync-export-views-contract.sql`.
 
+## Manutencao do banco local (rotinas administrativas)
+
+A partir da 1.6.20, o dashboard tem `Configuracoes > Manutencao do banco
+local` (`http://127.0.0.1:47891/config/local-db`) para reparos de schema no
+Postgres **local** do agente (nao no Arpa) - o runtime conecta com um
+usuario so-DML de proposito (sem `ALTER TABLE`), entao correcoes de schema
+precisam dessa via administrativa explicita em vez de `psql` direto na VM.
+
+- **Testar conexao**: `SELECT current_user`, sem efeito - use antes de
+  rodar qualquer coisa.
+- **Rotina conhecida**: reparos catalogados (`LocalDbMaintenanceRunner.
+  Routines`), selecionaveis num dropdown, sem copiar/colar SQL. Primeira
+  rotina: `fix_entity_type_check` (ver runbook de incidentes).
+- **SQL livre**: para reparos ainda nao catalogados.
+
+Credencial admin (sugestao do instalador: usuario `postgres`) e informada na
+hora, nunca gravada. **Quem executa e sempre o operador, pelo dashboard** -
+nunca rodar SQL direto no banco local ou no Arpa por fora dessa tela (nem
+via assistente de codigo), pelo mesmo motivo do resto desta secao:
+evitar erro direto no banco.
+
 ## Checklist antes de finalizar uma alteracao
 
 Para SyncAgent:
@@ -525,3 +546,12 @@ Para contratos:
   nao trate isso como falha do Sync sem confirmar o app afetado.
 - A VM so permite automacao remota se WinRM estiver ativo e o usuario
   operacional existir no grupo Administradores.
+- Instalacoes criadas antes do contrato Sync ganhar `cobranca`/
+  `plano_historico` (2.10.0/2.11.0) tem a constraint `outbox_events_
+  entity_type_check` do Postgres local desatualizada - ver "Manutencao do
+  banco local" acima e o runbook de incidentes.
+- O usuario `ararasuite_sync_ro` do Anapolis teve `GRANT SELECT ON ALL
+  TABLES IN SCHEMA public` aplicado em 2026-09-11 para investigacao de
+  schema - mais amplo que a politica de `docs/arpa-readonly-security-
+  policy.md`. Ver secao "Desvio registrado em 2026-09-11" nesse documento
+  antes de decidir revogar.

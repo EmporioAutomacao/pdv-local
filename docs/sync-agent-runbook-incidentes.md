@@ -190,7 +190,7 @@ $env:ARPA_SYNC_READONLY_PASSWORD = "<senha-runtime-read-only>"
 .\infra\windows\test-arpa-readonly-permissions.ps1 `
   -PostgresHost 192.168.0.4 `
   -DatabaseName anapolis `
-  -DatabaseUser sync_agent_anapolis_ro
+  -DatabaseUser ararasuite_sync_ro  # nome atual em 2026-09-11; confira em Config Arpa > Editar conexao
 ```
 
 3. Se autorizado pelo DBA, reaplicar somente DDL/grants:
@@ -208,10 +208,42 @@ $env:ARPA_SYNC_READONLY_PASSWORD = "<senha-runtime-read-only>"
 .\infra\windows\test-arpa-export-preflight.ps1 `
   -PostgresHost 192.168.0.4 `
   -DatabaseName anapolis `
-  -DatabaseUser sync_agent_anapolis_ro
+  -DatabaseUser ararasuite_sync_ro  # nome atual em 2026-09-11; confira em Config Arpa > Editar conexao
 ```
 
 5. Acionar ciclo manual e confirmar `runtime_status=idle`.
+
+## Incidente: entity_type nao permitido na fila local (23514)
+
+Sinais:
+
+- log do coletor mostra `<entidade>: falhou - 23514: a nova linha da relacao
+  "outbox_events" viola a restricao de verificacao
+  "outbox_events_entity_type_check"`;
+- afeta tipicamente `cobranca` e/ou `plano_historico` (entity_type mais
+  recentes no contrato Sync, 2.10.0/2.11.0);
+- a view `sync_export.<entidade>` correspondente existe e le normalmente (sem
+  `42P01`) - o erro acontece so ao tentar enfileirar localmente.
+
+Causa: a instalacao foi criada (ou reinstalada) antes do agente ganhar
+suporte a esse `entity_type`. A constraint `outbox_events_entity_type_check`
+do Postgres local ficou presa na lista antiga porque `self-update.ps1` nunca
+roda migracao de schema - so o instalador roda o init SQL, na instalacao.
+
+Passos:
+
+1. Abrir `http://127.0.0.1:47891/config/local-db` (Configuracoes >
+   Manutencao do banco local).
+2. Selecionar a rotina **"Corrigir outbox_events_entity_type_check"** no
+   dropdown, informar usuario/senha admin do Postgres local (sugestao do
+   instalador: `postgres`) e clicar **Testar conexao** antes de executar.
+3. Executar a rotina selecionada.
+4. Rodar uma sincronizacao manual e confirmar que a entidade nao aparece
+   mais como `falhou` no log.
+
+Nao editar a constraint via `psql`/SQL solto fora dessa tela - a rotina ja
+usa a lista de `entity_type` atual do contrato (`SyncContractValues`), e
+fica registrada/repetivel para outras instalacoes com o mesmo problema.
 
 ## Evidencias obrigatorias
 

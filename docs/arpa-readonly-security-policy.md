@@ -90,3 +90,34 @@ Scripts de preparacao como `prepare-arpa-anapolis-pilot.ps1` podem executar DDL
 administrativo para criar views/usuario read-only, mas isso e atividade de DBA.
 Esses scripts nao fazem `INSERT`, `UPDATE` ou `DELETE` em dados de negocio do
 Arpa e nao devem ser executados pelo usuario runtime do SyncAgent.
+
+## Desvio registrado em 2026-09-11
+
+Durante uma investigacao para descobrir os nomes reais de tabela/coluna de
+vendas/financeiro/cobranca no Anapolis (necessarios para consertar
+`infra/arpa/sync-export-views.sql`), foi aplicado no banco `anapolis`,
+via DBA (`postgres`):
+
+```sql
+GRANT USAGE ON SCHEMA public TO ararasuite_sync_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO ararasuite_sync_ro;
+```
+
+Isso da ao usuario runtime `ararasuite_sync_ro` leitura de **todas** as ~880
+tabelas do schema `public`, nao so as views `sync_export` aprovadas - viola
+a regra deste documento ("`SELECT` nas views/tabelas estritamente
+necessarias"). Foi uma decisao explicita do usuario/DBA para viabilizar o
+diagnostico (o runtime nao enxergava `information_schema.columns` de tabelas
+fora de `sync_export`), nao um acesso concedido pelo SyncAgent.
+
+**Recomendacao**: agora que o schema real ja foi mapeado e portado para o
+script de views (1.6.17-1.6.19), revogar o `GRANT` amplo e manter so o que
+"Preparar views" concede (`SELECT` nas views `sync_export`):
+
+```sql
+REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM ararasuite_sync_ro;
+REVOKE USAGE ON SCHEMA public FROM ararasuite_sync_ro;
+```
+
+Isso e acao de DBA - executar pelo dashboard/psql, nunca pelo runtime do
+SyncAgent nem por um assistente de codigo.

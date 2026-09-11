@@ -143,7 +143,9 @@ Status de preparacao real em 31/05/2026:
   PG 9.6 do Arpa aplica DST fantasma e erra 1h no verao).
 - usuario runtime read-only criado/ajustado, com `GRANT SELECT` nas views
   (o proprio "Preparar views" ja concede);
-- vendas/financeiro: sem tabelas mapeaveis nesse Arpa -> toggles desmarcados.
+- ~~vendas/financeiro: sem tabelas mapeaveis nesse Arpa -> toggles
+  desmarcados~~ **desatualizado, ver "Status em 2026-09-11" abaixo**: as
+  tabelas existem, so nao no formato que o script original assumia.
 
 Status de seguranca em 01/06/2026:
 
@@ -313,6 +315,52 @@ local_pending: 0
 local_dead_letter: 0
 local_logs_http_status: 200
 ```
+
+## Status em 2026-09-11
+
+Investigacao completa do schema real do Anapolis (usuario runtime, apos GRANT
+temporario descrito abaixo) confirmou e corrigiu o que a entrada de
+31/05/2026 registrou como "sem tabelas mapeaveis":
+
+- **Usuario runtime atual**: `ararasuite_sync_ro` (o nome de exemplo
+  `sync_agent_anapolis_ro` usado nas secoes acima ficou desatualizado -
+  confirme sempre em Configuracoes > Arpa > editar conexao).
+- **Todas as 7 views agora existem**: `produtos`, `clientes`, `estoque`,
+  `plano_historico`, `vendas`, `financeiro`, `cobranca` (confirmado por
+  "Preparar views" na conexao "Geral"). So `cobranca` ficou de fora antes -
+  ver abaixo.
+- **Schema real de vendas/financeiro** (normalizado em varias tabelas, nao
+  uma unica tabela com tudo - por isso o script generico original nunca
+  achava): `cabecalho_ordem_servico` + `itens_ordem_servico` (venda);
+  `parcelas` + `parcelas_quitadas` (financeiro a receber - cliente vem de
+  `cabecalho_ordem_servico.cliente` via `parcelas.ordem`, nao de uma coluna
+  direta); `apagar` + `apagar_quitadas` (financeiro a pagar - vinculo com a
+  compra via `apagar_nota_compra.nota -> cabecalho_nota_compra.nota`, nao
+  uma coluna de ordem direta em `apagar`).
+- **Schema real de cobranca**: `ctabancarias` (conta+banco) +
+  `bancos` (agencia/num_banco) + `convenio_bancos` (carteira/convenio/
+  cedente), com `convenio_dados`/`conf_boletos_dll` opcionais. `ctabancarias`
+  sozinha nunca tinha os campos - por isso `sync_export.cobranca` sempre
+  pulava com "sem id/agencia/conta/banco" ate o SyncAgent 1.6.17
+  (`infra/arpa/sync-export-views.sql` ganhou fallback via join para esse
+  formato).
+- `infra/arpa/sync-export-views.sql` (1.6.17-1.6.19) ganhou fallback
+  dinamico para vendas/financeiro/cobranca quando o schema fixo original nao
+  bate - testado com Postgres descartavel reproduzindo esse schema real
+  antes de publicar.
+- **Pendente**: eventos de `cobranca`/`plano_historico` ainda falhavam ao
+  enfileirar localmente com `23514` (constraint `entity_type` desatualizada
+  no Postgres local da VM, criada antes do agente suportar esses tipos) -
+  ver runbook de incidentes e a rotina "Corrigir
+  outbox_events_entity_type_check" em Configuracoes > Manutencao do banco
+  local (1.6.20+).
+- **Desvio de seguranca temporario**: para essa investigacao, foi aplicado
+  `GRANT USAGE ON SCHEMA public TO ararasuite_sync_ro; GRANT SELECT ON ALL
+  TABLES IN SCHEMA public TO ararasuite_sync_ro;` no Anapolis - mais amplo
+  que a politica de `docs/arpa-readonly-security-policy.md` (que pede
+  `SELECT` so nas views `sync_export`, nao no `public` inteiro). Ver
+  registro e recomendacao de revogar em
+  `docs/arpa-readonly-security-policy.md`.
 
 ## NO-GO
 
