@@ -28,6 +28,7 @@ public sealed class LocalStatusServer : BackgroundService
     private const string ConfigArpaLojasPath = "/config/arpa/lojas";
     private const string ConfigArpaSyncLogPath = "/config/arpa/sync-log";
     private const string ConfigLocalDbPath = "/config/local-db";
+    private const string ConfigLocalDbTestPath = "/config/local-db/test";
     private const string ConfigLocalDbRoutinePath = "/config/local-db/routine";
     private const string LogsPath = "/logs";
     private const string HelpPath = "/help";
@@ -196,6 +197,12 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == ConfigLocalDbRoutinePath)
             {
                 await HandleConfigLocalDbRoutineAsync(context, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == ConfigLocalDbTestPath)
+            {
+                await HandleConfigLocalDbTestAsync(context, cancellationToken);
                 return;
             }
 
@@ -1305,6 +1312,8 @@ public sealed class LocalStatusServer : BackgroundService
                 button { padding: 10px 14px; border: 0; border-radius: 6px; background: #b45309; color: white; cursor: pointer; }
                 button:hover { background: #92400e; }
                 button:disabled { background: #cbd5e1; cursor: not-allowed; }
+                button.secondary { background: #64748b; }
+                button.secondary:hover { background: #475569; }
                 .message { border-radius: 8px; padding: 12px; margin: 16px 0; font-weight: 600; }
                 .okbox { background: #dcfce7; color: #166534; }
                 .warnbox { background: #fef3c7; color: #92400e; }
@@ -1328,6 +1337,10 @@ public sealed class LocalStatusServer : BackgroundService
                   <input id="f_admin_user" name="admin_user" type="text" autocomplete="off" placeholder="postgres" value="postgres">
                   <label for="f_admin_password">Senha</label>
                   <input id="f_admin_password" name="admin_password" type="password" autocomplete="off">
+                  <button type="button" class="secondary" onclick="testConnection()">Testar conexao</button>
+                  <div id="status-test"></div>
+
+                  <hr>
 
                   <h2>Rotina conhecida</h2>
                   <p class="muted" style="margin-bottom:10px">Reparos ja catalogados - reaparecem em varias instalacoes (ex.: base criada antes de um contrato Sync novo). Sem copiar/colar SQL.</p>
@@ -1354,6 +1367,18 @@ public sealed class LocalStatusServer : BackgroundService
                   return { admin_user: document.getElementById('f_admin_user').value, admin_password: document.getElementById('f_admin_password').value };
                 }
                 function clearPassword(){ document.getElementById('f_admin_password').value = ''; }
+                function testConnection(){
+                  var status = document.getElementById('status-test');
+                  status.style.color = '#1f2937';
+                  status.textContent = 'Testando...';
+                  fetch('/config/local-db/test', { method: 'POST', body: new URLSearchParams(creds()) })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){
+                      status.style.color = j.ok ? '#166534' : '#92400e';
+                      status.textContent = j.message || (j.ok ? 'OK.' : 'Falha.');
+                    })
+                    .catch(function(e){ status.style.color = '#92400e'; status.textContent = String(e); });
+                }
                 function runRoutine(){
                   var key = document.getElementById('f_routine').value;
                   if(!key){ alert('Selecione uma rotina.'); return; }
@@ -1402,6 +1427,20 @@ public sealed class LocalStatusServer : BackgroundService
         var sql = form.GetValueOrDefault("sql", string.Empty);
 
         var result = await _localDbMaintenanceRunner.ExecuteAsync(adminUser, adminPassword, sql, cancellationToken);
+        await WriteJsonAsync(
+            context.Response,
+            HttpStatusCode.OK,
+            new { ok = result.Ok, message = result.Message },
+            cancellationToken);
+    }
+
+    private async Task HandleConfigLocalDbTestAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var form = await ReadFormAsync(context.Request, MaxConfigFormBytes, cancellationToken);
+        var adminUser = form.GetValueOrDefault("admin_user", string.Empty).Trim();
+        var adminPassword = form.GetValueOrDefault("admin_password", string.Empty);
+
+        var result = await _localDbMaintenanceRunner.TestConnectionAsync(adminUser, adminPassword, cancellationToken);
         await WriteJsonAsync(
             context.Response,
             HttpStatusCode.OK,

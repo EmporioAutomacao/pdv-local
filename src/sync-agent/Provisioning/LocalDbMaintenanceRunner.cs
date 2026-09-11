@@ -58,6 +58,47 @@ public sealed class LocalDbMaintenanceRunner
         };
     }
 
+    /// <summary>
+    /// Testa a credencial admin sem executar nenhum SQL de efeito - so
+    /// <c>SELECT current_user</c>. Existe para o operador conferir usuario/senha
+    /// do Postgres local pelo dashboard antes de rodar uma rotina ou SQL livre.
+    /// </summary>
+    public async Task<LocalDbMaintenanceResult> TestConnectionAsync(
+        string adminUser,
+        string adminPassword,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(adminUser))
+        {
+            return new LocalDbMaintenanceResult(false, "Informe o usuario admin do Postgres local.");
+        }
+
+        var baseConnectionString = _configuration.GetConnectionString("SyncAgentDb");
+        if (string.IsNullOrWhiteSpace(baseConnectionString))
+        {
+            return new LocalDbMaintenanceResult(false, "Connection string 'SyncAgentDb' nao configurada.");
+        }
+
+        try
+        {
+            var connectionStringBuilder = new NpgsqlConnectionStringBuilder(baseConnectionString)
+            {
+                Username = adminUser,
+                Password = adminPassword,
+            };
+
+            await using var dataSource = NpgsqlDataSource.Create(connectionStringBuilder.ConnectionString);
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var command = new NpgsqlCommand("SELECT current_user", connection) { CommandTimeout = 15 };
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return new LocalDbMaintenanceResult(true, $"Conexao OK. Autenticado como '{result}'.");
+        }
+        catch (Exception ex)
+        {
+            return new LocalDbMaintenanceResult(false, Describe(ex));
+        }
+    }
+
     public async Task<LocalDbMaintenanceResult> ExecuteRoutineAsync(
         string routineKey,
         string adminUser,
