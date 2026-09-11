@@ -8,7 +8,7 @@ param(
     [string]$PostgresAdminUser = "postgres",
     [securestring]$PostgresAdminPassword,
     [string]$DatabaseName = "pdv",
-    [string]$DatabaseUser = "araras",
+    [string]$DatabaseUser = "ararasuite",
     [string]$DatabasePassword,
     [switch]$EnableArpaCollector,
     [string]$ArpaHost = "192.168.0.4",

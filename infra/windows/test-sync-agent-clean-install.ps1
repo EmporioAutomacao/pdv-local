@@ -6,7 +6,7 @@ param(
     [string]$PostgresHost = "localhost",
     [int]$PostgresPort = 5432,
     [string]$DatabaseName = "pdv",
-    [string]$DatabaseUser = "araras",
+    [string]$DatabaseUser = "ararasuite",
     [string]$DatabasePassword = "",
     [string]$ErpApiBaseUrl = "",
     [string]$InstanceId = "",

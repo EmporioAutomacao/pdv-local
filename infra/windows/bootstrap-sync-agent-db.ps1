@@ -4,7 +4,7 @@ param(
     [string]$AdminUser = "postgres",
     [securestring]$AdminPassword,
     [string]$DatabaseName = "pdv",
-    [string]$DatabaseUser = "araras",
+    [string]$DatabaseUser = "ararasuite",
     [string]$DatabasePassword = "pdv_sync",
     [string]$PsqlPath = "psql",
     [string]$PgVectorVersion = "0.8.0"

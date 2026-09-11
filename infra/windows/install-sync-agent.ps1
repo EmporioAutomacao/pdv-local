@@ -25,7 +25,7 @@ param(
     [string]$PostgresAdminUser = "postgres",
     [securestring]$PostgresAdminPassword,
     [string]$DatabaseName = "pdv",
-    [string]$DatabaseUser = "araras",
+    [string]$DatabaseUser = "ararasuite",
     [string]$DatabasePassword = "pdv_sync",
     [string]$PsqlPath = "psql",
 

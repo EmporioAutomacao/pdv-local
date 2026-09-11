@@ -27,7 +27,7 @@ public sealed class InstallerWizardForm : Form
     private readonly TextBox _postgresAdminUser = new() { Text = "postgres" };
     private readonly TextBox _postgresAdminPassword = PasswordBox("postgres");
     private readonly TextBox _databaseName = new() { Text = "pdv" };
-    private readonly TextBox _databaseUser = new() { Text = "araras" };
+    private readonly TextBox _databaseUser = new() { Text = "ararasuite" };
     private readonly TextBox _databasePassword = PasswordBox("pdv_sync");
     private readonly CheckBox _enableArpa = new() { Text = "Habilitar coletor Arpa nesta instalacao" };
     private readonly TextBox _arpaHost = new() { Text = "127.0.0.1" };
