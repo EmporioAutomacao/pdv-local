@@ -27,6 +27,7 @@ public sealed class LocalStatusServer : BackgroundService
     private const string ConfigArpaPath = "/config/arpa";
     private const string ConfigArpaLojasPath = "/config/arpa/lojas";
     private const string ConfigArpaSyncLogPath = "/config/arpa/sync-log";
+    private const string ConfigLocalDbPath = "/config/local-db";
     private const string LogsPath = "/logs";
     private const string HelpPath = "/help";
     private const string StatusPath = "/status";
@@ -59,6 +60,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ArpaCollectorSettingsStore _arpaSettingsStore;
     private readonly ArpaLojaListClient _arpaLojaListClient;
     private readonly ArpaDdlRunner _arpaDdlRunner;
+    private readonly LocalDbMaintenanceRunner _localDbMaintenanceRunner;
     private readonly LocalSyncStore _localStore;
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
@@ -84,6 +86,7 @@ public sealed class LocalStatusServer : BackgroundService
         ArpaCollectorSettingsStore arpaSettingsStore,
         ArpaLojaListClient arpaLojaListClient,
         ArpaDdlRunner arpaDdlRunner,
+        LocalDbMaintenanceRunner localDbMaintenanceRunner,
         LocalSyncStore localStore,
         ManualSyncSignal manualSyncSignal,
         SyncAgentRuntimeState runtimeState,
@@ -101,6 +104,7 @@ public sealed class LocalStatusServer : BackgroundService
         _arpaSettingsStore = arpaSettingsStore;
         _arpaLojaListClient = arpaLojaListClient;
         _arpaDdlRunner = arpaDdlRunner;
+        _localDbMaintenanceRunner = localDbMaintenanceRunner;
         _localStore = localStore;
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
@@ -173,6 +177,18 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaPath)
             {
                 await WriteConfigArpaAsync(context.Response, context.Request.Url.Query, null, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigLocalDbPath)
+            {
+                await WriteConfigLocalDbAsync(context.Response, null, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == ConfigLocalDbPath)
+            {
+                await HandleConfigLocalDbExecuteAsync(context, cancellationToken);
                 return;
             }
 
@@ -1221,12 +1237,124 @@ public sealed class LocalStatusServer : BackgroundService
                     <p class="muted">Conexoes com bancos Arpa Control para importar produtos, clientes e estoque. {{Html(arpaLine)}}</p>
                   </section>
                 </a>
+                <a class="cardlink" href="/config/local-db">
+                  <section class="panel">
+                    <h2>Manutencao do banco local</h2>
+                    <p class="muted">Rodar SQL de reparo no banco Postgres local deste agente, com credencial admin informada na hora.</p>
+                  </section>
+                </a>
               </main>
             </body>
             </html>
             """;
 
         await WriteHtmlAsync(response, html, cancellationToken);
+    }
+
+    /// <summary>
+    /// Pagina de manutencao do banco local (Configuracoes &gt; Manutencao do
+    /// banco local). Roda SQL livre no Postgres local do agente (nao no Arpa)
+    /// com uma credencial admin informada na hora - nunca gravada. Existe
+    /// porque o runtime conecta com um usuario so-DML de proposito (sem
+    /// ALTER TABLE), entao reparos de schema (ex.: uma CHECK constraint presa
+    /// numa lista antiga apos o contrato Sync ganhar um entity_type novo)
+    /// exigem essa via administrativa explicita.
+    /// </summary>
+    private async Task WriteConfigLocalDbAsync(
+        HttpListenerResponse response,
+        string? flashMessage,
+        CancellationToken cancellationToken)
+    {
+        var messageHtml = string.IsNullOrWhiteSpace(flashMessage)
+            ? string.Empty
+            : $"""<div class="message okbox">{Html(flashMessage)}</div>""";
+
+        var html = $$"""
+            <!doctype html>
+            <html lang="pt-BR">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Manutencao do banco local - AraraSuite Sync</title>
+              <style>
+                body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
+                main { max-width: 760px; margin: 0 auto; }
+                h1 { margin-bottom: 4px; font-size: 28px; }
+                h2 { margin-top: 0; font-size: 18px; }
+                .muted { color: #64748b; margin-top: 0; }
+                {{BaseStyles}}
+                .panel { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin: 16px 0; }
+                label { color: #64748b; font-size: 13px; display: block; margin-bottom: 6px; }
+                input, textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: 14px; font-size: 14px; font-family: inherit; }
+                textarea { font-family: Consolas, monospace; min-height: 160px; resize: vertical; }
+                button { padding: 10px 14px; border: 0; border-radius: 6px; background: #b45309; color: white; cursor: pointer; }
+                button:hover { background: #92400e; }
+                .message { border-radius: 8px; padding: 12px; margin: 16px 0; font-weight: 600; }
+                .okbox { background: #dcfce7; color: #166534; }
+                .warnbox { background: #fef3c7; color: #92400e; }
+                #status { margin-top: 10px; font-weight: 600; white-space: pre-wrap; }
+              </style>
+            </head>
+            <body>
+              <main>
+                <h1>Manutencao do banco local</h1>
+                <p class="muted">Roda SQL diretamente no Postgres local deste agente (nao no Arpa) - schemas <code>sync_agent</code> e <code>pdv</code>.</p>
+                {{LocalNavHtml(ConfigPath)}}
+                {{messageHtml}}
+                <section class="panel">
+                  <div class="message warnbox">
+                    Isso executa o SQL exatamente como escrito, sem confirmacao adicional alem do popup abaixo.
+                    Use so para reparo de schema (ex.: ajustar uma constraint) - nao ha desfazer automatico.
+                    A credencial e usada uma vez e nunca e gravada.
+                  </div>
+                  <form id="maintform" onsubmit="return false;">
+                    <label for="f_admin_user">Usuario admin do Postgres local</label>
+                    <input id="f_admin_user" name="admin_user" type="text" autocomplete="off" placeholder="postgres" value="postgres">
+                    <label for="f_admin_password">Senha</label>
+                    <input id="f_admin_password" name="admin_password" type="password" autocomplete="off">
+                    <label for="f_sql">SQL</label>
+                    <textarea id="f_sql" name="sql" spellcheck="false" placeholder="ALTER TABLE sync_agent.outbox_events ..."></textarea>
+                    <button type="button" onclick="if(confirm('Executar esse SQL no banco local agora?'))runSql()">Executar</button>
+                  </form>
+                  <div id="status"></div>
+                </section>
+              </main>
+              <script>
+                function runSql(){
+                  var status = document.getElementById('status');
+                  status.style.color = '#1f2937';
+                  status.textContent = 'Executando...';
+                  var body = new URLSearchParams(new FormData(document.getElementById('maintform')));
+                  fetch('/config/local-db', { method: 'POST', body: body })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){
+                      status.style.color = j.ok ? '#166534' : '#92400e';
+                      status.textContent = j.message || (j.ok ? 'OK.' : 'Falha.');
+                      if(j.ok){ document.getElementById('f_admin_password').value = ''; }
+                    })
+                    .catch(function(e){ status.style.color = '#92400e'; status.textContent = String(e); });
+                }
+              </script>
+            </body>
+            </html>
+            """;
+
+        await WriteHtmlAsync(response, html, cancellationToken);
+    }
+
+    private async Task HandleConfigLocalDbExecuteAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var form = await ReadFormAsync(context.Request, MaxConfigFormBytes, cancellationToken);
+        var adminUser = form.GetValueOrDefault("admin_user", string.Empty).Trim();
+        var adminPassword = form.GetValueOrDefault("admin_password", string.Empty);
+        var sql = form.GetValueOrDefault("sql", string.Empty);
+
+        var result = await _localDbMaintenanceRunner.ExecuteAsync(adminUser, adminPassword, sql, cancellationToken);
+        await WriteJsonAsync(
+            context.Response,
+            HttpStatusCode.OK,
+            new { ok = result.Ok, message = result.Message },
+            cancellationToken);
     }
 
     private async Task WriteConfigArpaAsync(
