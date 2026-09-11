@@ -2,7 +2,7 @@ param(
     [string]$InstallRoot = "C:\Program Files\AraraSuite.com.br",
     [string]$ServiceName = "AraraSuiteSync",
     [string]$PostgresInstallRoot = "C:\Program Files\PostgreSQL\17",
-    [string]$PostgresDataDirectory = "C:\ProgramData\PDVLocal\PostgreSQL17\data",
+    [string]$PostgresDataDirectory = "C:\Program Files\AraraSuite.com.br\PostgreSQL17\data",
     [string]$PostgresServiceName = "postgresql-x64-17-pdvlocal",
     [int]$PostgresPort = 5432,
     [string]$PostgresAdminUser = "postgres",

@@ -17,7 +17,7 @@ public sealed class InstallerWizardForm : Form
     private readonly RadioButton _useExistingPostgres = new() { Text = "Usar PostgreSQL 17 ja instalado", Checked = true };
     private readonly RadioButton _installPostgres = new() { Text = "Instalar PostgreSQL 17 automaticamente" };
     private readonly TextBox _postgresInstallRoot = new() { Text = @"C:\Program Files\PostgreSQL\17" };
-    private readonly TextBox _postgresDataDirectory = new() { Text = @"C:\ProgramData\PDVLocal\PostgreSQL17\data" };
+    private readonly TextBox _postgresDataDirectory = new() { Text = @"C:\Program Files\AraraSuite.com.br\PostgreSQL17\data" };
     private readonly TextBox _postgresSourceRoot = new();
     private readonly TextBox _pgVectorSourceRoot = new();
     private readonly TextBox _postgresServiceName = new() { Text = "postgresql-x64-17-pdvlocal" };

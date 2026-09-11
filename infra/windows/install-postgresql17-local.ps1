@@ -1,6 +1,6 @@
 ﻿param(
     [string]$InstallRoot = "C:\Program Files\PostgreSQL\17",
-    [string]$DataDirectory = "C:\ProgramData\PDVLocal\PostgreSQL17\data",
+    [string]$DataDirectory = "C:\Program Files\AraraSuite.com.br\PostgreSQL17\data",
     [string]$SourceRoot = "",
     [string]$PgVectorSourceRoot = "",
     [string]$ServiceName = "postgresql-x64-17-pdvlocal",
