@@ -414,6 +414,12 @@ DECLARE
     c_ativo text; c_padr text; c_upd text;
     p_code text; p_ana text; p_desc text; p_ta text; p_es text; p_padr text;
     p_calc text; p_tipo text; p_oper text; p_ativo text;
+
+    -- cobranca via join (fallback quando nao ha uma tabela unica denormalizada -
+    -- schema em ctabancarias + bancos + convenio_bancos, mesmo modelo ja lido
+    -- direto pelo ERP em cobranca/services/arpa.py::_consultar_contas_cobranca_arpa_join)
+    j_cd_join text; j_cd_conv_expr text; j_cd_benef_expr text;
+    j_cbd_join text; j_instr_expr text;
 BEGIN
     BEGIN
         IF current_setting('TimeZone') IS NOT NULL
@@ -495,6 +501,69 @@ BEGIN
     END IF;
   EXCEPTION WHEN OTHERS THEN
     RAISE NOTICE 'sync_export.cobranca pulada (%).', SQLERRM;
+  END;
+
+  -- Fallback: alguns Arpa guardam a conta bancaria de cobranca normalizada em
+  -- 3 tabelas (ctabancarias = conta+banco(FK); bancos = agencia/num_banco/dv;
+  -- convenio_bancos = carteira/convenio/cedente por conta) em vez de uma unica
+  -- tabela com todos os campos - o bloco acima so tenta tabela unica e pula.
+  -- So roda se a view ainda nao existir (o bloco de tabela unica teve sucesso).
+  BEGIN
+    IF to_regclass('sync_export.cobranca') IS NULL
+       AND to_regclass('public.ctabancarias') IS NOT NULL
+       AND to_regclass('public.bancos') IS NOT NULL
+       AND to_regclass('public.convenio_bancos') IS NOT NULL THEN
+
+        IF to_regclass('public.convenio_dados') IS NOT NULL THEN
+            j_cd_join := ' LEFT JOIN public.convenio_dados cd ON CAST(cd.convenio AS TEXT) = CAST(cb.codigo AS TEXT)';
+            j_cd_conv_expr := 'COALESCE(NULLIF(TRIM(CAST(cd.numero_convenio AS TEXT)), ''''), NULLIF(TRIM(CAST(cd.convenio AS TEXT)), ''''), NULLIF(TRIM(CAST(cb.convenio AS TEXT)), ''''))';
+            j_cd_benef_expr := 'COALESCE(NULLIF(TRIM(CAST(cd.codigo_beneficiario AS TEXT)), ''''), NULLIF(TRIM(CAST(cb.cedente AS TEXT)), ''''))';
+        ELSE
+            j_cd_join := '';
+            j_cd_conv_expr := 'NULLIF(TRIM(CAST(cb.convenio AS TEXT)), '''')';
+            j_cd_benef_expr := 'NULLIF(TRIM(CAST(cb.cedente AS TEXT)), '''')';
+        END IF;
+
+        IF to_regclass('public.conf_boletos_dll') IS NOT NULL THEN
+            j_cbd_join := ' LEFT JOIN public.conf_boletos_dll cbd ON CAST(cbd.convenio AS TEXT) = CAST(cb.codigo AS TEXT)';
+            j_instr_expr := 'COALESCE(NULLIF(TRIM(CAST(cb.localpgto AS TEXT)), ''''), NULLIF(TRIM(CAST(ct.localpgto AS TEXT)), ''''), NULLIF(TRIM(CAST(cbd.observacao AS TEXT)), ''''))';
+        ELSE
+            j_cbd_join := '';
+            j_instr_expr := 'COALESCE(NULLIF(TRIM(CAST(cb.localpgto AS TEXT)), ''''), NULLIF(TRIM(CAST(ct.localpgto AS TEXT)), ''''))';
+        END IF;
+
+        sql := 'CREATE OR REPLACE VIEW sync_export.cobranca AS SELECT '
+            || 'CAST(cb.codigo AS TEXT) AS entity_key, '
+            || fixed || ' AS occurred_at_utc, jsonb_build_object('
+            || '''externo_id'', CAST(cb.codigo AS TEXT), '
+            || '''nome_exibicao'', COALESCE(NULLIF(TRIM(CAST(ct.nome AS TEXT)), ''''), NULLIF(TRIM(CAST(b.nome AS TEXT)), ''''), ''Conta Arpa''), '
+            || '''banco_nome'', CAST(b.nome AS TEXT), '
+            || '''banco_codigo'', CAST(b.num_banco AS TEXT), '
+            || '''agencia'', COALESCE(NULLIF(TRIM(CAST(cb.numero_agencia AS TEXT)), ''''), NULLIF(TRIM(CAST(b.agencia AS TEXT)), '''')), '
+            || '''agencia_digito'', NULLIF(TRIM(CAST(b.dv_agencia AS TEXT)), ''''), '
+            || '''conta'', CAST(ct.conta AS TEXT), '
+            || '''conta_digito'', COALESCE(NULLIF(TRIM(CAST(cb.dvcedente AS TEXT)), ''''), NULLIF(TRIM(split_part(CAST(ct.conta AS TEXT), ''-'', 2)), '''')), '
+            || '''carteira'', CAST(cb.carteira AS TEXT), '
+            || '''variacao_carteira'', CAST(cb.variacao AS TEXT), '
+            || '''convenio'', ' || j_cd_conv_expr || ', '
+            || '''codigo_beneficiario'', ' || j_cd_benef_expr || ', '
+            || '''posto'', CAST(b.posto AS TEXT), '
+            || '''sigla'', CAST(cb.carteira_sigla AS TEXT), '
+            || '''instrucao_padrao'', ' || j_instr_expr || ', '
+            || '''cedente_nome'', COALESCE(NULLIF(TRIM(CAST(ct.nome AS TEXT)), ''''), NULLIF(TRIM(CAST(cb.cedente AS TEXT)), '''')), '
+            || '''ativo_raw'', CAST(COALESCE(cb.ativo, ct.ativo, FALSE) AS TEXT)'
+            || ')::text AS payload_json, '
+            || '(''arpa-cobranca-'' || CAST(cb.codigo AS TEXT))::text AS trace_id '
+            || 'FROM public.convenio_bancos cb '
+            || 'LEFT JOIN public.ctabancarias ct ON CAST(ct.conta AS TEXT) = CAST(cb.conta AS TEXT) '
+            || 'LEFT JOIN public.bancos b ON CAST(b.numero AS TEXT) = CAST(ct.banco AS TEXT)'
+            || j_cd_join || j_cbd_join
+            || ' WHERE ct.conta IS NOT NULL AND cb.codigo IS NOT NULL';
+        EXECUTE sql;
+        RAISE NOTICE 'sync_export.cobranca criada (join ctabancarias+bancos+convenio_bancos).';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export.cobranca (join) pulada (%).', SQLERRM;
   END;
 
   BEGIN
