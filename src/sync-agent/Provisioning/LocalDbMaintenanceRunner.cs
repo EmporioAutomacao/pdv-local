@@ -1,4 +1,5 @@
 using Npgsql;
+using SyncAgent.Contracts;
 
 namespace SyncAgent.Provisioning;
 
@@ -13,6 +14,11 @@ namespace SyncAgent.Provisioning;
 /// que ficou presa numa lista antiga apos uma extensao de contrato) exigem
 /// uma acao administrativa explicita. Isso e essa acao: sem ela, o unico
 /// caminho era psql direto na VM.
+///
+/// <see cref="Routines"/> cobre reparos conhecidos e repetiveis entre clientes
+/// (ex.: bases criadas antes de um contrato Sync novo) - selecionaveis no
+/// dashboard sem copiar/colar SQL. O campo de SQL livre continua existindo
+/// para casos novos que ainda nao viraram rotina.
 /// </summary>
 public sealed class LocalDbMaintenanceRunner
 {
@@ -21,6 +27,50 @@ public sealed class LocalDbMaintenanceRunner
     public LocalDbMaintenanceRunner(IConfiguration configuration)
     {
         _configuration = configuration;
+    }
+
+    /// <summary>
+    /// Rotinas conhecidas, montadas a partir das mesmas constantes de
+    /// contrato que o resto do agente usa (<see cref="SyncContractValues"/>) -
+    /// nunca uma lista hardcoded separada que pode ficar desatualizada.
+    /// </summary>
+    public static IReadOnlyList<MaintenanceRoutine> Routines { get; } = BuildRoutines();
+
+    private static IReadOnlyList<MaintenanceRoutine> BuildRoutines()
+    {
+        var allowedEntityTypes = string.Join(", ", SyncContractValues.EntityTypes.Select(t => $"'{t}'"));
+
+        return new[]
+        {
+            new MaintenanceRoutine(
+                "fix_entity_type_check",
+                "Corrigir outbox_events_entity_type_check",
+                "Atualiza a lista de entity_type permitidos na fila local (outbox_events) para a "
+                    + "atual do contrato Sync: " + string.Join(", ", SyncContractValues.EntityTypes) + ". "
+                    + "Necessario em qualquer instalacao criada antes do contrato ganhar cobranca/"
+                    + "plano_historico (2.10.0/2.11.0) - sem isso, eventos dessas entidades nunca sao "
+                    + "enfileirados (erro 23514 no log). Seguro re-rodar.",
+                $"""
+                ALTER TABLE sync_agent.outbox_events DROP CONSTRAINT IF EXISTS outbox_events_entity_type_check;
+                ALTER TABLE sync_agent.outbox_events ADD CONSTRAINT outbox_events_entity_type_check
+                    CHECK (entity_type IN ({allowedEntityTypes}));
+                """),
+        };
+    }
+
+    public async Task<LocalDbMaintenanceResult> ExecuteRoutineAsync(
+        string routineKey,
+        string adminUser,
+        string adminPassword,
+        CancellationToken cancellationToken)
+    {
+        var routine = Routines.FirstOrDefault(r => r.Key == routineKey);
+        if (routine is null)
+        {
+            return new LocalDbMaintenanceResult(false, "Rotina desconhecida.");
+        }
+
+        return await ExecuteAsync(adminUser, adminPassword, routine.Sql, cancellationToken);
     }
 
     public async Task<LocalDbMaintenanceResult> ExecuteAsync(
@@ -76,3 +126,5 @@ public sealed class LocalDbMaintenanceRunner
 }
 
 public sealed record LocalDbMaintenanceResult(bool Ok, string Message);
+
+public sealed record MaintenanceRoutine(string Key, string Label, string Description, string Sql);

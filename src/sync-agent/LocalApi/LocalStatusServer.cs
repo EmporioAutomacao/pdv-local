@@ -28,6 +28,7 @@ public sealed class LocalStatusServer : BackgroundService
     private const string ConfigArpaLojasPath = "/config/arpa/lojas";
     private const string ConfigArpaSyncLogPath = "/config/arpa/sync-log";
     private const string ConfigLocalDbPath = "/config/local-db";
+    private const string ConfigLocalDbRoutinePath = "/config/local-db/routine";
     private const string LogsPath = "/logs";
     private const string HelpPath = "/help";
     private const string StatusPath = "/status";
@@ -189,6 +190,12 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == ConfigLocalDbPath)
             {
                 await HandleConfigLocalDbExecuteAsync(context, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == ConfigLocalDbRoutinePath)
+            {
+                await HandleConfigLocalDbRoutineAsync(context, cancellationToken);
                 return;
             }
 
@@ -1269,6 +1276,14 @@ public sealed class LocalStatusServer : BackgroundService
             ? string.Empty
             : $"""<div class="message okbox">{Html(flashMessage)}</div>""";
 
+        var routineOptions = new StringBuilder();
+        routineOptions.Append("""<option value="">Selecione...</option>""");
+        foreach (var routine in LocalDbMaintenanceRunner.Routines)
+        {
+            routineOptions.Append(
+                $"""<option value="{Html(routine.Key)}" data-desc="{Html(routine.Description)}">{Html(routine.Label)}</option>""");
+        }
+
         var html = $$"""
             <!doctype html>
             <html lang="pt-BR">
@@ -1285,14 +1300,17 @@ public sealed class LocalStatusServer : BackgroundService
                 {{BaseStyles}}
                 .panel { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin: 16px 0; }
                 label { color: #64748b; font-size: 13px; display: block; margin-bottom: 6px; }
-                input, textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: 14px; font-size: 14px; font-family: inherit; }
+                input, textarea, select { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: 14px; font-size: 14px; font-family: inherit; background: white; }
                 textarea { font-family: Consolas, monospace; min-height: 160px; resize: vertical; }
                 button { padding: 10px 14px; border: 0; border-radius: 6px; background: #b45309; color: white; cursor: pointer; }
                 button:hover { background: #92400e; }
+                button:disabled { background: #cbd5e1; cursor: not-allowed; }
                 .message { border-radius: 8px; padding: 12px; margin: 16px 0; font-weight: 600; }
                 .okbox { background: #dcfce7; color: #166534; }
                 .warnbox { background: #fef3c7; color: #92400e; }
-                #status { margin-top: 10px; font-weight: 600; white-space: pre-wrap; }
+                #routine-desc { font-size: 13px; color: #475569; margin: -6px 0 14px; min-height: 1.2em; }
+                #status, #status-routine { margin-top: 10px; font-weight: 600; white-space: pre-wrap; }
+                hr { border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0; }
               </style>
             </head>
             <body>
@@ -1303,34 +1321,68 @@ public sealed class LocalStatusServer : BackgroundService
                 {{messageHtml}}
                 <section class="panel">
                   <div class="message warnbox">
-                    Isso executa o SQL exatamente como escrito, sem confirmacao adicional alem do popup abaixo.
-                    Use so para reparo de schema (ex.: ajustar uma constraint) - nao ha desfazer automatico.
-                    A credencial e usada uma vez e nunca e gravada.
+                    Executa direto no banco, sem desfazer automatico. A credencial e usada uma vez
+                    e nunca e gravada.
                   </div>
-                  <form id="maintform" onsubmit="return false;">
-                    <label for="f_admin_user">Usuario admin do Postgres local</label>
-                    <input id="f_admin_user" name="admin_user" type="text" autocomplete="off" placeholder="postgres" value="postgres">
-                    <label for="f_admin_password">Senha</label>
-                    <input id="f_admin_password" name="admin_password" type="password" autocomplete="off">
-                    <label for="f_sql">SQL</label>
-                    <textarea id="f_sql" name="sql" spellcheck="false" placeholder="ALTER TABLE sync_agent.outbox_events ..."></textarea>
-                    <button type="button" onclick="if(confirm('Executar esse SQL no banco local agora?'))runSql()">Executar</button>
-                  </form>
+                  <label for="f_admin_user">Usuario admin do Postgres local</label>
+                  <input id="f_admin_user" name="admin_user" type="text" autocomplete="off" placeholder="postgres" value="postgres">
+                  <label for="f_admin_password">Senha</label>
+                  <input id="f_admin_password" name="admin_password" type="password" autocomplete="off">
+
+                  <h2>Rotina conhecida</h2>
+                  <p class="muted" style="margin-bottom:10px">Reparos ja catalogados - reaparecem em varias instalacoes (ex.: base criada antes de um contrato Sync novo). Sem copiar/colar SQL.</p>
+                  <label for="f_routine">Rotina</label>
+                  <select id="f_routine" onchange="document.getElementById('routine-desc').textContent = this.selectedOptions[0].dataset.desc || '';">
+                    {{routineOptions}}
+                  </select>
+                  <div id="routine-desc"></div>
+                  <button type="button" id="btn-routine" onclick="runRoutine()">Executar rotina selecionada</button>
+                  <div id="status-routine"></div>
+
+                  <hr>
+
+                  <h2>SQL livre</h2>
+                  <p class="muted" style="margin-bottom:10px">Para reparos ainda nao catalogados como rotina.</p>
+                  <label for="f_sql">SQL</label>
+                  <textarea id="f_sql" spellcheck="false" placeholder="ALTER TABLE sync_agent.outbox_events ..."></textarea>
+                  <button type="button" onclick="if(confirm('Executar esse SQL no banco local agora?'))runSql()">Executar SQL</button>
                   <div id="status"></div>
                 </section>
               </main>
               <script>
+                function creds(){
+                  return { admin_user: document.getElementById('f_admin_user').value, admin_password: document.getElementById('f_admin_password').value };
+                }
+                function clearPassword(){ document.getElementById('f_admin_password').value = ''; }
+                function runRoutine(){
+                  var key = document.getElementById('f_routine').value;
+                  if(!key){ alert('Selecione uma rotina.'); return; }
+                  var label = document.getElementById('f_routine').selectedOptions[0].text;
+                  if(!confirm('Executar a rotina "' + label + '" no banco local agora?')) return;
+                  var status = document.getElementById('status-routine');
+                  status.style.color = '#1f2937';
+                  status.textContent = 'Executando...';
+                  var body = new URLSearchParams(creds()); body.set('key', key);
+                  fetch('/config/local-db/routine', { method: 'POST', body: body })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){
+                      status.style.color = j.ok ? '#166534' : '#92400e';
+                      status.textContent = j.message || (j.ok ? 'OK.' : 'Falha.');
+                      if(j.ok){ clearPassword(); }
+                    })
+                    .catch(function(e){ status.style.color = '#92400e'; status.textContent = String(e); });
+                }
                 function runSql(){
                   var status = document.getElementById('status');
                   status.style.color = '#1f2937';
                   status.textContent = 'Executando...';
-                  var body = new URLSearchParams(new FormData(document.getElementById('maintform')));
+                  var body = new URLSearchParams(creds()); body.set('sql', document.getElementById('f_sql').value);
                   fetch('/config/local-db', { method: 'POST', body: body })
                     .then(function(r){ return r.json(); })
                     .then(function(j){
                       status.style.color = j.ok ? '#166534' : '#92400e';
                       status.textContent = j.message || (j.ok ? 'OK.' : 'Falha.');
-                      if(j.ok){ document.getElementById('f_admin_password').value = ''; }
+                      if(j.ok){ clearPassword(); }
                     })
                     .catch(function(e){ status.style.color = '#92400e'; status.textContent = String(e); });
                 }
@@ -1350,6 +1402,21 @@ public sealed class LocalStatusServer : BackgroundService
         var sql = form.GetValueOrDefault("sql", string.Empty);
 
         var result = await _localDbMaintenanceRunner.ExecuteAsync(adminUser, adminPassword, sql, cancellationToken);
+        await WriteJsonAsync(
+            context.Response,
+            HttpStatusCode.OK,
+            new { ok = result.Ok, message = result.Message },
+            cancellationToken);
+    }
+
+    private async Task HandleConfigLocalDbRoutineAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var form = await ReadFormAsync(context.Request, MaxConfigFormBytes, cancellationToken);
+        var adminUser = form.GetValueOrDefault("admin_user", string.Empty).Trim();
+        var adminPassword = form.GetValueOrDefault("admin_password", string.Empty);
+        var routineKey = form.GetValueOrDefault("key", string.Empty).Trim();
+
+        var result = await _localDbMaintenanceRunner.ExecuteRoutineAsync(routineKey, adminUser, adminPassword, cancellationToken);
         await WriteJsonAsync(
             context.Response,
             HttpStatusCode.OK,
