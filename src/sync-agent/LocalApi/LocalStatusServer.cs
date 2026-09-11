@@ -1363,6 +1363,19 @@ public sealed class LocalStatusServer : BackgroundService
                 select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; }
                 #synclog { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; margin: 10px 0 0; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
                 #synclog .warn { color: #fbbf24; }
+                .syncsteps { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+                .syncstep { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #e2e8f0; color: #64748b; font-size: 12px; font-weight: 600; }
+                .syncstep .dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; flex: none; }
+                .syncstep.active { background: #dbeafe; color: #1d4ed8; }
+                .syncstep.active .dot { background: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .25); }
+                .syncstep.done { background: #dcfce7; color: #166534; }
+                .syncstep.done .dot { background: #16a34a; }
+                .syncstep.warn { background: #fef3c7; color: #92400e; }
+                .syncstep.warn .dot { background: #d97706; }
+                .syncdrain { margin-top: 12px; }
+                .drainbar { height: 10px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+                .drainbarfill { height: 100%; width: 0%; background: #2563eb; transition: width .4s ease; }
+                .drainbarfill.warn { background: #d97706; }
               </style>
             </head>
             <body>
@@ -1392,6 +1405,11 @@ public sealed class LocalStatusServer : BackgroundService
                   <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap">
                     <h2 style="margin:0">Sincronizacao</h2>
                     <button type="button" id="synclogclose" class="secondary" onclick="closeSyncLog()" hidden>Fechar</button>
+                  </div>
+                  <div id="syncsteps" class="syncsteps"></div>
+                  <div id="syncdrain" class="syncdrain" hidden>
+                    <div class="drainbar"><div id="syncdrainfill" class="drainbarfill"></div></div>
+                    <div id="syncdraintext" class="muted" style="margin-top:6px"></div>
                   </div>
                   <pre id="synclog">Iniciando...</pre>
                 </section>
@@ -1552,9 +1570,49 @@ public sealed class LocalStatusServer : BackgroundService
                 var SYNCLOG_BASELINE = -1;
                 var SYNCLOG_STARTED = false;
                 var SYNCLOG_WAITS = 0;
+                var SYNCDRAIN_TIMER = null;
+                var SYNCDRAIN_BASELINE = 0;
+                var SYNCDRAIN_TICKS = 0;
+
+                // Fases de um ciclo, na ordem em que aparecem no log (ver Worker.cs).
+                // "Re-sync sob demanda" so aparece quando o ERP pediu re-sync no
+                // heartbeat anterior - por isso e opcional (nao trava a barra se
+                // nunca aparecer).
+                var SYNC_PHASES = [
+                  { key: 'read', label: 'Leitura Arpa', match: /^(Conexao |  [A-Za-z])/ },
+                  { key: 'dispatch', label: 'Envio ao ERP', match: /^Envio ao ERP:/ },
+                  { key: 'resync', label: 'Re-sync sob demanda', match: /^Re-sync sob demanda:/, optional: true },
+                  { key: 'snapshots', label: 'Snapshots do ERP', match: /\(do ERP\):/ },
+                  { key: 'finish', label: 'Conclusao', match: /^(Sincronizacao concluida|Sincronizacao terminou com erro|Sincronizacao interrompida|Atualizacao do aplicativo iniciada)/ }
+                ];
+
+                function renderSteps(lines, running){
+                  var el = document.getElementById('syncsteps');
+                  var reached = {};
+                  var order = [];
+                  (lines || []).forEach(function(l){
+                    SYNC_PHASES.forEach(function(p){
+                      if(!p.match.test(l.message)) return;
+                      if(order.indexOf(p.key) === -1) order.push(p.key);
+                      var wasWarn = reached[p.key] === 'warn';
+                      reached[p.key] = (wasWarn || l.level === 'warn') ? 'warn' : 'done';
+                    });
+                  });
+                  var lastKey = order.length ? order[order.length - 1] : null;
+                  el.innerHTML = SYNC_PHASES.filter(function(p){
+                    return !p.optional || reached[p.key];
+                  }).map(function(p){
+                    var st = reached[p.key];
+                    var cls = 'syncstep';
+                    if(st === 'warn'){ cls += ' warn'; }
+                    else if(st === 'done'){ cls += (p.key === lastKey && running) ? ' active' : ' done'; }
+                    return '<span class="' + cls + '"><span class="dot"></span>' + p.label + '</span>';
+                  }).join('');
+                }
 
                 function renderSyncLog(j){
                   var el = document.getElementById('synclog');
+                  renderSteps(j.lines, j.running);
                   if(!j.lines || !j.lines.length){ el.textContent = SYNCLOG_STARTED ? '(sem linhas)' : 'Aguardando o agente iniciar a sincronizacao...'; return; }
                   el.innerHTML = j.lines.map(function(l){
                     var txt = l.at + '  ' + l.message;
@@ -1562,6 +1620,56 @@ public sealed class LocalStatusServer : BackgroundService
                     return l.level === 'warn' ? '<span class="warn">' + esc + '</span>' : esc;
                   }).join('\n');
                   el.scrollTop = el.scrollHeight;
+                }
+
+                function stopDrainPoll(){
+                  if(SYNCDRAIN_TIMER){ clearInterval(SYNCDRAIN_TIMER); SYNCDRAIN_TIMER = null; }
+                }
+
+                function renderDrain(pending, deadLetter){
+                  var box = document.getElementById('syncdrain');
+                  var fill = document.getElementById('syncdrainfill');
+                  var text = document.getElementById('syncdraintext');
+                  box.hidden = false;
+                  var pct = SYNCDRAIN_BASELINE > 0 ? Math.max(0, Math.min(100, 100 - (pending / SYNCDRAIN_BASELINE * 100))) : 100;
+                  fill.style.width = pct.toFixed(0) + '%';
+                  fill.className = 'drainbarfill' + (deadLetter > 0 ? ' warn' : '');
+                  if(pending <= 0){
+                    text.textContent = deadLetter > 0
+                      ? deadLetter + ' evento(s) foram para dead-letter - veja Logs.'
+                      : 'Todos os eventos foram confirmados pelo ERP.';
+                  } else {
+                    text.textContent = pending + ' evento(s) ainda pendente(s) de confirmacao do ERP'
+                      + (deadLetter > 0 ? ' (' + deadLetter + ' em dead-letter)' : '')
+                      + ' - o agente continua enviando em lotes nos proximos ciclos automaticos.';
+                  }
+                }
+
+                // O dispatcher manda no maximo um lote por ciclo (BatchSize do
+                // ErpDispatcher). Um full-resync ou uma leitura grande pode deixar
+                // milhares de eventos pendentes mesmo com o ciclo "concluido" - essa
+                // barra continua acompanhando /status entre ciclos ate zerar, para
+                // nao parecer que travou.
+                function startDrainPoll(initialPending, initialDeadLetter){
+                  stopDrainPoll();
+                  if(!initialPending || initialPending <= 0){
+                    document.getElementById('syncdrain').hidden = true;
+                    return;
+                  }
+                  SYNCDRAIN_BASELINE = initialPending;
+                  SYNCDRAIN_TICKS = 0;
+                  renderDrain(initialPending, initialDeadLetter || 0);
+                  SYNCDRAIN_TIMER = setInterval(function(){
+                    SYNCDRAIN_TICKS++;
+                    fetch('/status').then(function(r){ return r.json(); }).then(function(s){
+                      renderDrain(s.pending_outbox_events, s.dead_letter_events);
+                      // ~15 min de acompanhamento client-side; depois disso o
+                      // dashboard/status continuam validos, so paramos de sondar.
+                      if(s.pending_outbox_events <= 0 || SYNCDRAIN_TICKS > 180){
+                        stopDrainPoll();
+                      }
+                    }).catch(function(){ /* proxima tentativa segue o intervalo normal */ });
+                  }, 5000);
                 }
 
                 function pollSyncLog(){
@@ -1578,6 +1686,9 @@ public sealed class LocalStatusServer : BackgroundService
                     if(SYNCLOG_STARTED && !j.running){
                       clearInterval(SYNCLOG_TIMER); SYNCLOG_TIMER = null;
                       document.getElementById('synclogclose').hidden = false;
+                      fetch('/status').then(function(r){ return r.json(); }).then(function(s){
+                        startDrainPoll(s.pending_outbox_events, s.dead_letter_events);
+                      }).catch(function(){ /* sem status agora, a barra so nao aparece */ });
                     }
                   }).catch(function(){ /* API pode cair momentaneamente; proxima poll tenta */ });
                 }
@@ -1587,6 +1698,9 @@ public sealed class LocalStatusServer : BackgroundService
                   panel.hidden = false;
                   document.getElementById('synclogclose').hidden = true;
                   document.getElementById('synclog').textContent = 'Solicitando sincronizacao...';
+                  document.getElementById('syncsteps').innerHTML = '';
+                  document.getElementById('syncdrain').hidden = true;
+                  stopDrainPoll();
                   SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0;
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
@@ -1605,6 +1719,9 @@ public sealed class LocalStatusServer : BackgroundService
                   panel.hidden = false;
                   document.getElementById('synclogclose').hidden = true;
                   document.getElementById('synclog').textContent = 'Zerando marcadores...';
+                  document.getElementById('syncsteps').innerHTML = '';
+                  document.getElementById('syncdrain').hidden = true;
+                  stopDrainPoll();
                   SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0;
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
@@ -1621,6 +1738,7 @@ public sealed class LocalStatusServer : BackgroundService
 
                 function closeSyncLog(){
                   if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); SYNCLOG_TIMER = null; }
+                  stopDrainPoll();
                   document.getElementById('synclogpanel').hidden = true;
                 }
 
