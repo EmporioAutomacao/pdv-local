@@ -86,6 +86,8 @@ public sealed class ArpaCollector
                 continue;
             }
 
+            var resyncGeneration = await _localStore.GetArpaResyncGenerationAsync(connection.Id, cancellationToken);
+
             await using (dataSource)
             {
                 foreach (var entity in connection.Entities)
@@ -93,7 +95,7 @@ public sealed class ArpaCollector
                     totalEntities++;
                     try
                     {
-                        var entitySummary = await CollectEntityAsync(dataSource, connection, entity, cancellationToken);
+                        var entitySummary = await CollectEntityAsync(dataSource, connection, entity, resyncGeneration, cancellationToken);
                         totalCollected += entitySummary.Collected;
                         totalInserted += entitySummary.Inserted;
                         _runLog.Add(
@@ -136,6 +138,7 @@ public sealed class ArpaCollector
         NpgsqlDataSource dataSource,
         EffectiveArpaCollectorConnection connection,
         ArpaEntityCollectorOptions entity,
+        int resyncGeneration,
         CancellationToken cancellationToken)
     {
         var syncOptions = _effectiveConfigProvider.GetCurrent();
@@ -173,13 +176,27 @@ public sealed class ArpaCollector
 
             var normalizedPayload = _normalizers.Normalize(entity.EntityType, row.EntityKey, payload);
 
-            var eventId = DeterministicGuid.Create(
-                "sync-agent:v1",
-                "arpa",
-                syncOptions.InstanceId,
-                entity.EntityType,
-                row.EntityKey,
-                row.OccurredAtUtc.ToString("O"));
+            // Geracao > 0 (apos "Sincronizar tudo") entra no seed do event_id,
+            // igual ao resync sob demanda (ArpaResyncProcessor): sem isso, um
+            // full-resync re-leria tudo mas gerar o mesmo event_id do envio
+            // anterior, e o outbox descartaria por ON CONFLICT DO NOTHING sem
+            // reenviar nada ao ERP.
+            var eventId = resyncGeneration > 0
+                ? DeterministicGuid.Create(
+                    "sync-agent:v1",
+                    "arpa",
+                    syncOptions.InstanceId,
+                    entity.EntityType,
+                    row.EntityKey,
+                    row.OccurredAtUtc.ToString("O"),
+                    $"resync-gen-{resyncGeneration}")
+                : DeterministicGuid.Create(
+                    "sync-agent:v1",
+                    "arpa",
+                    syncOptions.InstanceId,
+                    entity.EntityType,
+                    row.EntityKey,
+                    row.OccurredAtUtc.ToString("O"));
 
             var draft = new OutboxEventDraft(
                 eventId,

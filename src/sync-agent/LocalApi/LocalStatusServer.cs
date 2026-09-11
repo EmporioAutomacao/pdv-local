@@ -1879,11 +1879,12 @@ public sealed class LocalStatusServer : BackgroundService
                 }
 
                 var cleared = await _localStore.ResetArpaWatermarksAsync(id, cancellationToken);
+                var generation = await _localStore.BumpArpaResyncGenerationAsync(id, cancellationToken);
                 _manualSyncSignal.TrySignal();
                 await WriteJsonAsync(
                     context.Response,
                     HttpStatusCode.OK,
-                    new { ok = true, message = $"{cleared} marcador(es) zerado(s). A proxima sincronizacao re-le e re-envia tudo desta conexao ao ERP." },
+                    new { ok = true, message = $"{cleared} marcador(es) zerado(s) (geracao {generation}). A proxima sincronizacao re-le e re-envia tudo desta conexao ao ERP." },
                     cancellationToken);
                 return;
             }

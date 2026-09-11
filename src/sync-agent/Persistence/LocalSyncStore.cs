@@ -569,11 +569,70 @@ public sealed class LocalSyncStore
         const string sql = """
             DELETE FROM sync_agent.agent_state
             WHERE state_key LIKE 'collector.arpa.' || @conn || '.%'
+            AND state_key NOT LIKE 'collector.arpa.' || @conn || '.resync_generation'
             """;
 
         await using var command = _dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("conn", connectionId);
         return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Le a geracao atual de full-resync de uma conexao Arpa
+    /// (<c>collector.arpa.&lt;connectionId&gt;.resync_generation</c>). Comeca
+    /// em 0 (nenhum full-resync ainda pedido). O <see cref="Collectors.ArpaCollector"/>
+    /// inclui esse valor no seed do <c>event_id</c> quando &gt; 0, para gerar
+    /// IDs novos apos um full-resync e o ERP reaplicar em vez de deduplicar
+    /// (mesma ideia do resync sob demanda em <see cref="Collectors.ArpaResyncProcessor"/>).
+    /// </summary>
+    public async Task<int> GetArpaResyncGenerationAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT state_value ->> 'value'
+            FROM sync_agent.agent_state
+            WHERE state_key = 'collector.arpa.' || @conn || '.resync_generation'
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("conn", connectionId);
+
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        if (value is not string text
+            || !int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return 0;
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
+    /// Incrementa a geracao de full-resync de uma conexao Arpa. Chamado junto
+    /// com <see cref="ResetArpaWatermarksAsync"/> pelo botao "Sincronizar
+    /// tudo" (Configuracoes &gt; Arpa) - sem isso, o coletor re-le tudo mas o
+    /// event_id deterministico e igual ao ja enviado e o outbox deduplica
+    /// (ON CONFLICT DO NOTHING), sem reenviar nada ao ERP.
+    /// </summary>
+    public async Task<int> BumpArpaResyncGenerationAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO sync_agent.agent_state (state_key, state_value)
+            VALUES ('collector.arpa.' || @conn || '.resync_generation', jsonb_build_object('value', 1))
+            ON CONFLICT (state_key) DO UPDATE
+            SET
+                state_value = jsonb_build_object(
+                    'value',
+                    COALESCE((sync_agent.agent_state.state_value ->> 'value')::int, 0) + 1
+                ),
+                updated_at_utc = now()
+            RETURNING (state_value ->> 'value')::int
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("conn", connectionId);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is int generation ? generation : 1;
     }
 
     public async Task<DateTimeOffset> GetDateTimeOffsetStateAsync(
