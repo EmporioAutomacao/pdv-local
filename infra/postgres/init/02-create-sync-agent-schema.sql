@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS sync_agent.outbox_events (
     CONSTRAINT outbox_events_source_system_check
         CHECK (source_system IN ('arpa', 'pdv_local')),
     CONSTRAINT outbox_events_entity_type_check
-        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro')),
+        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro', 'cobranca', 'plano_historico')),
     CONSTRAINT outbox_events_event_type_check
         CHECK (event_type IN ('upsert', 'delete_logico', 'status_update')),
     CONSTRAINT outbox_events_schema_version_check
@@ -41,13 +41,19 @@ BEGIN
         CHECK (source_system IN ('arpa', 'pdv_local'));
 END $$;
 
+-- ADD + "ignora se ja existe" nunca atualiza uma constraint ja criada com a
+-- lista antiga - por isso bases criadas antes do contrato 2.10.0/2.11.0
+-- (entity_type=cobranca/plano_historico) ficavam presas na lista velha para
+-- sempre. DROP + ADD (igual ao outbox_events_source_system_check acima)
+-- reaplica a lista atual a cada execucao deste script.
 DO $$
 BEGIN
     ALTER TABLE sync_agent.outbox_events
+        DROP CONSTRAINT IF EXISTS outbox_events_entity_type_check;
+
+    ALTER TABLE sync_agent.outbox_events
         ADD CONSTRAINT outbox_events_entity_type_check
-        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro'));
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
+        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro', 'cobranca', 'plano_historico'));
 END $$;
 
 DO $$

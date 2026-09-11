@@ -1386,6 +1386,14 @@ public sealed class LocalSyncStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    // Cogitou-se um self-heal em runtime (igual EnsureSaleItemUnitColumnsAsync)
+    // para outbox_events_entity_type_check, mas nao da: sync_agent.outbox_events
+    // e criada pelo instalador com o usuario admin do Postgres ("postgres") e o
+    // agente roda com um usuario so-DML (INSERT/UPDATE/SELECT/DELETE, sem ALTER)
+    // de proposito, por seguranca. Uma maquina existente presa na constraint
+    // antiga (pre 2.10.0/2.11.0) so e corrigida re-rodando
+    // infra/windows/bootstrap-sync-agent-db.ps1 com a credencial admin do
+    // Postgres local - o script e idempotente (seguro re-rodar).
     public async Task<OutboxEnqueueResult> EnqueueOutboxEventAsync(
         OutboxEventDraft draft,
         CancellationToken cancellationToken)
