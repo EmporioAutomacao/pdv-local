@@ -336,6 +336,20 @@ DECLARE
     p_datapg2 text; p_status2 text; p_doc2 text; p_emissao2 text; p_ordem2 text;
     pairs text; sql text; itens_expr text; cli_join text; cli_nome_expr text; cli_doc_expr text;
     occ_expr text; receber_ok boolean := false; pagar_ok boolean := false;
+
+    -- cliente via cabecalho da venda, quando a tabela de parcelas nao guarda
+    -- o cliente direto (ex.: "parcelas" do Anapolis so tem ordem/parcela/valor/
+    -- vencimento - o cliente mora em cabecalho_ordem_servico.cliente).
+    cli_ref_expr text; cos_t text; cos_cli text; cos_join text;
+    -- quitadas: valor pago / data de pagamento / status derivado quando a
+    -- tabela de titulos nao tem essas colunas (fica em "*_quitadas").
+    q_t text; q_parcela text; q_valor text; q_data text;
+    q_join text; q_pago_expr text; q_datapg_expr text; q_status_synth text;
+    -- vinculo apagar -> compra: quando nao ha coluna de ordem/pedido direta em
+    -- "apagar", o Anapolis liga via apagar_nota_compra.nota -> cabecalho_nota_compra
+    -- (mesma cadeia de financeiro/a_pagar.py::_consultar_titulos_pagar_arpa).
+    anc_t text; anc_apagar text; anc_nota text; cnc_t text; cnc_cod text; cnc_nota text;
+    compra_expr text;
 BEGIN
     BEGIN
         EXECUTE $v$
@@ -521,16 +535,50 @@ BEGIN
                 r_forma  := sync_export._pick(r_t, ARRAY['forma_pagamento','especie','tipo_pagamento','meio_pagamento']);
                 r_ordem  := sync_export._pick(r_t, ARRAY['ordem','pedido','id_ordem','venda','id_venda','pedido_id','venda_id']);
 
+                -- cliente: direto na tabela, senao via cabecalho da venda (ordem) -
+                -- caso do Anapolis, onde "parcelas" nao guarda cliente.
+                cli_ref_expr := NULL; cos_join := '';
+                IF r_cust IS NOT NULL THEN
+                    cli_ref_expr := format('r.%I', r_cust);
+                ELSIF r_ordem IS NOT NULL THEN
+                    cos_t := sync_export._first_table(ARRAY['cabecalho_ordem_servico']);
+                    IF cos_t IS NOT NULL THEN
+                        cos_cli := sync_export._pick(cos_t, ARRAY['cliente','cd_cliente','cod_cliente']);
+                        IF cos_cli IS NOT NULL THEN
+                            cos_join := format(' LEFT JOIN public.%I cos ON CAST(cos.ordem AS TEXT) = CAST(r.%I AS TEXT)', cos_t, r_ordem);
+                            cli_ref_expr := format('cos.%I', cos_cli);
+                        END IF;
+                    END IF;
+                END IF;
+
                 cl_t := sync_export._first_table(ARRAY['clientes','cliente']);
                 cli_join := ''; cli_nome_expr := 'NULL'; cli_doc_expr := 'NULL';
-                IF cl_t IS NOT NULL AND r_cust IS NOT NULL THEN
+                IF cl_t IS NOT NULL AND cli_ref_expr IS NOT NULL THEN
                     cl_code := sync_export._pick(cl_t, ARRAY['codigo','id','cliente']);
                     cl_name := sync_export._pick(cl_t, ARRAY['nome','razao','razao_social','fantasia']);
                     cl_doc  := sync_export._pick(cl_t, ARRAY['cnpj_cpf','cpf_cnpj','cnpj','cpf','documento']);
                     IF cl_code IS NOT NULL THEN
-                        cli_join := format(' LEFT JOIN public.%I cli ON CAST(cli.%I AS TEXT) = CAST(r.%I AS TEXT)', cl_t, cl_code, r_cust);
+                        cli_join := format(' LEFT JOIN public.%I cli ON CAST(cli.%I AS TEXT) = CAST(%s AS TEXT)', cl_t, cl_code, cli_ref_expr);
                         IF cl_name IS NOT NULL THEN cli_nome_expr := format('cli.%I', cl_name); END IF;
                         IF cl_doc  IS NOT NULL THEN cli_doc_expr  := format('cli.%I', cl_doc); END IF;
+                    END IF;
+                END IF;
+
+                -- quitadas: valor pago / data de pagamento / status derivado quando
+                -- a tabela de titulos nao tem essas colunas direto (caso do
+                -- Anapolis: "parcelas" nao tem status/valor_pago/data_pagamento -
+                -- isso mora em "parcelas_quitadas", ligada por parcelas.codigo).
+                q_t := sync_export._first_table(ARRAY['parcelas_quitadas','contas_receber_quitadas','conta_receber_quitada','titulos_receber_quitados']);
+                q_join := ''; q_pago_expr := 'NULL'; q_datapg_expr := 'NULL'; q_status_synth := NULL;
+                IF q_t IS NOT NULL THEN
+                    q_parcela := sync_export._pick(q_t, ARRAY['parcela','codigo_parcela','id_parcela','codigo_id']);
+                    IF q_parcela IS NOT NULL THEN
+                        q_join := format(' LEFT JOIN public.%I pq ON CAST(pq.%I AS TEXT) = CAST(r.%I AS TEXT)', q_t, q_parcela, r_code);
+                        q_valor := sync_export._pick(q_t, ARRAY['valor_pago','vlr_pago','valor','valor_pagamento']);
+                        q_data  := sync_export._pick(q_t, ARRAY['data_pagamento','data_pgto','quitacao','data_quitacao','dt_pagamento','dt_quitacao']);
+                        IF q_valor IS NOT NULL THEN q_pago_expr := format('pq.%I', q_valor); END IF;
+                        IF q_data  IS NOT NULL THEN q_datapg_expr := format('pq.%I', q_data); END IF;
+                        q_status_synth := format('CASE WHEN pq.%I IS NULL THEN ''ABERTO'' ELSE ''PAGO'' END', q_parcela);
                     END IF;
                 END IF;
 
@@ -539,14 +587,21 @@ BEGIN
                 pairs := pairs || format(', ''cliente_documento'', %s, ''cliente_nome'', %s', cli_doc_expr, cli_nome_expr);
                 IF r_forma  IS NOT NULL THEN pairs := pairs || format(', ''especie_pagamento'', r.%I::text', r_forma); END IF;
                 pairs := pairs || format(', ''valor_base'', r.%I', r_valor);
-                IF r_pago   IS NOT NULL THEN pairs := pairs || format(', ''valor_recebido'', r.%I', r_pago); END IF;
+                pairs := pairs || format(', ''valor_recebido'', COALESCE(%s, %s, 0)',
+                    CASE WHEN r_pago IS NOT NULL THEN format('r.%I', r_pago) ELSE 'NULL' END, q_pago_expr);
                 pairs := pairs || format(', ''vencimento'', r.%I', r_venc);
-                IF r_datapg IS NOT NULL THEN pairs := pairs || format(', ''data_recebimento'', r.%I', r_datapg); END IF;
-                IF r_status IS NOT NULL THEN pairs := pairs || format(', ''status'', r.%I::text', r_status); END IF;
+                pairs := pairs || format(', ''data_recebimento'', COALESCE(%s, %s)',
+                    CASE WHEN r_datapg IS NOT NULL THEN format('r.%I', r_datapg) ELSE 'NULL' END, q_datapg_expr);
+                IF r_status IS NOT NULL THEN
+                    pairs := pairs || format(', ''status'', r.%I::text', r_status);
+                ELSIF q_status_synth IS NOT NULL THEN
+                    pairs := pairs || format(', ''status'', %s', q_status_synth);
+                END IF;
                 IF r_doc    IS NOT NULL THEN pairs := pairs || format(', ''documento'', r.%I::text', r_doc); END IF;
 
-                occ_expr := format('COALESCE(%s, %s',
+                occ_expr := format('COALESCE(%s, %s, %s',
                     CASE WHEN r_datapg IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_datapg) ELSE 'NULL' END,
+                    CASE WHEN q_datapg_expr <> 'NULL' THEN format('CAST(%s AS timestamptz)', q_datapg_expr) ELSE 'NULL' END,
                     CASE WHEN r_venc   IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_venc)   ELSE 'NULL' END);
                 occ_expr := occ_expr || ', ' || fixed || ')';
 
@@ -555,7 +610,7 @@ BEGIN
                     || occ_expr || ' AS occurred_at_utc, '
                     || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
                     || format('(''arpa-financeiro-'' || r.%I)::text', r_code) || ' AS trace_id '
-                    || format('FROM public.%I r', r_t) || cli_join
+                    || format('FROM public.%I r', r_t) || cos_join || cli_join || q_join
                     || format(' WHERE r.%I IS NOT NULL', r_code);
                 receber_ok := true;
             END IF;
@@ -593,20 +648,72 @@ BEGIN
                     END IF;
                 END IF;
 
+                -- vinculo com a compra: coluna direta (ordem/pedido/...), senao a
+                -- cadeia apagar -> apagar_nota_compra -> cabecalho_nota_compra
+                -- (caso do Anapolis: "apagar" nao tem coluna de ordem/pedido).
+                compra_expr := NULL;
+                IF p_ordem2 IS NOT NULL THEN
+                    compra_expr := format('p.%I::text', p_ordem2);
+                ELSE
+                    anc_t := sync_export._first_table(ARRAY['apagar_nota_compra']);
+                    IF anc_t IS NOT NULL THEN
+                        anc_apagar := sync_export._pick(anc_t, ARRAY['apagar','cd_apagar','codigo_apagar']);
+                        anc_nota   := sync_export._pick(anc_t, ARRAY['nota','cabecalho_nota_compra','nota_compra']);
+                        IF anc_apagar IS NOT NULL AND anc_nota IS NOT NULL THEN
+                            cnc_t := sync_export._first_table(ARRAY['cabecalho_nota_compra']);
+                            IF cnc_t IS NOT NULL THEN
+                                cnc_cod  := sync_export._pick(cnc_t, ARRAY['codigo','id']);
+                                cnc_nota := sync_export._pick(cnc_t, ARRAY['nota','numero']);
+                                IF cnc_cod IS NOT NULL AND cnc_nota IS NOT NULL THEN
+                                    compra_expr := format(
+                                        '(SELECT NULLIF(cnc.%I::text, '''') FROM public.%I anc LEFT JOIN public.%I cnc ON cnc.%I = anc.%I WHERE anc.%I = p.%I ORDER BY anc.%I DESC NULLS LAST LIMIT 1)',
+                                        cnc_nota, anc_t, cnc_t, cnc_cod, anc_nota, anc_apagar, p_code2, anc_nota);
+                                END IF;
+                            END IF;
+                        END IF;
+                    END IF;
+                    IF compra_expr IS NULL AND p_doc2 IS NOT NULL THEN
+                        compra_expr := format('NULLIF(split_part(p.%I::text, ''/'', 1), '''')', p_doc2);
+                    END IF;
+                END IF;
+
+                -- quitadas: valor pago / data de pagamento / status derivado quando
+                -- "apagar" nao tem essas colunas direto (fica em "apagar_quitadas").
+                q_t := sync_export._first_table(ARRAY['apagar_quitadas','parcelas_pagar_quitadas','contas_pagar_quitadas','titulos_pagar_quitados','pagar_quitadas']);
+                q_join := ''; q_pago_expr := 'NULL'; q_datapg_expr := 'NULL'; q_status_synth := NULL;
+                IF q_t IS NOT NULL THEN
+                    q_parcela := sync_export._pick(q_t, ARRAY['parcela','codigo_parcela','id_parcela','codigo_id']);
+                    IF q_parcela IS NOT NULL THEN
+                        q_join := format(' LEFT JOIN public.%I pq ON CAST(pq.%I AS TEXT) = CAST(p.%I AS TEXT)', q_t, q_parcela, p_code2);
+                        q_valor := sync_export._pick(q_t, ARRAY['valor_pago','vlr_pago','valor','valor_pagamento']);
+                        q_data  := sync_export._pick(q_t, ARRAY['data_pagamento','data_pgto','quitacao','data_quitacao','dt_pagamento','dt_quitacao']);
+                        IF q_valor IS NOT NULL THEN q_pago_expr := format('pq.%I', q_valor); END IF;
+                        IF q_data  IS NOT NULL THEN q_datapg_expr := format('pq.%I', q_data); END IF;
+                        q_status_synth := format('CASE WHEN pq.%I IS NULL THEN ''ABERTO'' ELSE ''PAGO'' END', q_parcela);
+                    END IF;
+                END IF;
+
                 pairs := format('''titulo_externo_id'', (''pag-'' || p.%I)::text, ''natureza'', ''pagar''', p_code2);
-                IF p_ordem2 IS NOT NULL THEN pairs := pairs || format(', ''compra_externa_id'', p.%I::text', p_ordem2); END IF;
+                IF compra_expr IS NOT NULL THEN pairs := pairs || format(', ''compra_externa_id'', %s', compra_expr); END IF;
                 IF p_doc2   IS NOT NULL THEN pairs := pairs || format(', ''documento'', p.%I::text', p_doc2); END IF;
                 IF p_forn   IS NOT NULL THEN pairs := pairs || format(', ''fornecedor_codigo'', p.%I::text', p_forn); END IF;
                 pairs := pairs || format(', ''fornecedor_nome'', %s', cli_nome_expr);
                 pairs := pairs || format(', ''valor_base'', p.%I', p_valor2);
-                IF p_pago2    IS NOT NULL THEN pairs := pairs || format(', ''valor_pago'', p.%I', p_pago2); END IF;
+                pairs := pairs || format(', ''valor_pago'', COALESCE(%s, %s, 0)',
+                    CASE WHEN p_pago2 IS NOT NULL THEN format('p.%I', p_pago2) ELSE 'NULL' END, q_pago_expr);
                 pairs := pairs || format(', ''vencimento'', p.%I', p_venc2);
-                IF p_datapg2  IS NOT NULL THEN pairs := pairs || format(', ''data_pagamento'', p.%I', p_datapg2); END IF;
+                pairs := pairs || format(', ''data_pagamento'', COALESCE(%s, %s)',
+                    CASE WHEN p_datapg2 IS NOT NULL THEN format('p.%I', p_datapg2) ELSE 'NULL' END, q_datapg_expr);
                 IF p_emissao2 IS NOT NULL THEN pairs := pairs || format(', ''emissao'', p.%I', p_emissao2); END IF;
-                IF p_status2  IS NOT NULL THEN pairs := pairs || format(', ''status'', p.%I::text', p_status2); END IF;
+                IF p_status2  IS NOT NULL THEN
+                    pairs := pairs || format(', ''status'', p.%I::text', p_status2);
+                ELSIF q_status_synth IS NOT NULL THEN
+                    pairs := pairs || format(', ''status'', %s', q_status_synth);
+                END IF;
 
-                occ_expr := format('COALESCE(%s, %s',
+                occ_expr := format('COALESCE(%s, %s, %s',
                     CASE WHEN p_datapg2 IS NOT NULL THEN format('CAST(p.%I AS timestamptz)', p_datapg2) ELSE 'NULL' END,
+                    CASE WHEN q_datapg_expr <> 'NULL' THEN format('CAST(%s AS timestamptz)', q_datapg_expr) ELSE 'NULL' END,
                     CASE WHEN p_venc2   IS NOT NULL THEN format('CAST(p.%I AS timestamptz)', p_venc2)   ELSE 'NULL' END);
                 occ_expr := occ_expr || ', ' || fixed || ')';
 
@@ -615,7 +722,7 @@ BEGIN
                     || occ_expr || ' AS occurred_at_utc, '
                     || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
                     || format('(''arpa-financeiro-pag-'' || p.%I)::text', p_code2) || ' AS trace_id '
-                    || format('FROM public.%I p', p_t2) || cli_join
+                    || format('FROM public.%I p', p_t2) || cli_join || q_join
                     || format(' WHERE p.%I IS NOT NULL', p_code2);
                 pagar_ok := true;
             END IF;
