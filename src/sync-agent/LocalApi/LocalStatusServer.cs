@@ -1514,6 +1514,13 @@ public sealed class LocalStatusServer : BackgroundService
                   <td style="white-space:nowrap">
                     <button type="button" class="mini" onclick="editConn('{{Html(c.Id)}}')">Editar</button>
                     <button type="button" class="mini" onclick="startSync()">Sincronizar</button>
+                    <select id="resync_scope_{{Html(c.Id)}}" class="mini" style="width:auto; display:inline-block" onchange="onResyncScopeChange('{{Html(c.Id)}}')">
+                      <option value="all">Tudo</option>
+                      <option value="3m">Ultimos 3 meses</option>
+                      <option value="1d">Ultimo dia</option>
+                      <option value="custom">Data especifica...</option>
+                    </select>
+                    <input type="date" id="resync_date_{{Html(c.Id)}}" class="mini" style="width:auto; display:none">
                     <button type="button" class="mini" onclick="fullResync('{{Html(c.Id)}}')">Sincronizar tudo</button>
                     <button type="button" class="mini danger" onclick="if(confirm('Remover a conexao {{Html(c.Nome)}}?'))postAct('delete','{{Html(c.Id)}}')">Remover</button>
                   </td>
@@ -1953,12 +1960,27 @@ public sealed class LocalStatusServer : BackgroundService
                   }).catch(function(e){ document.getElementById('synclog').textContent = 'Falha ao solicitar: ' + e; });
                 }
 
+                function onResyncScopeChange(id){
+                  var scope = document.getElementById('resync_scope_' + id).value;
+                  document.getElementById('resync_date_' + id).style.display = (scope === 'custom') ? 'inline-block' : 'none';
+                }
+
                 function fullResync(id){
-                  if(!confirm('Re-enviar TODOS os dados desta conexao ao ERP? Zera os marcadores e pode gerar milhares de eventos.')) return;
+                  var scope = document.getElementById('resync_scope_' + id).value;
+                  var scopeLabel = {
+                    all: 'TODOS os dados (desde sempre)',
+                    '3m': 'os dados dos ultimos 3 meses',
+                    '1d': 'os dados do ultimo dia',
+                    custom: 'os dados desde a data escolhida'
+                  }[scope] || 'os dados selecionados';
+                  if(scope === 'custom' && !document.getElementById('resync_date_' + id).value){
+                    alert('Escolha uma data.'); return;
+                  }
+                  if(!confirm('Re-enviar ' + scopeLabel + ' desta conexao ao ERP? Pode gerar muitos eventos.')) return;
                   var panel = document.getElementById('synclogpanel');
                   panel.hidden = false;
                   document.getElementById('synclogclose').hidden = true;
-                  document.getElementById('synclog').textContent = 'Zerando marcadores...';
+                  document.getElementById('synclog').textContent = 'Ajustando marcadores...';
                   document.getElementById('syncsteps').innerHTML = '';
                   document.getElementById('syncdrain').hidden = true;
                   stopDrainPoll();
@@ -1966,7 +1988,8 @@ public sealed class LocalStatusServer : BackgroundService
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
                     SYNCLOG_BASELINE = j.run_id;
-                    var b = new URLSearchParams(); b.set('id', id);
+                    var b = new URLSearchParams(); b.set('id', id); b.set('since_preset', scope);
+                    if(scope === 'custom'){ b.set('since_date', document.getElementById('resync_date_' + id).value); }
                     return fetch('/config/arpa/full-resync', { method:'POST', body: b });
                   }).then(function(r){ return r.json(); }).then(function(j){
                     document.getElementById('synclog').textContent = (j.message || 'OK') + '\nAguardando o agente iniciar...';
@@ -2237,13 +2260,42 @@ public sealed class LocalStatusServer : BackgroundService
                     return;
                 }
 
-                var cleared = await _localStore.ResetArpaWatermarksAsync(id, cancellationToken);
+                // since_preset: "all" (default, comportamento antigo - zera e rele o
+                // historico inteiro), "3m"/"1d" (janela relativa a agora) ou "custom"
+                // (since_date, yyyy-MM-dd, do input type="date" do form).
+                var sincePreset = V("since_preset");
+                if (sincePreset == "custom" && !DateOnly.TryParse(V("since_date"), out _))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Data invalida." }, cancellationToken);
+                    return;
+                }
+
+                DateTimeOffset? since = sincePreset switch
+                {
+                    "3m" => DateTimeOffset.UtcNow.AddMonths(-3),
+                    "1d" => DateTimeOffset.UtcNow.AddDays(-1),
+                    "custom" => new DateTimeOffset(DateOnly.Parse(V("since_date")).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+                    _ => null,
+                };
+
+                string escopoMsg;
+                if (since is null)
+                {
+                    var cleared = await _localStore.ResetArpaWatermarksAsync(id, cancellationToken);
+                    escopoMsg = $"{cleared} marcador(es) zerado(s)";
+                }
+                else
+                {
+                    await _localStore.SetArpaWatermarksSinceAsync(id, since.Value, cancellationToken);
+                    escopoMsg = $"marcadores ajustados para {since.Value.ToLocalTime():dd/MM/yyyy HH:mm}";
+                }
+
                 var generation = await _localStore.BumpArpaResyncGenerationAsync(id, cancellationToken);
                 _manualSyncSignal.TrySignal();
                 await WriteJsonAsync(
                     context.Response,
                     HttpStatusCode.OK,
-                    new { ok = true, message = $"{cleared} marcador(es) zerado(s) (geracao {generation}). A proxima sincronizacao re-le e re-envia tudo desta conexao ao ERP." },
+                    new { ok = true, message = $"{escopoMsg} (geracao {generation}). A proxima sincronizacao re-le e re-envia esse periodo desta conexao ao ERP." },
                     cancellationToken);
                 return;
             }

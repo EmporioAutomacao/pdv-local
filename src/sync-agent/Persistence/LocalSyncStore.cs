@@ -578,6 +578,28 @@ public sealed class LocalSyncStore
     }
 
     /// <summary>
+    /// Alternativa a <see cref="ResetArpaWatermarksAsync"/> para um resync
+    /// parcial: em vez de apagar o watermark (que volta pro epoch e rele o
+    /// historico inteiro), fixa-o numa data especifica - ex.: "so os ultimos
+    /// 3 meses" em vez de "desde sempre". Usa
+    /// <see cref="SyncContractValues.EntityTypes"/> (a mesma lista que
+    /// <c>ArpaStandardEntities.Build</c> usa para nomear as entidades) para
+    /// cobrir toda entidade que o coletor suporta, mesmo as desligadas nessa
+    /// conexao (marcador parado nao atrapalha - so e lido se o toggle ligar).
+    /// </summary>
+    public async Task SetArpaWatermarksSinceAsync(
+        string connectionId,
+        DateTimeOffset since,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entityType in SyncContractValues.EntityTypes)
+        {
+            var stateKey = $"collector.arpa.{connectionId}.{entityType}.watermark";
+            await SetDateTimeOffsetStateAsync(stateKey, since, cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Le a geracao atual de full-resync de uma conexao Arpa
     /// (<c>collector.arpa.&lt;connectionId&gt;.resync_generation</c>). Comeca
     /// em 0 (nenhum full-resync ainda pedido). O <see cref="Collectors.ArpaCollector"/>
