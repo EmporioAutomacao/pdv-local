@@ -1643,10 +1643,12 @@ public sealed class LocalStatusServer : BackgroundService
 
                 <section class="panel">
                   <h2>Conexoes</h2>
-                  <table>
-                    <tr><th>Nome</th><th>Banco</th><th>Loja</th><th>Sincroniza</th><th>Usuario</th><th></th></tr>
-                    {{rows}}
-                  </table>
+                  <div style="overflow-x: auto">
+                    <table>
+                      <tr><th>Nome</th><th>Banco</th><th>Loja</th><th>Sincroniza</th><th>Usuario</th><th></th></tr>
+                      {{rows}}
+                    </table>
+                  </div>
                 </section>
 
                 <section class="panel" id="synclogpanel" hidden>
