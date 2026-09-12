@@ -1595,8 +1595,9 @@ public sealed class LocalStatusServer : BackgroundService
                 button { padding: 9px 13px; border: 0; border-radius: 6px; background: #2563eb; color: white; cursor: pointer; font-size: 14px; }
                 button:hover { background: #1d4ed8; }
                 button.secondary { background: #64748b; }
-                button.mini { padding: 5px 8px; font-size: 12px; background: #eef2ff; color: #3730a3; }
+                button.mini { padding: 5px 8px; font-size: 12px; background: #eef2ff; color: #3730a3; vertical-align: middle; }
                 button.mini.danger { background: #fee2e2; color: #991b1b; }
+                select.mini, input.mini { padding: 4px 6px; font-size: 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #1f2937; vertical-align: middle; }
                 button.danger { background: #dc2626; }
                 .message { border-radius: 8px; padding: 12px; margin: 14px 0; font-weight: 600; }
                 .okbox { background: #dcfce7; color: #166534; }
