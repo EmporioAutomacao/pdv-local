@@ -82,7 +82,7 @@ DECLARE
     -- produto
     p_t text; p_code text; p_name text; p_bc text; p_fab text; p_ncm text;
     p_cost text; p_sale text; p_active text;
-    p_qty text; p_min text; p_max text; p_loc text; p_updated text;
+    p_qty text; p_min text; p_max text; p_loc text; p_unid text; p_updated text;
     p_log text; p_log_key text; p_log_time text;
     p_qlog text; p_qlog_key text; p_qlog_time text;
 
@@ -126,6 +126,7 @@ BEGIN
         p_min    := sync_export._pick(p_t, ARRAY['estoqueminimo', 'estoque_minimo', 'minimo', 'qtd_minima']);
         p_max    := sync_export._pick(p_t, ARRAY['estoquemaximo', 'estoque_maximo', 'maximo', 'qtd_maxima']);
         p_loc    := sync_export._pick(p_t, ARRAY['localizacao', 'local', 'endereco_estoque', 'prateleira']);
+        p_unid   := sync_export._pick(p_t, ARRAY['unidade', 'unidademedida', 'unidade_medida', 'sigla_unidade', 'un']);
         p_updated := sync_export._pick(p_t, ARRAY['updated_at_utc', 'atualizado_em', 'updated_at', 'data_alteracao', 'dt_alteracao', 'ultima_alteracao', 'data_atualizacao']);
 
         p_log := sync_export._first_table(ARRAY['alterados', 'produtos_alterados', 'produto_alterados', 'log_produtos', 'produtos_log_alteracao']);
@@ -181,6 +182,7 @@ BEGIN
             IF p_bc   IS NOT NULL THEN pairs := pairs || format(', ''codigodebarras'', p.%I', p_bc); END IF;
             IF p_cost IS NOT NULL THEN pairs := pairs || format(', ''precocusto'', p.%I', p_cost); END IF;
             IF p_sale IS NOT NULL THEN pairs := pairs || format(', ''precovenda'', p.%I', p_sale); END IF;
+            IF p_unid IS NOT NULL THEN pairs := pairs || format(', ''unidade'', p.%I', p_unid); END IF;
             pairs := pairs || ', ''ativo'', ' || active_expr;
 
             sql := 'CREATE OR REPLACE VIEW sync_export.produtos AS SELECT '
