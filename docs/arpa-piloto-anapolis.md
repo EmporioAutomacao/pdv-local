@@ -348,19 +348,38 @@ temporario descrito abaixo) confirmou e corrigiu o que a entrada de
   dinamico para vendas/financeiro/cobranca quando o schema fixo original nao
   bate - testado com Postgres descartavel reproduzindo esse schema real
   antes de publicar.
-- **Pendente**: eventos de `cobranca`/`plano_historico` ainda falhavam ao
-  enfileirar localmente com `23514` (constraint `entity_type` desatualizada
-  no Postgres local da VM, criada antes do agente suportar esses tipos) -
-  ver runbook de incidentes e a rotina "Corrigir
-  outbox_events_entity_type_check" em Configuracoes > Manutencao do banco
-  local (1.6.20+).
-- **Desvio de seguranca temporario**: para essa investigacao, foi aplicado
-  `GRANT USAGE ON SCHEMA public TO ararasuite_sync_ro; GRANT SELECT ON ALL
-  TABLES IN SCHEMA public TO ararasuite_sync_ro;` no Anapolis - mais amplo
-  que a politica de `docs/arpa-readonly-security-policy.md` (que pede
-  `SELECT` so nas views `sync_export`, nao no `public` inteiro). Ver
-  registro e recomendacao de revogar em
-  `docs/arpa-readonly-security-policy.md`.
+- **Resolvido**: o usuario rodou a rotina "Corrigir
+  outbox_events_entity_type_check" (Configuracoes > Manutencao do banco
+  local, 1.6.20+) na VM. Confirmado por leitura direta da constraint
+  (`pg_get_constraintdef`, credencial `pdv_sync` normal) e pelas contagens
+  reais em `sync_agent.outbox_events` no mesmo dia: `cobranca` 6 accepted,
+  `plano_historico` 150 accepted, `venda` 4191 accepted, `financeiro` 6675
+  accepted, `produto` 34632 accepted - as 7 entidades fluindo Arpa -> local
+  -> ERP de ponta a ponta.
+- **`entity_type=produto` ganhou o campo `unidade`** (contrato Sync 2.13.0,
+  SyncAgent 1.6.24, ERP `sync_api.domain_processor.apply_produto` +
+  `resolve_unidade_arpa`). A tabela `produtos` do Anapolis tem coluna
+  `unidade` (varchar) - confirmado por leitura direta na view
+  (`sync_export.produtos` ja retorna `"unidade": "UN"/"UND"` etc.).
+  Produtos ja sincronizados antes desse deploy so ganham o campo quando
+  mudarem de novo ou num resync (ver "Sincronizar tudo" com periodo,
+  1.6.25, em `docs/sync-agent-configuracoes-arpa.md`).
+- **Nao e bug**: uma amostra pequena (3 produtos) do payload mostrou
+  `"ativo": false` nos tres e pareceu um sinal de que a logica de
+  `ativo` invertida (`p_active` generico, ver `sync-export-views.sql`)
+  estava errada. Conferido em agregado: `produtos.ativo=0` (1406 linhas,
+  convencao legada deste Arpa = ativo) mapeia certinho para
+  `payload.ativo=true` (1406), e `ativo=1` (187) para `false` (187). A
+  logica esta correta - foi so uma amostra nao representativa (os 3
+  primeiros calharam de ser produtos realmente inativos). Fica registrado
+  para nao repetir o susto.
+- **Desvio de seguranca temporario, ainda nao revogado em 2026-09-11**:
+  para a investigacao acima, foi aplicado `GRANT USAGE ON SCHEMA public TO
+  ararasuite_sync_ro; GRANT SELECT ON ALL TABLES IN SCHEMA public TO
+  ararasuite_sync_ro;` no Anapolis - mais amplo que a politica de
+  `docs/arpa-readonly-security-policy.md` (que pede `SELECT` so nas views
+  `sync_export`, nao no `public` inteiro). Ver registro e recomendacao de
+  revogar em `docs/arpa-readonly-security-policy.md`.
 
 ## NO-GO
 

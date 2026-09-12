@@ -549,7 +549,11 @@ Para contratos:
 - Instalacoes criadas antes do contrato Sync ganhar `cobranca`/
   `plano_historico` (2.10.0/2.11.0) tem a constraint `outbox_events_
   entity_type_check` do Postgres local desatualizada - ver "Manutencao do
-  banco local" acima e o runbook de incidentes.
+  banco local" acima e o runbook de incidentes. Na VM `192.168.0.184` isso
+  ja foi corrigido em 2026-09-11 (confirmado por leitura da constraint e
+  pelas contagens em `sync_agent.outbox_events`: `cobranca`/
+  `plano_historico` accepted > 0) - continua valendo para outras
+  instalacoes com base antiga.
 - O usuario `ararasuite_sync_ro` do Anapolis teve `GRANT SELECT ON ALL
   TABLES IN SCHEMA public` aplicado em 2026-09-11 para investigacao de
   schema - mais amplo que a politica de `docs/arpa-readonly-security-

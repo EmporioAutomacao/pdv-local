@@ -240,6 +240,21 @@ Passos:
 3. Executar a rotina selecionada.
 4. Rodar uma sincronizacao manual e confirmar que a entidade nao aparece
    mais como `falhou` no log.
+5. Confirmar a constraint atualizada (leitura, credencial normal do
+   agente `pdv_sync` - nao precisa de admin para so conferir):
+
+```powershell
+psql -U pdv_sync -h localhost -d pdv_sync -c "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'outbox_events_entity_type_check';"
+```
+
+   Deve listar todos os `entity_type` do contrato atual (`cliente`,
+   `produto`, `estoque`, `venda`, `financeiro`, `cobranca`,
+   `plano_historico`). Contagem por entidade/status para fechar o
+   diagnostico:
+
+```sql
+SELECT entity_type, status, count(*) FROM sync_agent.outbox_events GROUP BY entity_type, status ORDER BY entity_type, status;
+```
 
 Nao editar a constraint via `psql`/SQL solto fora dessa tela - a rotina ja
 usa a lista de `entity_type` atual do contrato (`SyncContractValues`), e

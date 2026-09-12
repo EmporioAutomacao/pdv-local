@@ -93,10 +93,29 @@ painel espera ela comecar. O botao **Fechar** aparece ao concluir.
 Endpoint: `GET /config/arpa/sync-log` (JSON: `run_id`, `running`, `lines`).
 
 **Sincronizar tudo** (1.6.9+) **zera os marcadores (watermarks)** desta conexao
-e dispara um ciclo — a coleta re-le e re-envia **todo** o cadastro ao ERP
-(produtos, clientes, estoque). Use para backfill ou para corrigir dados errados
-no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam a 500/lote).
-Endpoint: `POST /config/arpa/full-resync` (`id`).
+e dispara um ciclo — a coleta re-le e re-envia o cadastro ao ERP (produtos,
+clientes, estoque, vendas, financeiro, cobranca, plano_historico - as
+entidades ligadas nessa conexao). Use para backfill ou para corrigir dados
+errados no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam a
+500/lote).
+
+A partir de 1.6.25, um seletor ao lado do botao escolhe o **periodo** do
+reenvio em vez de sempre "desde sempre":
+
+| Opcao | Efeito |
+|---|---|
+| **Tudo** | Comportamento original - apaga o watermark, re-le o historico inteiro. |
+| **Ultimos 3 meses** / **Ultimo dia** | Fixa o watermark em `agora - 3 meses` / `agora - 1 dia` (janela relativa, calculada no servidor). |
+| **Data especifica** | Abre um campo de data (`input type="date"`); fixa o watermark na meia-noite UTC dessa data. |
+
+Util para conexoes com muito historico (ex.: vendas/financeiro de anos) onde
+reenviar tudo geraria dezenas de milhares de eventos sem necessidade. Em
+qualquer opcao, a geracao de resync da conexao e incrementada (mesmo
+mecanismo do "Tudo") para os `event_id` saírem novos e nao serem
+descartados por deduplicacao.
+
+Endpoint: `POST /config/arpa/full-resync` (`id`, `since_preset=all|3m|1d|custom`,
+`since_date` quando `since_preset=custom`).
 
 Botoes do formulario: **Salvar**, **Testar conexao** (valida credencial +
 presenca das views `sync_export`), **Limpar**.
@@ -161,7 +180,7 @@ e nao consegue usar essa auth).
 | POST | `/config/arpa/save` | Cria/edita conexao. **409** se a Loja ja estiver em outra conexao. |
 | POST | `/config/arpa/delete` | Remove conexao (`id`) |
 | POST | `/config/arpa/sync-now` | Dispara um ciclo |
-| POST | `/config/arpa/full-resync` | Zera os watermarks da conexao (`id`) + dispara ciclo — re-envia tudo |
+| POST | `/config/arpa/full-resync` | Ajusta os watermarks da conexao (`id`, `since_preset=all\|3m\|1d\|custom` + `since_date`) + dispara ciclo — re-envia o periodo escolhido (1.6.9+; periodo a partir de 1.6.25) |
 | POST | `/config/arpa/test` | Testa conexao |
 | POST | `/config/arpa/prepare-views` | Roda o script unico de views + GRANT ao Usuario (credencial DBA no corpo) |
 | POST | `/config/arpa/create-user` | Cria role read-only (credencial DBA no corpo) |
