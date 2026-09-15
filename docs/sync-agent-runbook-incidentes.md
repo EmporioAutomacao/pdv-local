@@ -260,6 +260,52 @@ Nao editar a constraint via `psql`/SQL solto fora dessa tela - a rotina ja
 usa a lista de `entity_type` atual do contrato (`SyncContractValues`), e
 fica registrada/repetivel para outras instalacoes com o mesmo problema.
 
+## Incidente: ALTER negado em pdv.sale_items (42501)
+
+Sinais:
+
+- log mostra `42501: e necessario ser o dono da tabela sale_items` (ou
+  `permission denied for table sale_items`);
+- persiste mesmo apos atualizar a versao do SyncAgent - nao e um problema
+  resolvido por reinstalar/atualizar o agente;
+- a partir de 1.6.29 esse erro fica so em log (nao derruba mais o ciclo de
+  publicacao de vendas do PDV); em versoes anteriores podia interromper
+  `GetPendingPdvSalesAsync` e travar o envio de vendas ao ERP.
+
+Causa: a tabela `pdv.sale_items` e criada pelo instalador com o usuario admin
+do Postgres (`postgres`), e o agente roda com um usuario so-DML de proposito
+(sem `ALTER TABLE`), mesmo padrao/motivo do incidente 23514 acima. O agente
+tenta um self-heal (`ADD COLUMN IF NOT EXISTS` para `unit_label`,
+`unit_external_key`, `unit_factor`) no primeiro ciclo apos o start, para
+cobrir bases atualizadas por auto-update que nunca rodaram de novo o init
+SQL - mas esse ALTER exige ser dono da tabela, e o usuario runtime nunca e.
+Atualizar a versao do agente nao resolve sozinho: o auto-update nao roda
+migracao de schema, so o instalador roda o init SQL (que ja inclui essas
+colunas desde a origem, em instalacoes novas).
+
+Passos:
+
+1. Abrir `http://127.0.0.1:47891/config/local-db` (Configuracoes >
+   Manutencao do banco local).
+2. Selecionar a rotina **"Adicionar colunas de unidade em pdv.sale_items"**
+   no dropdown, informar usuario/senha admin do Postgres local (sugestao do
+   instalador: `postgres`) e clicar **Testar conexao** antes de executar.
+3. Executar a rotina selecionada.
+4. Confirmar as colunas (leitura, credencial normal do agente `pdv_sync` -
+   nao precisa de admin para so conferir):
+
+```powershell
+psql -U pdv_sync -h localhost -d pdv_sync -c "\d pdv.sale_items"
+```
+
+   Deve listar `unit_label`, `unit_external_key` e `unit_factor`.
+5. Rodar uma venda de teste no PDV (ou reiniciar o servico) e confirmar que
+   o erro nao aparece mais no log e que a venda e publicada normalmente.
+
+Nao editar `pdv.sale_items` via `psql`/SQL solto fora dessa tela pelo mesmo
+motivo do incidente 23514 - a rotina fica registrada/repetivel para outras
+instalacoes com o mesmo problema.
+
 ## Evidencias obrigatorias
 
 Coletar antes de qualquer correcao destrutiva:

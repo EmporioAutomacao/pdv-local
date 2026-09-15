@@ -653,6 +653,12 @@ public sealed class LocalStatusServer : BackgroundService
                 <section class="panel">
                   <h2>Manutencao do banco local</h2>
                   <p>A partir de 1.6.20, <a href="/config/local-db">Configuracoes &rsaquo; Manutencao do banco local</a> roda reparos de schema no Postgres <strong>local</strong> do agente (nao no Arpa) - o runtime conecta com um usuario so-DML de proposito, sem <code>ALTER TABLE</code>, entao reparos exigem essa via administrativa em vez de <code>psql</code> direto na maquina. <strong>Testar conexao</strong> confere usuario/senha do admin Postgres local (sugestao do instalador: <code>postgres</code>) sem efeito nenhum; <strong>rotinas conhecidas</strong> (dropdown) executam reparos ja catalogados com um clique, sem copiar/colar SQL; o campo de <strong>SQL livre</strong> cobre casos ainda nao catalogados. A credencial e usada uma vez e nunca e gravada.</p>
+                  <p>Erros comuns que exigem essa tela (o runtime nunca consegue corrigir sozinho - so-DML de proposito, por seguranca):</p>
+                  <table>
+                    <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
+                    <tr><td><code>23514: viola a restricao de verificacao "outbox_events_entity_type_check"</code></td><td>Instalacao criada antes do agente suportar esse <code>entity_type</code> (tipicamente <code>cobranca</code>/<code>plano_historico</code>) - a view Arpa ate le certo, mas o banco local recusa o INSERT.</td><td>Rotina <strong>"Corrigir outbox_events_entity_type_check"</strong> (a partir de 1.6.20).</td></tr>
+                    <tr><td><code>42501: e necessario ser o dono da tabela sale_items</code></td><td>Instalacao que nunca rodou de novo o init SQL do banco local desde que as colunas de unidade (<code>unit_label</code>, <code>unit_external_key</code>, <code>unit_factor</code>) foram adicionadas em <code>pdv.sale_items</code> - persiste mesmo apos atualizar a versao do agente, porque o auto-update nao roda migracao de schema. A partir de 1.6.29 esse erro fica so em log (nao derruba a publicacao de vendas), mas as colunas continuam faltando ate essa rotina rodar.</td><td>Rotina <strong>"Adicionar colunas de unidade em pdv.sale_items"</strong> (a partir de 1.6.29).</td></tr>
+                  </table>
                 </section>
 
                 <section class="panel">
@@ -1692,8 +1698,8 @@ public sealed class LocalStatusServer : BackgroundService
                       <label><input type="checkbox" id="f_produtos" name="sync_produtos" checked> Produtos</label>
                       <label><input type="checkbox" id="f_clientes" name="sync_clientes" checked> Clientes</label>
                       <label><input type="checkbox" id="f_estoque" name="sync_estoque"> Estoque</label>
-                      <label><input type="checkbox" id="f_vendas" name="sync_vendas"> Vendas</label>
-                      <label><input type="checkbox" id="f_financeiro" name="sync_financeiro"> Financeiro</label>
+                      <label><input type="checkbox" id="f_vendas" name="sync_vendas" onchange="onVendasToggle()"> Vendas</label>
+                      <label><input type="checkbox" id="f_financeiro" name="sync_financeiro"> Financeiro <span class="muted" style="font-size:11px">(obrigatorio com Vendas - sem isso a venda chega sem parcela)</span></label>
                       <label><input type="checkbox" id="f_cobranca" name="sync_cobranca"> Cobranca</label>
                       <label><input type="checkbox" id="f_plano_hist" name="sync_plano_historico"> Plano de historicos</label>
                       <label><input type="checkbox" id="f_controla" name="controla_estoque"> Controla o estoque desta Loja</label>
@@ -2008,9 +2014,15 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('synclogpanel').hidden = true;
                 }
 
+                function onVendasToggle(){
+                  var vendas = document.getElementById('f_vendas').checked;
+                  var financeiro = document.getElementById('f_financeiro');
+                  financeiro.disabled = vendas;
+                  if(vendas){ financeiro.checked = true; }
+                }
                 function fd(){ return new URLSearchParams(new FormData(document.getElementById('connform'))); }
                 function setStatus(t, ok){ var s=document.getElementById('status'); s.textContent=t; s.style.color = ok ? '#166534' : '#92400e'; }
-                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('f_pass').placeholder=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); }
+                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('f_pass').placeholder=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); onVendasToggle(); }
                 function editConn(id){
                   var c = CONNS[id]; if(!c) return;
                   document.getElementById('f_id').value = c.id;
@@ -2032,6 +2044,7 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_plano_hist').checked = !!c.syncPlanoHistorico;
                   document.getElementById('f_controla').checked = !!c.controlaEstoque;
                   document.getElementById('f_enabled').checked = !!c.enabled;
+                  onVendasToggle();
                   document.getElementById('formtitle').textContent = 'Editar conexao: ' + (c.nome||'');
                   window.scrollTo(0, document.getElementById('formtitle').offsetTop - 20);
                 }
@@ -2159,7 +2172,12 @@ public sealed class LocalStatusServer : BackgroundService
                     SyncClientes = B("sync_clientes"),
                     SyncEstoque = B("sync_estoque"),
                     SyncVendas = B("sync_vendas"),
-                    SyncFinanceiro = B("sync_financeiro"),
+                    // Financeiro e obrigatorio junto de Vendas (ver comentario em
+                    // ArpaLocalConnection.SyncFinanceiro) - forcado aqui tambem
+                    // para o valor persistido refletir o que de fato sera
+                    // coletado, mesmo se o POST vier direto da API sem passar
+                    // pela UI (que ja desabilita o checkbox nesse caso).
+                    SyncFinanceiro = B("sync_financeiro") || B("sync_vendas"),
                     SyncCobranca = B("sync_cobranca"),
                     SyncPlanoHistorico = B("sync_plano_historico"),
                     BatchSize = I("batch_size", 5000),
@@ -2223,7 +2241,8 @@ public sealed class LocalStatusServer : BackgroundService
 
                 var result = await _arpaDdlRunner.TestConnectionAsync(
                     V("host"), I("port", 5432), V("database"), V("username"), testPassword,
-                    B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"), B("sync_financeiro"),
+                    B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"),
+                    B("sync_financeiro") || B("sync_vendas"),
                     B("sync_cobranca"), B("sync_plano_historico"),
                     cancellationToken);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);

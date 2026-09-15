@@ -55,6 +55,20 @@ public sealed class LocalDbMaintenanceRunner
                 ALTER TABLE sync_agent.outbox_events ADD CONSTRAINT outbox_events_entity_type_check
                     CHECK (entity_type IN ({allowedEntityTypes}));
                 """),
+            new MaintenanceRoutine(
+                "add_sale_items_unit_columns",
+                "Adicionar colunas de unidade em pdv.sale_items",
+                "Adiciona as colunas unit_label, unit_external_key e unit_factor na tabela "
+                    + "pdv.sale_items. Necessario em instalacoes que nunca rodaram de novo o init SQL do "
+                    + "banco local desde que essas colunas foram introduzidas (erro 42501 'e necessario "
+                    + "ser o dono da tabela sale_items' no log - o servico do agente conecta com um "
+                    + "usuario so-DML e nao consegue alterar a tabela sozinho, mesmo apos atualizar a "
+                    + "versao do agente). Seguro re-rodar.",
+                """
+                ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_label text NULL;
+                ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_external_key text NULL;
+                ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_factor numeric(14, 6) NULL;
+                """),
         };
     }
 

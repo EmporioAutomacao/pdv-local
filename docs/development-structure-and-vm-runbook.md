@@ -504,8 +504,9 @@ precisam dessa via administrativa explicita em vez de `psql` direto na VM.
 - **Testar conexao**: `SELECT current_user`, sem efeito - use antes de
   rodar qualquer coisa.
 - **Rotina conhecida**: reparos catalogados (`LocalDbMaintenanceRunner.
-  Routines`), selecionaveis num dropdown, sem copiar/colar SQL. Primeira
-  rotina: `fix_entity_type_check` (ver runbook de incidentes).
+  Routines`), selecionaveis num dropdown, sem copiar/colar SQL. Rotinas
+  atuais: `fix_entity_type_check` e `add_sale_items_unit_columns` (ver
+  runbook de incidentes).
 - **SQL livre**: para reparos ainda nao catalogados.
 
 Credencial admin (sugestao do instalador: usuario `postgres`) e informada na

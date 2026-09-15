@@ -1492,8 +1492,29 @@ public sealed class LocalSyncStore
             ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_factor numeric(14, 6) NULL
             """;
         await using var command = _dataSource.CreateCommand(sql);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        _saleItemUnitColumnsEnsured = true;
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            _saleItemUnitColumnsEnsured = true;
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+        {
+            // O runtime conecta com um usuario so-DML de proposito (sem ALTER
+            // TABLE) - mesma razao pela qual nao ha self-heal em runtime para
+            // outbox_events_entity_type_check (ver comentario acima, perto de
+            // EnqueueOutboxEventAsync). Marca como "tentado" para nao repetir
+            // o ALTER a cada ciclo; se as colunas realmente faltarem, a query
+            // abaixo falha com 42703 (coluna nao existe) em vez de travar aqui
+            // silenciosamente - erro mais claro para quem for diagnosticar.
+            // Reparo: rotina "Adicionar colunas de unidade em pdv.sale_items"
+            // em Configuracoes > Manutencao do banco local.
+            _saleItemUnitColumnsEnsured = true;
+            _logger.LogWarning(
+                ex,
+                "Sem permissao para ALTER TABLE pdv.sale_items (usuario so-DML). Se as colunas de "
+                    + "unidade ainda nao existirem nesta base, rode a rotina 'Adicionar colunas de "
+                    + "unidade em pdv.sale_items' em Configuracoes > Manutencao do banco local.");
+        }
     }
 
     public async Task<IReadOnlyList<PdvSalePendingPublishRecord>> GetPendingPdvSalesAsync(
