@@ -226,9 +226,24 @@ internal sealed class UpdateAvailableDialog : Form
             + "Peca para corrigirem em API de Sincronizacao > Pacotes de atualizacao.",
         "self_update_disabled" => $"A atualizacao automatica esta desabilitada nesta instalacao (versao atual {currentVersion}).",
         "invalid_response" => "O ERP respondeu de forma inesperada a consulta de versao.",
+        _ when code.StartsWith("client_not_configured", StringComparison.Ordinal) =>
+            "Configuracao de seguranca desta instalacao esta incompleta ("
+            + DescribeClientNotConfiguredDetail(code)
+            + "). Fale com o suporte tecnico para revisar o appsettings.json desta maquina.",
         _ when code.StartsWith("http_", StringComparison.Ordinal) => $"O ERP retornou um erro ({code}) ao consultar a versao disponivel.",
         _ => $"Nao foi possivel consultar a versao disponivel ({code}).",
     };
+
+    /// <summary>
+    /// Extrai o detalhe apos "client_not_configured: " (mensagem original da
+    /// AuthenticationException do agente, ex.: "Client certificate is required...").
+    /// Sem o prefixo esperado, devolve o codigo inteiro em vez de lancar.
+    /// </summary>
+    private static string DescribeClientNotConfiguredDetail(string code)
+    {
+        const string prefix = "client_not_configured: ";
+        return code.StartsWith(prefix, StringComparison.Ordinal) ? code[prefix.Length..] : code;
+    }
 
     private sealed record PackageItem(UpdateCheckPackage Package)
     {

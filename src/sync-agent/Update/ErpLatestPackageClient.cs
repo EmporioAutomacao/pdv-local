@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Authentication;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SyncAgent.Provisioning;
@@ -57,8 +58,20 @@ public sealed class ErpLatestPackageClient
         }
 
         var erpApiBaseUri = new Uri(syncOptions.ErpApiBaseUrl, UriKind.Absolute);
-        ErpCredentialProvider.EnsureHttpsOutsideLocalDevelopment(erpApiBaseUri);
-        _credentialProvider.ValidateProvisionedForRemoteEndpoint(erpApiBaseUri);
+        try
+        {
+            ErpCredentialProvider.EnsureHttpsOutsideLocalDevelopment(erpApiBaseUri);
+            _credentialProvider.ValidateProvisionedForRemoteEndpoint(erpApiBaseUri);
+        }
+        catch (AuthenticationException ex)
+        {
+            // Configuracao local incompleta (ex.: ErpSecurity:RequireMutualTls=true
+            // sem certificado provisionado) - erro de configuracao desta maquina, nao
+            // do ERP. Sem este catch, a excecao sobe ate o handler HTTP de
+            // /update-check e vira um 500 generico e sem contexto na bandeja (ver
+            // runbook de incidentes / tabela de erros em /help).
+            return AvailablePackagesFetchResult.Failed($"client_not_configured: {ex.Message}");
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
@@ -173,8 +186,16 @@ public sealed class ErpLatestPackageClient
         }
 
         var erpApiBaseUri = new Uri(syncOptions.ErpApiBaseUrl, UriKind.Absolute);
-        ErpCredentialProvider.EnsureHttpsOutsideLocalDevelopment(erpApiBaseUri);
-        _credentialProvider.ValidateProvisionedForRemoteEndpoint(erpApiBaseUri);
+        try
+        {
+            ErpCredentialProvider.EnsureHttpsOutsideLocalDevelopment(erpApiBaseUri);
+            _credentialProvider.ValidateProvisionedForRemoteEndpoint(erpApiBaseUri);
+        }
+        catch (AuthenticationException ex)
+        {
+            // Mesmo motivo do catch em FetchAvailableAsync acima.
+            return LatestPackageFetchResult.Failed($"client_not_configured: {ex.Message}");
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
