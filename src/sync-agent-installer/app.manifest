@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Forca elevacao (UAC) para QUALQUER forma de execucao deste .exe - duplo
+  clique manual, chamada da bandeja com --auto, ou script de deploy/GPO.
+
+  Antes disso, so o fluxo --auto (Program.cs, chamado pela bandeja) checava
+  IsElevated()/relancava com "runas"; o fluxo manual (InstallerWizardForm/
+  UpdateWizardForm, quando alguem da duplo clique no instalador) nao tinha
+  nenhuma checagem, entao rodava sem privilegio e falhava mais adiante (ex.:
+  initdb.exe sem permissao para criar a pasta de dados do PostgreSQL em
+  C:\Program Files\...) a menos que o usuario lembrasse de clicar em
+  "Executar como administrador" manualmente.
+
+  Com requireAdministrator o Windows mostra o prompt de UAC (e o icone de
+  escudo no .exe) antes mesmo do processo iniciar, para as duas formas de
+  chamada - elimina a necessidade do usuario lembrar de elevar manualmente.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+</assembly>

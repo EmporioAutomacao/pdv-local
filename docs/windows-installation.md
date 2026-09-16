@@ -352,7 +352,8 @@ continua sendo feita no dashboard local:
 http://127.0.0.1:47891/setup
 ```
 
-Executar o instalador interativo como Administrador:
+Executar o instalador interativo (duplo clique basta - pede elevacao UAC
+sozinho a partir de 1.6.31):
 
 ```powershell
 .\payload\SyncAgentInstaller\SyncAgent.Installer.exe

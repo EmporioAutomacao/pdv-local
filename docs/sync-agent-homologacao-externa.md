@@ -123,7 +123,10 @@ Opcao recomendada, com interface:
 .\payload\SyncAgentInstaller\SyncAgent.Installer.exe
 ```
 
-Executar como Administrador e informar:
+Duplo clique basta - o instalador pede elevacao (UAC) sozinho a partir de
+1.6.31 (`app.manifest` com `requestedExecutionLevel=requireAdministrator`;
+antes disso so o fluxo `--auto`/bandeja auto-elevava, o duplo clique manual
+exigia "Executar como Administrador" a mao). Informar:
 
 - caminho de instalacao;
 - escolha da etapa PostgreSQL:
