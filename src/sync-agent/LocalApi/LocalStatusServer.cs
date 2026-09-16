@@ -56,6 +56,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly IOptionsMonitor<SyncAgentOptions> _options;
     private readonly IOptionsMonitor<SyncAgentProvisioningOptions> _provisioningOptions;
     private readonly IOptionsMonitor<ArpaCollectorOptions> _arpaOptions;
+    private readonly IOptionsMonitor<ErpSecurityOptions> _erpSecurityOptions;
     private readonly EffectiveSyncAgentConfigurationProvider _effectiveConfigProvider;
     private readonly ErpActivationClient _erpActivationClient;
     private readonly ArpaConnectionsStore _arpaConnectionsStore;
@@ -82,6 +83,7 @@ public sealed class LocalStatusServer : BackgroundService
         IOptionsMonitor<SyncAgentOptions> options,
         IOptionsMonitor<SyncAgentProvisioningOptions> provisioningOptions,
         IOptionsMonitor<ArpaCollectorOptions> arpaOptions,
+        IOptionsMonitor<ErpSecurityOptions> erpSecurityOptions,
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
         ErpActivationClient erpActivationClient,
         ArpaConnectionsStore arpaConnectionsStore,
@@ -100,6 +102,7 @@ public sealed class LocalStatusServer : BackgroundService
         _options = options;
         _provisioningOptions = provisioningOptions;
         _arpaOptions = arpaOptions;
+        _erpSecurityOptions = erpSecurityOptions;
         _effectiveConfigProvider = effectiveConfigProvider;
         _erpActivationClient = erpActivationClient;
         _arpaConnectionsStore = arpaConnectionsStore;
@@ -414,6 +417,7 @@ public sealed class LocalStatusServer : BackgroundService
         var effectiveOptions = _effectiveConfigProvider.GetCurrent();
         var storeStatus = await _localStore.GetStatusAsync(cancellationToken);
         var runtimeState = _runtimeState.Snapshot;
+        var configWarnings = ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue);
 
         await WriteJsonAsync(
             response,
@@ -422,6 +426,7 @@ public sealed class LocalStatusServer : BackgroundService
             {
                 status = "ok",
                 timestamp_utc = DateTimeOffset.UtcNow,
+                config_warnings = configWarnings,
                 provisioning_enabled = effectiveOptions.IsProvisioningEnabled,
                 provisioned = effectiveOptions.IsProvisioned,
                 needs_reactivation = effectiveOptions.NeedsReactivation,
@@ -461,6 +466,8 @@ public sealed class LocalStatusServer : BackgroundService
             : effectiveOptions.IsProvisioned ? "provisioned" : "not_provisioned";
         var activationClass = effectiveOptions.IsProvisioned && !effectiveOptions.NeedsReactivation ? "ok" : "warn";
         var rejectedSalesHtml = BuildRejectedSalesHtml(rejectedSales);
+        var configWarnings = ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue);
+        var configWarningsHtml = BuildConfigWarningsHtml(configWarnings);
 
         var html = $$"""
             <!doctype html>
@@ -489,6 +496,8 @@ public sealed class LocalStatusServer : BackgroundService
                 th, td { border-bottom: 1px solid #e2e8f0; padding: 8px; text-align: left; vertical-align: top; font-size: 14px; }
                 th { color: #475569; font-size: 13px; }
                 pre { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 16px; overflow: auto; }
+                .message { border-radius: 8px; padding: 12px; margin: 16px 0; font-weight: 600; }
+                .warnbox { background: #fef3c7; color: #92400e; }
               </style>
             </head>
             <body>
@@ -496,6 +505,7 @@ public sealed class LocalStatusServer : BackgroundService
                 <h1>AraraSuite Sync</h1>
                 <p class="muted">Dashboard local. Atualiza automaticamente a cada 15 segundos.</p>
                 {{LocalNavHtml(DashboardPath)}}
+                {{configWarningsHtml}}
                 <div class="grid">
                   <section class="card"><div class="label">Status</div><div class="value ok">{{Html(runtimeState.CurrentStatus)}}</div></section>
                   <section class="card"><div class="label">Ativacao</div><div class="value {{activationClass}}">{{Html(activationStatus)}}</div></section>
@@ -615,7 +625,7 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><td><code>erp_unreachable</code> / <code>activation_timeout</code></td><td>A maquina nao alcanca o ERP (rede, firewall, DNS, URL errada) ou ele nao respondeu a tempo.</td><td>Testar <code>curl</code>/navegador ate a URL do ERP a partir desta maquina.</td></tr>
                     <tr><td><code>tenant_invalid</code></td><td>Codigo gerado antes do CP resolver o cliente.</td><td>No CP, Aplicar Configuracoes; depois gerar novo codigo.</td></tr>
                     <tr><td><code>http_404</code> / <code>http_5xx</code></td><td>Rota <code>/v1/sync/...</code> ausente nesse dominio, ou ERP com erro.</td><td>Conferir se a URL e a do ERP do cliente e se ele esta no ar.</td></tr>
-                    <tr><td><code>Client certificate is required</code> (apos ativar, <code>runtime_status=degraded</code>; ou popup "Configuracao de seguranca desta instalacao esta incompleta" no botao <strong>Atualizar App</strong> da bandeja, a partir de 1.6.30 - antes disso aparecia como <code>500</code> generico e sem contexto)</td><td><code>ErpSecurity:RequireMutualTls=true</code> mas o ERP nao exige certificado cliente (ou nenhum <code>ClientCertificateThumbprint</code>/<code>ClientCertificatePath</code> foi provisionado nesta maquina).</td><td>No <code>appsettings.json</code> do agente, <code>"RequireMutualTls": false</code> na secao <code>ErpSecurity</code>, e reiniciar <code>AraraSuiteSync</code>.</td></tr>
+                    <tr><td><code>Client certificate is required</code> (apos ativar, <code>runtime_status=degraded</code>; ou popup "Configuracao de seguranca desta instalacao esta incompleta" no botao <strong>Atualizar App</strong> da bandeja, a partir de 1.6.30 - antes disso aparecia como <code>500</code> generico e sem contexto; a partir de 1.6.31 tambem aparece <strong>antes</strong> de qualquer falha real, direto no <code>config_warnings</code> de <a href="/status">/status</a> e num aviso no topo desta pagina)</td><td><code>ErpSecurity:RequireMutualTls=true</code> mas o ERP nao exige certificado cliente (ou nenhum <code>ClientCertificateThumbprint</code>/<code>ClientCertificatePath</code> foi provisionado nesta maquina) - inclusive o proprio <code>appsettings.json</code> padrao do instalador ja vem assim, entao qualquer instalacao que pule o script de certificado nasce com esse aviso.</td><td>No <code>appsettings.json</code> do agente (editor <strong>elevado</strong> - gravar em <code>C:\Program Files\...</code> sem elevacao falha silenciosamente e a edicao nao pega), <code>"RequireMutualTls": false</code> na secao <code>ErpSecurity</code> se este cliente nao usa mTLS, e reiniciar <code>AraraSuiteSync</code>. Confirme com <code>Invoke-RestMethod http://127.0.0.1:47891/status</code> - <code>config_warnings</code> deve ficar vazio.</td></tr>
                     <tr><td><code>23505 ... operators_login_key</code> (import de operadores)</td><td>Banco local reaproveitado entre clientes diferentes.</td><td>Agente &ge; 1.3.1 (import resiliente). Instalacao nova nao apresenta isso.</td></tr>
                   </table>
                   <p style="margin-top:10px;">Reativar uma instalacao ja ativada: parar o servico, apagar <code>C:\Program Files\AraraSuite.com.br\Sync\Secrets\sync-agent-provisioning.dpapi</code>, reiniciar e ativar de novo em <a href="/setup">/setup</a>.</p>
@@ -632,6 +642,7 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><td><code>last_heartbeat_succeeded</code></td><td>Resultado do ultimo heartbeat para o ERP.</td><td>Se falhar, validar autenticacao e disponibilidade da API ERP.</td></tr>
                     <tr><td><code>last_reconciliation_summary</code></td><td>Resumo local da janela reconciliada nas ultimas 24h.</td><td>Use para localizar crescimento de pendentes, rejeicoes e dead-letter por entidade.</td></tr>
                     <tr><td><code>pdv_sales_summary</code></td><td>Contagem das vendas PDV por status local: <code>pending_sync</code>, <code>sent</code>, <code>accepted</code>, <code>rejected</code>.</td><td><code>rejected</code> exige analise do dead-letter; <code>sent</code> prolongado indica envio ainda nao confirmado.</td></tr>
+                    <tr><td><code>config_warnings</code></td><td>Inconsistencias detectadas na propria configuracao <code>ErpSecurity</code> (ex.: <code>RequireMutualTls</code> sem certificado provisionado) - checado a cada requisicao de <code>/status</code>, sem precisar de nenhuma chamada real ao ERP ter falhado primeiro (a partir de 1.6.31).</td><td>Lista vazia = nada a corrigir. Nao-vazia: seguir a instrucao de cada item (tambem aparece como aviso no topo do dashboard).</td></tr>
                   </table>
                 </section>
 
@@ -2586,6 +2597,29 @@ public sealed class LocalStatusServer : BackgroundService
             """);
 
         return summary.ToString();
+    }
+
+    private static string BuildConfigWarningsHtml(IReadOnlyList<string> warnings)
+    {
+        if (warnings.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var items = new StringBuilder();
+        foreach (var warning in warnings)
+        {
+            items.AppendLine($"<li>{Html(warning)}</li>");
+        }
+
+        return $$"""
+            <div class="message warnbox" style="padding: 14px 16px;">
+              <div>&#9888; Configuracao incompleta detectada ({{warnings.Count}}) - corrija antes que a sincronizacao pare de funcionar:</div>
+              <ul style="margin: 8px 0 0; padding-left: 20px; font-weight: 400;">
+                {{items}}
+              </ul>
+            </div>
+            """;
     }
 
     private static string BuildRejectedSalesHtml(IReadOnlyList<PdvRejectedSaleRecord> rejectedSales)

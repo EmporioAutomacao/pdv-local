@@ -184,8 +184,8 @@ Credenciais de integracao ficam centralizadas em `ErpSecurity`:
     "ClientCertificatePath": "",
     "ClientCertificatePasswordEnvironmentVariable": "PDV_SYNC_ERP_CERT_PASSWORD",
     "ClientCertificatePassword": "",
-    "RequireBearerToken": true,
-    "RequireMutualTls": true
+    "RequireBearerToken": false,
+    "RequireMutualTls": false
   }
 }
 ```
@@ -199,9 +199,17 @@ Ordem de resolucao:
 - Senha do PFX: variavel de ambiente `PDV_SYNC_ERP_CERT_PASSWORD`; fallback
   tecnico para `ErpSecurity:ClientCertificatePassword`.
 
-Fora de `localhost`/`127.0.0.1`, o agente exige HTTPS. Por padrao tambem exige
-Bearer token e certificado cliente quando dispatcher ou heartbeat estao
-habilitados contra endpoint remoto.
+Fora de `localhost`/`127.0.0.1`, o agente exige HTTPS. `RequireBearerToken` e
+`RequireMutualTls` default para `false` neste template (a partir de 1.6.31) -
+ligar cada um so quando a credencial correspondente for de fato provisionada,
+senao toda chamada ao ERP falha com `AuthenticationException` (ver incidente
+"RequireMutualTls sem certificado provisionado" no runbook). `install-sync-agent.ps1`
+grava `RequireBearerToken=true` sempre (token e o mecanismo padrao de toda
+ativacao) e calcula `RequireMutualTls` a partir do certificado efetivamente
+passado - nao editar esses dois campos a mao numa instalacao real sem
+confirmar que a credencial exigida existe. `GET /status` expõe
+`config_warnings` com qualquer inconsistencia entre essas flags e o que foi
+provisionado, antes de qualquer chamada real falhar.
 
 Na ativacao pos-instalacao, a URL informada pelo cliente e a URL retornada pelo
 ERP sao validadas antes de salvar credenciais. O refresh de token tambem
@@ -573,49 +581,6 @@ O watermark e salvo em `sync_agent.agent_state` com chave:
 ```text
 collector.arpa.<Name>.watermark
 ```
-
-### Configuracao remota (via ERP)
-
-Em vez de `ConnectionString`/`Entities` estaticos no `appsettings.json`, o
-coletor pode obter a conexao Arpa Control diretamente do ERP — a mesma
-conexao (`ArpaControlConexao`) ja cadastrada la, sem duplicar credenciais
-localmente:
-
-```json
-{
-  "ArpaCollector": {
-    "Enabled": true,
-    "UseRemoteConfig": true,
-    "RemoteConfigCacheProtectedFile": ".secrets/arpa/remote-config.dpapi",
-    "RemoteConfigRefreshMinutes": 60,
-    "RemoteConfigTimeoutSeconds": 20,
-    "BatchSize": 100
-  }
-}
-```
-
-Requisitos:
-
-- A instalacao precisa ter a capability `arpa_collector` concedida em
-  `activation:complete` (ver `requested_capabilities` em
-  `Provisioning/ErpActivationClient.cs`).
-- A `ArpaControlConexao` correspondente precisa estar vinculada a esta
-  instalacao no ERP (campo `sync_installation`) — sem isso,
-  `GET /v1/sync/agents/{instanceId}/arpa-connection` retorna `404`.
-- `ConnectionString`, `PasswordEnvironmentVariable`, `PasswordFile`,
-  `PasswordProtectedFile` e `Entities` sao ignorados quando
-  `UseRemoteConfig=true`; a conexao e as queries por entidade vem inteiras da
-  resposta do ERP.
-
-Funcionamento: `EffectiveArpaCollectorConfigurationProvider`
-(`Provisioning/EffectiveArpaCollectorConfigurationProvider.cs`) busca a
-configuracao via `ArpaConnectionConfigClient` a cada
-`RemoteConfigRefreshMinutes` e mantem a ultima copia obtida com sucesso em
-cache local protegido por DPAPI (`RemoteConfigCacheProtectedFile`,
-`Provisioning/ArpaRemoteConfigCache.cs`), para que o coletor continue
-rodando com a ultima configuracao conhecida se o ERP ficar temporariamente
-inacessivel. Se nunca houve uma configuracao em cache e o ERP esta
-inacessivel, a coleta e pulada naquela execucao (log de aviso).
 
 ## Normalizadores
 

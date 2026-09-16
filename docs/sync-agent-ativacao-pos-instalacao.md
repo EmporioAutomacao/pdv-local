@@ -479,7 +479,7 @@ Catalogo exibido tambem em `/help` do agente e no admin do ERP
 | `erp_unreachable` / `activation_timeout` (>= 1.3.0) | Maquina nao alcanca o ERP / timeout | Testar a URL do ERP pelo navegador na maquina do agente |
 | `tenant_invalid` | Codigo gerado antes do CP resolver | CP -> Aplicar Configuracoes; gerar codigo novo |
 | `http_404` / `http_5xx` | Rota `/v1/sync` ausente nesse dominio / ERP com erro | Conferir a URL e se `sync_api` esta no ar |
-| `Client certificate is required` (apos ativar, `degraded`) | `ErpSecurity:RequireMutualTls=true`, ERP sem mTLS | `"RequireMutualTls": false` no `appsettings.json` do agente + reiniciar `AraraSuiteSync` (instalador >= 1.3.2 ja usa `false`) |
+| `Client certificate is required` (apos ativar, `degraded`) | `ErpSecurity:RequireMutualTls=true` sem certificado provisionado (nao precisa ter mTLS habilitado no ERP - o proprio agente ja bloqueia a chamada antes de sair) | `"RequireMutualTls": false` no `appsettings.json` do agente (editor **elevado**) + reiniciar `AraraSuiteSync` (instalador >= 1.3.2 ja calcula `false` por padrao; o template de origem tambem default `false` a partir de 1.6.31 - so fica `true` numa instalacao antiga cujo `appsettings.json` nunca foi regenerado, ja que self-update preserva o arquivo). A partir de 1.6.31, `GET /status` mostra isso em `config_warnings` **antes** de qualquer falha real - nao precisa esperar `degraded` aparecer. Ver runbook de incidentes. |
 | `PostgresException 23505 ... operators_login_key` | Banco local reaproveitado entre clientes | Agente >= 1.3.1 (import resiliente por savepoint) |
 
 **Nota:** toda tentativa que chega a criar a `SyncInstallation` no ERP queima o

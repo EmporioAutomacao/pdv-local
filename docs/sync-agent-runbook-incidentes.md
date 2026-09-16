@@ -149,6 +149,79 @@ Passos:
 3. Confirmar certificado cliente quando mTLS estiver habilitado.
 4. Rotacionar token com `provision_sync_agent --rotate-token` se houver suspeita de vazamento.
 
+## Incidente: RequireMutualTls sem certificado provisionado
+
+Caso real (2026-09-15): uma estacao com o mesmo sistema/ERP de outra que
+funcionava normalmente mostrava, no botao **Atualizar App** da bandeja,
+`500 Internal Server Error` (antes da 1.6.30) e depois, ja na 1.6.30, o
+popup passou a mostrar o texto real: `Client certificate is required.
+Provision ClientCertificateThumbprint or ClientCertificatePath in
+ErpSecurity.` A causa era `ErpSecurity:RequireMutualTls=true` sem nenhum
+certificado configurado nessa estacao especifica - **inclusive o
+`appsettings.json` padrao do instalador ja vem com esse valor**, entao
+qualquer instalacao que pule `provision-sync-agent-security.ps1 -PfxPath`
+nasce nesse estado. `ValidateProvisionedForRemoteEndpoint` lanca essa
+excecao pra **toda** chamada ao ERP (heartbeat, dispatch, snapshots,
+update-check) - nao e so o botao de atualizar que quebra.
+
+Sinais:
+
+- `runtime_status=degraded` com `last_error` contendo `Client certificate
+  is required...` (ou `Bearer token is required...`, mesma causa-raiz mas
+  pro token);
+- a partir de 1.6.31, aparece **antes** de qualquer falha real: `GET
+  /status` traz `config_warnings` nao-vazio, e o dashboard (`/`) mostra um
+  aviso amarelo no topo. Nao espere o popup de erro pra checar - olhe
+  `config_warnings` primeiro.
+
+Passos:
+
+1. Checar `/status` (nao precisa admin, so leitura):
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:47891/status | Select-Object config_warnings, runtime_status, last_error
+```
+
+2. Confirmar o valor real gravado no disco (o que o `/status`/`config_warnings`
+   reflete e o que o processo tem carregado em memoria - confirme que bate
+   com o arquivo, ja que reload de config so acontece se o arquivo mudar
+   *enquanto* o servico roda):
+
+```powershell
+Get-Content "C:\Program Files\AraraSuite.com.br\Sync\Agent\appsettings.json" | Select-String "RequireMutualTls|RequireBearerToken|ClientCertificate"
+```
+
+3. Se este cliente **nao usa mTLS** (caso comum): editar o `appsettings.json`
+   **com PowerShell/editor elevado** (gravar em `C:\Program Files\...` sem
+   elevacao falha ou nao persiste, sem aviso claro - foi exatamente o que
+   aconteceu no caso real acima, a primeira tentativa de edicao "sumiu"):
+
+```powershell
+$path = "C:\Program Files\AraraSuite.com.br\Sync\Agent\appsettings.json"
+$json = Get-Content $path -Raw | ConvertFrom-Json
+$json.ErpSecurity.RequireMutualTls = $false
+$json | ConvertTo-Json -Depth 10 | Set-Content $path -Encoding utf8
+Restart-Service "AraraSuiteSync"
+```
+
+4. Se este cliente **usa mTLS de verdade**: provisionar o certificado em vez
+   de desabilitar a exigencia:
+
+```powershell
+.\infra\windows\provision-sync-agent-security.ps1 `
+  -PfxPath "C:\Install\sync-agent-client.pfx" `
+  -PfxPassword (Read-Host "Senha do PFX" -AsSecureString)
+```
+
+   e configurar `ErpSecurity:ClientCertificateThumbprint` no `appsettings.json`
+   com o thumbprint exibido pelo script.
+5. Confirmar que resolveu (`config_warnings` vazio, `runtime_status` fora de
+   `degraded`):
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:47891/status | Select-Object config_warnings, runtime_status, last_error, agent_version
+```
+
 ## Incidente: ativacao pos-instalacao
 
 Sinais:

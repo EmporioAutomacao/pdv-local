@@ -20,7 +20,15 @@ public sealed class ErpSecurityOptions
 
     public string ClientCertificatePassword { get; set; } = string.Empty;
 
-    public bool RequireBearerToken { get; set; } = true;
+    // Default false de proposito: uma instalacao que nunca passou pelo
+    // provisionamento de seguranca (provision-sync-agent-security.ps1, ou o
+    // switch -RequireMutualTls de install-sync-agent.ps1) deve funcionar sem
+    // exigir uma credencial que nao existe, em vez de nascer com
+    // runtime_status=degraded. Quem precisa de fato de bearer token/mTLS liga
+    // explicitamente (o instalador ja grava RequireBearerToken=true sempre,
+    // por token ser o mecanismo padrao de toda ativacao). Ver incidente
+    // "RequireMutualTls sem certificado provisionado" no runbook.
+    public bool RequireBearerToken { get; set; } = false;
 
-    public bool RequireMutualTls { get; set; } = true;
+    public bool RequireMutualTls { get; set; } = false;
 }
