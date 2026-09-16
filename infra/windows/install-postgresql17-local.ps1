@@ -13,6 +13,48 @@
 
 $ErrorActionPreference = "Stop"
 
+function Stop-ConflictingPostgresInstance {
+    param(
+        [string]$InstallRoot
+    )
+
+    # Reinstalar/atualizar em cima de uma instalacao ja em execucao trava a
+    # copia dos binarios (ex.: icudt67.dll "sendo usado por outro processo")
+    # - acontece em qualquer maquina que ja tenha um Postgres desse
+    # InstallRoot rodando (reinstalacao, ou upgrade in-place de uma
+    # instalacao anterior com outro nome de servico). Detecta pelo CAMINHO
+    # do binario, nao pelo nome do servico (o -ServiceName pedido agora pode
+    # nao bater com o nome que a instalacao anterior usou).
+    $normalizedRoot = $InstallRoot.TrimEnd('\')
+    $services = Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'postgresql%'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.PathName -and $_.PathName.StartsWith($normalizedRoot, [StringComparison]::OrdinalIgnoreCase) }
+
+    foreach ($service in $services) {
+        if ($service.State -eq "Running") {
+            Write-Host "Parando servico PostgreSQL existente antes de sobrescrever os binarios: $($service.Name)"
+            Stop-Service -Name $service.Name -Force -ErrorAction SilentlyContinue
+            $stopped = Get-Service -Name $service.Name -ErrorAction SilentlyContinue
+            if ($stopped) {
+                $stopped.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+            }
+        }
+    }
+
+    # Fallback: processo postgres.exe rodando desse caminho sem servico
+    # Windows associado (ex.: iniciado manualmente numa sessao de teste).
+    $processes = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'postgres.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($normalizedRoot, [StringComparison]::OrdinalIgnoreCase) }
+
+    foreach ($process in $processes) {
+        Write-Host "Encerrando processo postgres.exe orfao (PID $($process.ProcessId)) antes de sobrescrever os binarios."
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($services -or $processes) {
+        Start-Sleep -Seconds 2
+    }
+}
+
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -200,6 +242,8 @@ if ([string]::IsNullOrWhiteSpace($plainPassword)) {
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DataDirectory) | Out-Null
+
+Stop-ConflictingPostgresInstance -InstallRoot $InstallRoot
 
 Write-Host "Copiando binarios PostgreSQL 17..."
 Copy-Item -Path (Join-Path $sourceRoot "*") -Destination $InstallRoot -Recurse -Force

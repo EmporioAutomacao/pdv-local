@@ -440,6 +440,36 @@ Set-Acl $dataDir $acl
 
 Depois rodar a instalacao de novo (ou so o `install-postgresql17-local.ps1`).
 
+### Sintomas seguintes na mesma maquina (apos corrigir o initdb)
+
+Numa maquina com varias tentativas de instalacao anteriores (comum em
+desenvolvimento/homologacao), corrigir o initdb pode so revelar os proximos
+dois problemas, ambos ja corrigidos a partir de 1.6.35:
+
+**`Copy-Item : O processo nao pode acessar o arquivo '...\icudt67.dll'
+porque ele esta sendo usado por outro processo.`** ao copiar os binarios
+PostgreSQL - ha um `postgres.exe` **ja rodando** a partir do mesmo
+`$InstallRoot` (reinstalacao/upgrade em cima de uma instalacao anterior,
+possivelmente com outro nome de servico). `install-postgresql17-local.ps1`
+agora para qualquer servico Postgres (por caminho do binario, nao por nome -
+o nome pode ter mudado entre instalacoes) e qualquer `postgres.exe` orfao
+rodando desse `InstallRoot` antes de copiar. Sem isso, a copia falha
+parcialmente e a instalacao segue com binarios misturados (antigos +
+novos).
+
+**`ERRO: role "araras" nao existe`** (ou `role "pdv_sync" nao existe`,
+dependendo de quando a instalacao original foi feita) durante "Applying
+pgvector extension and sync_agent schema..." - `infra/postgres/init/00-set-timezone.sql`
+tinha os nomes de banco/role **fixos** (`pdv`/`araras`, de antes de qualquer
+renomeacao desta base de codigo - nem batia mais com o default atual do
+instalador Windows nem com o `docker-compose.yml` de desenvolvimento).
+Reescrito para descobrir banco e role dinamicamente em runtime
+(`current_database()` + dono do banco via `pg_catalog.pg_database.datdba`) -
+funciona com qualquer nome de banco/usuario, presente ou futuro, sem
+precisar editar esse arquivo de novo numa proxima renomeacao. Validado
+rodando contra um Postgres descartavel no Docker com nomes arbitrarios
+(`testdb`/`testuser`).
+
 ## Evidencias obrigatorias
 
 Coletar antes de qualquer correcao destrutiva:

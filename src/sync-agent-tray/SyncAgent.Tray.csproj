@@ -7,6 +7,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SyncAgent.Tray</RootNamespace>
     <AssemblyName>SyncAgent.Tray</AssemblyName>
-    <Version>1.6.34</Version>
+    <Version>1.6.35</Version>
   </PropertyGroup>
 </Project>
