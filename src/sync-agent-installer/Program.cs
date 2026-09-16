@@ -22,10 +22,24 @@ internal static class Program
             // wizard. Se nao estiver elevado, relanca a si mesmo com UAC.
             if (!IsElevated())
             {
-                return RelaunchElevatedAuto();
+                return RelaunchElevated("--auto");
             }
 
             return AutoUpdateRunner.Run();
+        }
+
+        // Duplo clique manual no .exe (instalacao/atualizacao interativa): sem
+        // isso o processo roda sem privilegio nenhum ate o usuario lembrar de
+        // "Executar como Administrador", e falha mais adiante (ex.: initdb.exe
+        // sem permissao pra criar a pasta de dados do PostgreSQL) sem deixar
+        // claro o motivo. Um <ApplicationManifest> com requireAdministrator
+        // foi tentado no lugar disso e quebrou o build de arquivo unico
+        // (PublishSingleFile + self-contained) com "configuracao lado a lado
+        // incorreta" - relancar a si mesmo com "runas" e o mesmo mecanismo ja
+        // usado e testado no fluxo --auto acima.
+        if (!IsElevated())
+        {
+            return RelaunchElevated(null);
         }
 
         ApplicationConfiguration.Initialize();
@@ -60,7 +74,7 @@ internal static class Program
         }
     }
 
-    private static int RelaunchElevatedAuto()
+    private static int RelaunchElevated(string? arguments)
     {
         try
         {
@@ -68,10 +82,13 @@ internal static class Program
             var psi = new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = "--auto",
                 UseShellExecute = true,
                 Verb = "runas",
             };
+            if (!string.IsNullOrWhiteSpace(arguments))
+            {
+                psi.Arguments = arguments;
+            }
             using var elevated = Process.Start(psi);
             if (elevated is null)
             {

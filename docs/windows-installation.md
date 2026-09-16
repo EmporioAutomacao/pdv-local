@@ -353,7 +353,7 @@ http://127.0.0.1:47891/setup
 ```
 
 Executar o instalador interativo (duplo clique basta - pede elevacao UAC
-sozinho a partir de 1.6.31):
+sozinho a partir de 1.6.32):
 
 ```powershell
 .\payload\SyncAgentInstaller\SyncAgent.Installer.exe

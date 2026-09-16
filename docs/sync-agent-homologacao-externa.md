@@ -124,9 +124,12 @@ Opcao recomendada, com interface:
 ```
 
 Duplo clique basta - o instalador pede elevacao (UAC) sozinho a partir de
-1.6.31 (`app.manifest` com `requestedExecutionLevel=requireAdministrator`;
-antes disso so o fluxo `--auto`/bandeja auto-elevava, o duplo clique manual
-exigia "Executar como Administrador" a mao). Informar:
+1.6.32 (`Program.cs` relanca a si mesmo com `Verb=runas` quando detecta que
+nao esta elevado, mesmo mecanismo ja usado pelo fluxo `--auto`/bandeja desde
+antes; um `<ApplicationManifest>` foi tentado primeiro na 1.6.31 mas quebrou
+o build de arquivo unico com "configuracao lado a lado incorreta" - revertido).
+Antes da 1.6.32, o duplo clique manual exigia "Executar como Administrador"
+a mao. Informar:
 
 - caminho de instalacao;
 - escolha da etapa PostgreSQL:
