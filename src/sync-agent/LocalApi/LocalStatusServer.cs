@@ -685,8 +685,8 @@ public sealed class LocalStatusServer : BackgroundService
                 <section class="panel">
                   <h2>Banco local</h2>
                   <p>O banco local e PostgreSQL 17 com pgvector 0.8.0, timezone <code>America/Sao_Paulo</code>.</p>
-                  <pre>psql -U pdv_sync -d pdv_sync -c "SHOW timezone;"
-            psql -U pdv_sync -d pdv_sync -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"</pre>
+                  <pre>psql -U ararasuite -d ararasuite -c "SHOW timezone;"
+            psql -U ararasuite -d ararasuite -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"</pre>
                 </section>
 
                 <section class="panel">

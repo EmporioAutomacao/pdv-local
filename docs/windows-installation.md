@@ -90,8 +90,8 @@ Parametros principais:
   -PostgresHost localhost `
   -PostgresPort 5432 `
   -AdminUser postgres `
-  -DatabaseName pdv_sync `
-  -DatabaseUser pdv_sync `
+  -DatabaseName ararasuite `
+  -DatabaseUser ararasuite `
   -DatabasePassword pdv_sync
 ```
 
@@ -127,8 +127,8 @@ Instalacao completa do agente:
   -PostgresPort 5432 `
   -PostgresAdminUser postgres `
   -PostgresAdminPassword (Read-Host "Senha admin PostgreSQL" -AsSecureString) `
-  -DatabaseName pdv_sync `
-  -DatabaseUser pdv_sync `
+  -DatabaseName ararasuite `
+  -DatabaseUser ararasuite `
   -DatabasePassword "<senha-local-pdv-sync>"
 ```
 
@@ -428,8 +428,8 @@ Implementacao atual da instalacao automatica:
 
 - script: `infra\windows\install-postgresql17-local.ps1`;
 - instala em `C:\Program Files\PostgreSQL\17` por padrao;
-- inicializa dados em `C:\ProgramData\PDVLocal\PostgreSQL17\data` por padrao;
-- registra servico `postgresql-x64-17-pdvlocal`;
+- inicializa dados em `C:\Program Files\AraraSuite.com.br\PostgreSQL17\data` por padrao;
+- registra servico `postgresql-x64-17-ararasuite`;
 - usa arquivo temporario para passar a senha ao `initdb`, removendo o arquivo
   ao final;
 - valida PostgreSQL major `17`;

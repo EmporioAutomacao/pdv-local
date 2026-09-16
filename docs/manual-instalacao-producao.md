@@ -212,8 +212,8 @@ Instalacao completa via script, para cenarios automatizados:
   -PostgresPort 5432 `
   -PostgresAdminUser postgres `
   -PostgresAdminPassword (Read-Host "Senha admin PostgreSQL" -AsSecureString) `
-  -DatabaseName pdv_sync `
-  -DatabaseUser pdv_sync `
+  -DatabaseName ararasuite `
+  -DatabaseUser ararasuite `
   -DatabasePassword "<senha-gerada-pdv-sync>"
 ```
 
@@ -241,7 +241,7 @@ Parametros principais do script (`infra\windows\install-sync-agent.ps1`):
 | `-EnablePostInstallActivation` | desligado | Instala sem credenciais do ERP; ativacao via `/setup` depois. |
 | `-ProvisioningProtectedFile` | caminho padrao em `Secrets\` | Override do caminho do arquivo DPAPI de provisionamento. |
 | `-PostgresHost/-Port/-AdminUser/-AdminPassword` | `localhost`/`5432`/`postgres`/— | Acesso admin ao PostgreSQL local para bootstrap. |
-| `-DatabaseName/-DatabaseUser/-DatabasePassword` | `pdv_sync`/`pdv_sync`/`pdv_sync` | Banco e usuario local do SyncAgent. |
+| `-DatabaseName/-DatabaseUser/-DatabasePassword` | `ararasuite`/`ararasuite`/`pdv_sync` | Banco e usuario local do SyncAgent. |
 | `-PsqlPath` | `psql` | Caminho do executavel `psql`, se nao estiver no `PATH`. |
 | `-EnableArpaCollector` | desligado | Habilita coletor Arpa (ver secao 7). |
 | `-ArpaConnectionString`, `-ArpaPassword`, `-ArpaPasswordProtectedFile` | — | Conexao Arpa read-only. |
@@ -307,18 +307,18 @@ Para rodar manualmente (banco ja existente ou `-SkipDatabaseBootstrap`):
   -PostgresHost localhost `
   -PostgresPort 5432 `
   -AdminUser postgres `
-  -DatabaseName pdv_sync `
-  -DatabaseUser pdv_sync `
+  -DatabaseName ararasuite `
+  -DatabaseUser ararasuite `
   -DatabasePassword "<senha-gerada-pdv_sync>"
 ```
 
 Validacao manual apos o bootstrap:
 
 ```powershell
-psql -U pdv_sync -d pdv_sync -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
-psql -U pdv_sync -d pdv_sync -c "SHOW timezone;"
-psql -U pdv_sync -d pdv_sync -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'sync_agent' ORDER BY table_name;"
-psql -U pdv_sync -d pdv_sync -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'pdv' ORDER BY table_name;"
+psql -U ararasuite -d ararasuite -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
+psql -U ararasuite -d ararasuite -c "SHOW timezone;"
+psql -U ararasuite -d ararasuite -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'sync_agent' ORDER BY table_name;"
+psql -U ararasuite -d ararasuite -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'pdv' ORDER BY table_name;"
 ```
 
 ## 7. Passo 4 - Coletor Arpa (opcional)

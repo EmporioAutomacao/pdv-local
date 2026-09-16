@@ -20,13 +20,13 @@ public sealed class InstallerWizardForm : Form
     private readonly TextBox _postgresDataDirectory = new() { Text = @"C:\Program Files\AraraSuite.com.br\PostgreSQL17\data" };
     private readonly TextBox _postgresSourceRoot = new();
     private readonly TextBox _pgVectorSourceRoot = new();
-    private readonly TextBox _postgresServiceName = new() { Text = "postgresql-x64-17-pdvlocal" };
+    private readonly TextBox _postgresServiceName = new() { Text = "postgresql-x64-17-ararasuite" };
     private readonly TextBox _psqlPath = new() { Text = "psql" };
     private readonly TextBox _postgresHost = new() { Text = "localhost" };
     private readonly NumericUpDown _postgresPort = new() { Minimum = 1, Maximum = 65535, Value = 5432 };
     private readonly TextBox _postgresAdminUser = new() { Text = "postgres" };
     private readonly TextBox _postgresAdminPassword = PasswordBox("postgres");
-    private readonly TextBox _databaseName = new() { Text = "pdv" };
+    private readonly TextBox _databaseName = new() { Text = "ararasuite" };
     private readonly TextBox _databaseUser = new() { Text = "ararasuite" };
     private readonly TextBox _databasePassword = PasswordBox("pdv_sync");
     private readonly CheckBox _enableArpa = new() { Text = "Habilitar coletor Arpa nesta instalacao" };
@@ -621,7 +621,14 @@ public sealed class InstallerWizardForm : Form
 
     private string ResolveArpaViewsSqlFile()
     {
-        var fromPayload = ResolveUnderPayloadRoot("infra", "arpa", "sync-export-views-anapolis.initial-load.sql");
+        // Script generico (deteccao dinamica de schema, mesmo usado em runtime
+        // pelo SyncAgent/ArpaDdlRunner via EmbeddedResource). Antes apontava pra
+        // "sync-export-views-anapolis.initial-load.sql" - um snapshot de teste
+        // gerado localmente durante o piloto do cliente Anapolis, que nunca fez
+        // parte do pacote/payload real distribuido (so existia em artifacts/
+        // desta maquina de desenvolvimento) - "SQL de views Arpa nao encontrado
+        // no pacote" em qualquer instalacao de verdade.
+        var fromPayload = ResolveUnderPayloadRoot("infra", "arpa", "sync-export-views.sql");
         if (fromPayload is not null)
         {
             return fromPayload;
@@ -630,16 +637,16 @@ public sealed class InstallerWizardForm : Form
         var baseDir = AppContext.BaseDirectory;
         var candidates = new[]
         {
-            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "infra", "arpa", "sync-export-views-anapolis.initial-load.sql")),
-            Path.GetFullPath(Path.Combine(baseDir, "..", "infra", "arpa", "sync-export-views-anapolis.initial-load.sql")),
-            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "infra", "arpa", "sync-export-views-anapolis.initial-load.sql")),
-            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "artifacts", "sync-agent-installer", "infra", "arpa", "sync-export-views-anapolis.initial-load.sql"))
+            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "infra", "arpa", "sync-export-views.sql")),
+            Path.GetFullPath(Path.Combine(baseDir, "..", "infra", "arpa", "sync-export-views.sql")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "infra", "arpa", "sync-export-views.sql")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "artifacts", "sync-agent-installer", "infra", "arpa", "sync-export-views.sql"))
         };
 
         var sqlFile = candidates.FirstOrDefault(File.Exists);
         if (sqlFile is null)
         {
-            throw new FileNotFoundException("SQL de views Arpa nao encontrado no pacote: sync-export-views-anapolis.initial-load.sql");
+            throw new FileNotFoundException("SQL de views Arpa nao encontrado no pacote: sync-export-views.sql");
         }
 
         return sqlFile;

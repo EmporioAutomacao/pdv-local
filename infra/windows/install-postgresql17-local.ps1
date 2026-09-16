@@ -3,7 +3,7 @@
     [string]$DataDirectory = "C:\Program Files\AraraSuite.com.br\PostgreSQL17\data",
     [string]$SourceRoot = "",
     [string]$PgVectorSourceRoot = "",
-    [string]$ServiceName = "postgresql-x64-17-pdvlocal",
+    [string]$ServiceName = "postgresql-x64-17-ararasuite",
     [int]$Port = 5432,
     [string]$Superuser = "postgres",
     [securestring]$SuperuserPassword,

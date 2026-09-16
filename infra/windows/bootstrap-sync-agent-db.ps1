@@ -3,7 +3,7 @@ param(
     [int]$PostgresPort = 5432,
     [string]$AdminUser = "postgres",
     [securestring]$AdminPassword,
-    [string]$DatabaseName = "pdv",
+    [string]$DatabaseName = "ararasuite",
     [string]$DatabaseUser = "ararasuite",
     [string]$DatabasePassword = "pdv_sync",
     [string]$PsqlPath = "psql",

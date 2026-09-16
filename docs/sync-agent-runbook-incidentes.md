@@ -317,7 +317,7 @@ Passos:
    agente `pdv_sync` - nao precisa de admin para so conferir):
 
 ```powershell
-psql -U pdv_sync -h localhost -d pdv_sync -c "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'outbox_events_entity_type_check';"
+psql -U ararasuite -h localhost -d ararasuite -c "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'outbox_events_entity_type_check';"
 ```
 
    Deve listar todos os `entity_type` do contrato atual (`cliente`,
@@ -368,7 +368,7 @@ Passos:
    nao precisa de admin para so conferir):
 
 ```powershell
-psql -U pdv_sync -h localhost -d pdv_sync -c "\d pdv.sale_items"
+psql -U ararasuite -h localhost -d ararasuite -c "\d pdv.sale_items"
 ```
 
    Deve listar `unit_label`, `unit_external_key` e `unit_factor`.
