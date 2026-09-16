@@ -379,6 +379,67 @@ Nao editar `pdv.sale_items` via `psql`/SQL solto fora dessa tela pelo mesmo
 motivo do incidente 23514 - a rotina fica registrada/repetivel para outras
 instalacoes com o mesmo problema.
 
+## Incidente: initdb falha com "Permission denied" ao criar/alterar o DataDirectory
+
+Caso real (2026-09-15), maquina de dominio corporativo: o instalador (GUI ou
+`install-postgresql17-local.ps1`) falhava sempre no mesmo ponto, mesmo com
+elevacao UAC genuina confirmada (token nao filtrado, `whoami /groups` sem
+"uso apenas para negar"):
+
+```
+initdb.exe : initdb: erro: nao pode criar diretorio "C:/Program Files/AraraSuite.com.br/PostgreSQL17/data": Permission denied
+```
+
+Diagnostico descartou, nessa ordem, ate sobrar a causa real: variavel de
+ambiente sobrescrevendo config (nao era), antivirus/EDR de terceiros (so
+Windows Defender padrao, sem CrowdStrike/SentinelOne/etc), Controlled Folder
+Access do Defender (desligado), Mark-of-the-Web no `.exe` baixado (ausente),
+privilegios de token ausentes (`whoami /priv` normal - `SeTakeOwnershipPrivilege`
+etc. presentes-mas-desabilitados, como em qualquer sessao elevada padrao).
+
+Causa raiz confirmada por reproducao direta: `initdb.exe` no Windows sempre
+tenta travar as permissoes do `DataDirectory` para a conta especifica que o
+executa (equivalente ao `chmod 0700` do Unix) - e essa etapa de **alterar**
+permissoes (nao a de criar o diretorio) e a que falha, especificamente
+quando o dono da pasta e o **grupo** `BUILTIN\Administradores` em vez da
+**conta individual**. Isso acontece porque o Windows, por padrao, atribui
+como dono o grupo Administradores (nao o usuario) quando um membro desse
+grupo cria uma pasta nova sob `Program Files` - mesmo com UAC genuinamente
+elevado. `initdb` sempre tenta se tornar dono exclusivo da conta que o
+executa (nao do grupo), e a troca de dono/DACL e negada nesse descompasso.
+
+Sinais:
+
+- `initdb: erro: nao pode criar diretorio "...": Permission denied` (dono
+  ainda e o grupo Administradores quando a pasta nao existia antes);
+- ou, se a pasta ja existir (de uma tentativa anterior), a mensagem muda
+  para `initdb: erro: nao pode mudar permissoes do diretorio "...":
+  Permission denied` - mesma causa, so muda o texto conforme o initdb cria
+  do zero ou so ajusta uma pasta ja existente;
+- `(Get-Acl $DataDirectory).Owner` mostra `BUILTIN\Administradores` (o
+  grupo) em vez de `DOMINIO\usuario` (a conta especifica).
+
+Corrigido a partir de 1.6.34 (`infra/windows/install-postgresql17-local.ps1`):
+o script agora cria o `DataDirectory` explicitamente e forca o dono para a
+identidade do processo atual (`[System.Security.Principal.WindowsIdentity]::GetCurrent().Name`)
+antes de chamar `initdb`, em vez de deixar o `initdb` criar a pasta sozinho
+e herdar o dono padrao do Windows (o grupo).
+
+Correcao manual (instalacoes com o agente anterior a 1.6.34, ou se acontecer
+de novo em algum outro caminho nao coberto pelo script): apagar a pasta
+parcial e recriar forcando o dono:
+
+```powershell
+$dataDir = "C:\Program Files\AraraSuite.com.br\PostgreSQL17\data"
+Remove-Item $dataDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $dataDir | Out-Null
+$acl = Get-Acl $dataDir
+$acl.SetOwner([System.Security.Principal.NTAccount]"$env:USERDOMAIN\$env:USERNAME")
+Set-Acl $dataDir $acl
+```
+
+Depois rodar a instalacao de novo (ou so o `install-postgresql17-local.ps1`).
+
 ## Evidencias obrigatorias
 
 Coletar antes de qualquer correcao destrutiva:

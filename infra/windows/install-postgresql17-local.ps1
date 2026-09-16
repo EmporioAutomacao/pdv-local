@@ -220,6 +220,24 @@ if ((Test-Path -LiteralPath $DataDirectory) -and -not (Test-Path -LiteralPath (J
 }
 
 if (-not (Test-Path -LiteralPath $DataDirectory)) {
+    # initdb no Windows tenta travar as permissoes do DataDirectory (equivalente
+    # ao chmod 0700 do Unix) para o usuario atual - e falha com "Permission
+    # denied" nessa etapa (nao na criacao em si) se o dono da pasta nao for
+    # literalmente essa conta especifica. Quando um membro do grupo
+    # Administradores cria uma pasta nova (mesmo elevado via UAC), o Windows
+    # normalmente atribui como dono o GRUPO "BUILTIN\Administradores", nao a
+    # conta individual - descompasso com o que o initdb espera (ele sempre
+    # tenta se tornar dono exclusivo da conta que o executa). Criar a pasta
+    # aqui e forcar o dono para a conta atual evita isso. Confirmado
+    # reproduzindo o problema real (2026-09-15): mesma pasta, mesmo
+    # New-Item -Force funcionando normalmente, initdb falhando so na etapa
+    # "alterando permissoes no diretorio existente" ate o dono ser corrigido.
+    New-Item -ItemType Directory -Force -Path $DataDirectory | Out-Null
+    $currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $dataDirAcl = Get-Acl -LiteralPath $DataDirectory
+    $dataDirAcl.SetOwner([System.Security.Principal.NTAccount]$currentIdentity)
+    Set-Acl -LiteralPath $DataDirectory -AclObject $dataDirAcl
+
     $passwordFile = Join-Path ([IO.Path]::GetTempPath()) ("pdvlocal-pg-" + [Guid]::NewGuid() + ".pwd")
     try {
         Set-Content -LiteralPath $passwordFile -Value $plainPassword -Encoding ASCII -NoNewline
