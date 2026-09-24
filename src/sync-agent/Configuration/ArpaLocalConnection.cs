@@ -42,6 +42,14 @@ public sealed record ArpaLocalConnection
 
     public bool SyncVendas { get; init; }
 
+    /// <summary>
+    /// Financeiro (parcelas/titulos). Forcado a true sempre que
+    /// <see cref="SyncVendas"/> estiver habilitado - ver
+    /// <c>ArpaStandardEntities.Build</c> - porque o ERP so cria
+    /// TituloReceber/TituloPagar a partir do evento <c>entity_type=financeiro</c>,
+    /// nunca a partir do evento de venda. Esse campo por si so so importa
+    /// quando se quer financeiro sem trazer vendas.
+    /// </summary>
     public bool SyncFinanceiro { get; init; }
 
     /// <summary>

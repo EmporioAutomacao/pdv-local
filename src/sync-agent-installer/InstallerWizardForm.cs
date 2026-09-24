@@ -29,6 +29,7 @@ public sealed class InstallerWizardForm : Form
     private readonly TextBox _databaseName = new() { Text = "ararasuite" };
     private readonly TextBox _databaseUser = new() { Text = "ararasuite" };
     private readonly TextBox _databasePassword = PasswordBox("pdv_sync");
+    private readonly CheckBox _installPdv = new() { Text = "Instalar o PDV (ponto de venda)", Checked = true };
     private readonly CheckBox _enableArpa = new() { Text = "Habilitar coletor Arpa nesta instalacao" };
     private readonly TextBox _arpaHost = new() { Text = "127.0.0.1" };
     private readonly NumericUpDown _arpaPort = new() { Minimum = 1, Maximum = 65535, Value = 5432 };
@@ -176,21 +177,25 @@ public sealed class InstallerWizardForm : Form
 
     private void RenderWelcome()
     {
-        SetHeader("Bem-vindo", "Este assistente instala o PDV e o Sync da AraraSuite e deixa a ativacao do ERP para o dashboard local.");
+        SetHeader("Bem-vindo", "Este assistente instala o Sync da AraraSuite (e, opcionalmente, o PDV) e deixa a ativacao do ERP para o dashboard local.");
         var admin = IsAdministrator();
         var text = new Label
         {
             Dock = DockStyle.Top,
             AutoSize = false,
-            Height = 180,
+            Height = 160,
             Text = admin
-                ? "Permissao de Administrador detectada.\r\n\r\nO instalador vai preparar o banco local, copiar o PDV App e o SyncAgent, instalar o servico Windows, configurar o Tray e criar atalhos do PDV."
+                ? "Permissao de Administrador detectada.\r\n\r\nO instalador vai preparar o banco local, copiar o SyncAgent (e o PDV App, se selecionado abaixo), instalar o servico Windows, configurar o Tray e criar atalhos."
                 : "Abra este instalador como Administrador.\r\n\r\nSem elevacao, o servico Windows e o bootstrap do banco nao podem ser instalados.",
             Font = new Font("Segoe UI", 11)
         };
 
+        var panel = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown };
+        panel.Controls.Add(text);
+        panel.Controls.Add(_installPdv);
+
         _nextButton.Enabled = admin;
-        _content.Controls.Add(text);
+        _content.Controls.Add(panel);
     }
 
     private void RenderDatabase()
@@ -365,6 +370,7 @@ public sealed class InstallerWizardForm : Form
         {
             builder.AppendLine($"Evidencia: {_evidenceOutput.Text}");
         }
+        builder.AppendLine($"PDV: {(_installPdv.Checked ? "sera instalado" : "nao sera instalado")}");
         builder.AppendLine($"Coletor Arpa: {(_enableArpa.Checked ? "habilitado" : "desabilitado")}");
         if (_enableArpa.Checked)
         {
@@ -1020,6 +1026,11 @@ $$;
             ]);
         }
 
+        if (!_installPdv.Checked)
+        {
+            args.Add("-SkipPdv");
+        }
+
         lines.Add(string.Join(" ", args));
         lines.Add("exit $LASTEXITCODE");
         return string.Join(Environment.NewLine, lines);
@@ -1048,6 +1059,11 @@ $$;
             "-SkipErp",
             "-EvidenceOutput", Quote(evidenceOutput)
         };
+
+        if (!_installPdv.Checked)
+        {
+            args.Add("-SkipPdv");
+        }
 
         return "$ErrorActionPreference = 'Stop'" + Environment.NewLine
             + "trap { Write-Error $_; exit 1 }" + Environment.NewLine

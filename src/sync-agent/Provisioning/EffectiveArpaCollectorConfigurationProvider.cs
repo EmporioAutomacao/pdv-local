@@ -10,8 +10,7 @@ namespace SyncAgent.Provisioning;
 /// Resolve a lista de conexoes Arpa efetivas do coletor. Precedencia:
 /// 1. store local (aba Configuracoes > Arpa) - fonte de verdade;
 /// 2. ConnectionString/Entities estaticos do appsettings (legado) - migrados
-///    para o store no primeiro uso;
-/// 3. configuracao remota do ERP (UseRemoteConfig=true) com cache DPAPI (legado).
+///    para o store no primeiro uso.
 /// </summary>
 public sealed class EffectiveArpaCollectorConfigurationProvider
 {
@@ -20,12 +19,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
     private readonly ArpaConnectionStringProvider _localConnectionStringProvider;
     private readonly ArpaConnectionsStore _connectionsStore;
     private readonly ArpaCollectorSettingsStore _settingsStore;
-    private readonly ArpaConnectionConfigClient _remoteClient;
-    private readonly ArpaRemoteConfigCache _remoteCache;
-    private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
-    private ArpaConnectionConfig? _cachedRemoteConfig;
-    private DateTimeOffset _lastRefreshUtc = DateTimeOffset.MinValue;
     private bool _legacyMigrationChecked;
 
     public EffectiveArpaCollectorConfigurationProvider(
@@ -33,25 +27,21 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
         IOptionsMonitor<ArpaCollectorOptions> options,
         ArpaConnectionStringProvider localConnectionStringProvider,
         ArpaConnectionsStore connectionsStore,
-        ArpaCollectorSettingsStore settingsStore,
-        ArpaConnectionConfigClient remoteClient,
-        ArpaRemoteConfigCache remoteCache)
+        ArpaCollectorSettingsStore settingsStore)
     {
         _logger = logger;
         _options = options;
         _localConnectionStringProvider = localConnectionStringProvider;
         _connectionsStore = connectionsStore;
         _settingsStore = settingsStore;
-        _remoteClient = remoteClient;
-        _remoteCache = remoteCache;
     }
 
-    public async Task<IReadOnlyList<EffectiveArpaCollectorConnection>> GetCurrentAsync(CancellationToken cancellationToken)
+    public Task<IReadOnlyList<EffectiveArpaCollectorConnection>> GetCurrentAsync(CancellationToken cancellationToken)
     {
         var options = _options.CurrentValue;
         if (!_settingsStore.IsEffectivelyEnabled())
         {
-            return [];
+            return Task.FromResult<IReadOnlyList<EffectiveArpaCollectorConnection>>([]);
         }
 
         MigrateLegacyStaticConnectionIfNeeded(options);
@@ -59,71 +49,31 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
         var stored = _connectionsStore.ReadAll();
         if (stored.Count > 0)
         {
-            return stored
+            IReadOnlyList<EffectiveArpaCollectorConnection> effective = stored
                 .Where(c => c.Enabled)
                 .Select(ToEffective)
                 .Where(c => c is not null)
                 .Select(c => c!)
                 .ToList();
+            return Task.FromResult(effective);
         }
 
-        if (!options.UseRemoteConfig)
+        if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
-            if (string.IsNullOrWhiteSpace(options.ConnectionString))
-            {
-                return [];
-            }
-
-            return
-            [
-                new EffectiveArpaCollectorConnection(
-                    "static",
-                    "Estatica (appsettings)",
-                    _localConnectionStringProvider.GetConnectionString(),
-                    options.BatchSize,
-                    string.Empty,
-                    options.Entities),
-            ];
+            return Task.FromResult<IReadOnlyList<EffectiveArpaCollectorConnection>>([]);
         }
 
-        await RefreshRemoteConfigIfNeededAsync(options, cancellationToken);
-
-        var remote = _cachedRemoteConfig;
-        if (remote is null)
-        {
-            _logger.LogWarning(
-                "ArpaCollector: configuracao remota indisponivel e nenhuma copia em cache foi encontrada; coleta sera pulada nesta execucao.");
-            return [];
-        }
-
-        var remoteConnectionString = new NpgsqlConnectionStringBuilder
-        {
-            Host = remote.Host,
-            Port = remote.Port,
-            Username = remote.Username,
-            Password = remote.Password,
-            Database = remote.Database,
-        }.ConnectionString;
-
-        var remoteEntities = remote.Entities
-            .Select(entity => new ArpaEntityCollectorOptions
-            {
-                Name = entity.Name,
-                EntityType = entity.EntityType,
-                Query = entity.Query,
-            })
-            .ToList();
-
-        return
+        IReadOnlyList<EffectiveArpaCollectorConnection> result =
         [
             new EffectiveArpaCollectorConnection(
-                $"remote-{remote.ConnectionId}",
-                remote.Nome,
-                remoteConnectionString,
+                "static",
+                "Estatica (appsettings)",
+                _localConnectionStringProvider.GetConnectionString(),
                 options.BatchSize,
                 string.Empty,
-                remoteEntities),
+                options.Entities),
         ];
+        return Task.FromResult(result);
     }
 
     private EffectiveArpaCollectorConnection? ToEffective(ArpaLocalConnection connection)
@@ -170,7 +120,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
 
         _legacyMigrationChecked = true;
 
-        if (options.UseRemoteConfig || string.IsNullOrWhiteSpace(options.ConnectionString))
+        if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
             return;
         }
@@ -216,46 +166,6 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
         }
     }
 
-    private async Task RefreshRemoteConfigIfNeededAsync(ArpaCollectorOptions options, CancellationToken cancellationToken)
-    {
-        var refreshInterval = TimeSpan.FromMinutes(Math.Max(1, options.RemoteConfigRefreshMinutes));
-        if (_cachedRemoteConfig is not null && DateTimeOffset.UtcNow - _lastRefreshUtc < refreshInterval)
-        {
-            return;
-        }
-
-        await _refreshLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (_cachedRemoteConfig is not null && DateTimeOffset.UtcNow - _lastRefreshUtc < refreshInterval)
-            {
-                return;
-            }
-
-            var result = await _remoteClient.FetchAsync(cancellationToken);
-            if (result.Succeeded && result.Connection is not null)
-            {
-                _cachedRemoteConfig = result.Connection;
-                _lastRefreshUtc = DateTimeOffset.UtcNow;
-                await _remoteCache.SaveAsync(result.Connection, cancellationToken);
-                return;
-            }
-
-            _logger.LogWarning(
-                "ArpaCollector: falha ao obter configuracao remota de conexao ({Error}); usando ultima copia em cache, se houver.",
-                result.Error);
-
-            if (_cachedRemoteConfig is null)
-            {
-                _cachedRemoteConfig = _remoteCache.TryRead();
-                _lastRefreshUtc = DateTimeOffset.UtcNow;
-            }
-        }
-        finally
-        {
-            _refreshLock.Release();
-        }
-    }
 }
 
 public sealed record EffectiveArpaCollectorConnection(

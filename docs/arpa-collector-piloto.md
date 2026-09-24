@@ -45,8 +45,6 @@ nao mais so no `appsettings.json` nem no `ArpaControlConexao` do ERP.
   `arpa-collector-settings.json` (JSON simples, sem segredo) no diretorio de
   secrets e tem precedencia sobre `ArpaCollector:Enabled` do `appsettings.json`.
   Enquanto o botao nunca foi usado, vale o `appsettings.json` (padrao `false`).
-- `UseRemoteConfig=true` (buscar do ERP) segue funcionando como legado, mas so
-  quando o store local esta vazio.
 
 O restante deste documento (preparar views por diagnostico, usuario read-only,
 preflight) continua valido para os casos em que o schema real do Arpa nao bate
@@ -324,7 +322,6 @@ derrubar o ciclo (heartbeat, vendas PDV e dispatcher continuam).
 | `42P01: relation "sync_export.produtos" does not exist` | As views `sync_export` nunca foram criadas nesse Arpa. | Botao **Preparar views** em Configuracoes > Arpa (Usuario DBA + Senha DBA; 1.6.9+ ele introspecta o schema e ja concede leitura ao Usuario da conexao). |
 | `42501: permission denied for relation sync_export.produtos` | As views existem mas o usuario read-only da conexao nao tem `GRANT SELECT`. | Rodar **Preparar views** de novo (ele faz o GRANT), ou **Criar usuario read-only**. |
 | `42703: column "..." does not exist` / view devolve schema estranho | Schema do Arpa muito fora do padrao Arpa Sistemas. | Preparar views cobre a maioria dos casos; para o resto, fluxo por diagnostico (`new-arpa-sync-export-views-from-diagnostics.ps1`, legado) + `apply-arpa-sync-export-views.ps1` como DBA. |
-| Coleta sempre pulada / `configuracao remota indisponivel` | `UseRemoteConfig=true` e o ERP nao respondeu `GET /v1/sync/agents/{id}/arpa-connection` (404 = conexao Arpa nao vinculada a instalacao, ou sem capability `arpa_collector`). | No ERP, vincular a `ArpaControlConexao` a esta instalacao (`sync_installation`) e conceder a capability. |
 | Cliente **nao usa** Arpa Control | O coletor nao deveria estar habilitado. | Botao *Desativar coletor* em **Configuracoes > Arpa** (ou `ArpaCollector:Enabled=false` no `appsettings.json` se o botao nunca foi usado). |
 | `A Loja/Estoque 'X' ja esta vinculada a conexao 'Y'` (HTTP 409 ao salvar) | Duas conexoes apontando para a mesma Loja/Estoque do ERP. | Cada Loja/Estoque so pode estar em uma conexao. Ajuste o campo de uma delas ou remova a conexao duplicada. |
 | `28000: role "<MAQUINA>$" does not exist` ao "Testar conexao" (visto ate 1.6.3) | Editou uma conexao (a Senha vem em branco) e testou sem redigitar -> Npgsql caiu para auth integrada do Windows e mandou a conta da maquina (servico roda como LocalSystem). | 1.6.4: "Testar conexao" na edicao usa a senha ja guardada. 1.6.5: se o Postgres do Arpa realmente pedir auth integrada, a mensagem explica (definir senha para o usuario, ou pg_hba `trust`/`scram-sha-256`). |

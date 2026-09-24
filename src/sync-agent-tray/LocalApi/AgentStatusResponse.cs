@@ -23,4 +23,5 @@ public sealed record AgentStatusResponse(
     [property: JsonPropertyName("runtime_status")] string RuntimeStatus,
     [property: JsonPropertyName("last_cycle_completed_at_utc")] DateTimeOffset? LastCycleCompletedAtUtc,
     [property: JsonPropertyName("last_cycle_trigger")] string? LastCycleTrigger,
-    [property: JsonPropertyName("last_error")] string? LastError);
+    [property: JsonPropertyName("last_error")] string? LastError,
+    [property: JsonPropertyName("pending_update_confirmation")] PendingUpdateConfirmationInfo? PendingUpdateConfirmation = null);

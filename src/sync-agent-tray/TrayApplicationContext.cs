@@ -15,6 +15,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _deadLetterItem;
     private readonly ToolStripMenuItem _heartbeatItem;
     private readonly ToolStripMenuItem _reconciliationItem;
+    private readonly ToolStripMenuItem _pendingUpdateMenuItem;
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private AgentStatusResponse? _lastStatus;
 
@@ -32,6 +33,11 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         var syncNowItem = new ToolStripMenuItem("Sincronizar agora", null, async (_, _) => await SyncNowAsync());
         var updateAppItem = new ToolStripMenuItem("Atualizar App", null, (_, _) => OpenUpdateProgress());
+        _pendingUpdateMenuItem = new ToolStripMenuItem("Atualizacao pendente...", null, (_, _) => OpenPendingUpdateConfirmation())
+        {
+            Visible = false,
+            Font = new Font(Control.DefaultFont, FontStyle.Bold),
+        };
         var openHelpItem = new ToolStripMenuItem("Abrir ajuda", null, (_, _) => OpenHelp());
         var copyInstanceItem = new ToolStripMenuItem("Copiar ID da instalacao", null, (_, _) => CopyInstanceId());
         var refreshItem = new ToolStripMenuItem("Atualizar status", null, async (_, _) => await RefreshStatusAsync());
@@ -57,6 +63,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             new ToolStripSeparator(),
             syncNowItem,
             updateAppItem,
+            _pendingUpdateMenuItem,
             refreshItem,
             openHelpItem,
             copyInstanceItem,
@@ -103,6 +110,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _heartbeatItem.Text = $"Heartbeat: {FormatHeartbeat(_lastStatus)}";
             _reconciliationItem.Text = $"Reconciliacao: {FormatReconciliation(_lastStatus)}";
             _notifyIcon.Text = BuildNotifyText(_lastStatus.RuntimeStatus);
+            CheckPendingUpdateConfirmation(_lastStatus);
 
             if (showBalloon)
             {
@@ -239,6 +247,78 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         public string? Status { get; set; }
         public string? Version { get; set; }
+    }
+
+    /// <summary>
+    /// Modo "Confirmar com o usuario" (contrato Sync 2.14.0): mostra a janela de
+    /// confirmacao e um balao na primeira vez que uma atualizacao pendente aparecer.
+    /// Um marcador em disco (mesmo raciocinio de <see cref="ShowJustUpdatedBalloonIfApplicable"/>)
+    /// evita repetir o balao a cada poll de 30s ou apos a bandeja reiniciar - o item
+    /// de menu continua disponivel o tempo todo enquanto a confirmacao estiver pendente.
+    /// </summary>
+    private void CheckPendingUpdateConfirmation(AgentStatusResponse status)
+    {
+        var pending = status.PendingUpdateConfirmation;
+        _pendingUpdateMenuItem.Visible = pending is { AwaitingChoice: true };
+
+        if (pending is not { AwaitingChoice: true })
+        {
+            return;
+        }
+
+        if (HasAlreadyNotifiedPendingUpdate(pending.Version))
+        {
+            return;
+        }
+
+        MarkPendingUpdateNotified(pending.Version);
+        _notifyIcon.ShowBalloonTip(
+            8000,
+            "AraraSuite Sync",
+            $"Atualizacao v{pending.Version} disponivel. Clique com o botao direito no icone e escolha \"Atualizacao pendente...\" para confirmar ou agendar - senao ela e aplicada automaticamente.",
+            ToolTipIcon.Info);
+    }
+
+    private void OpenPendingUpdateConfirmation()
+    {
+        var pending = _lastStatus?.PendingUpdateConfirmation;
+        if (pending is null)
+        {
+            return;
+        }
+
+        using var form = new PendingUpdateConfirmationForm(_statusClient, pending);
+        form.ShowDialog();
+        _ = RefreshStatusAsync();
+    }
+
+    private static string PendingUpdateMarkerFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "AraraSuite", "pending-update-notified.txt");
+
+    private static bool HasAlreadyNotifiedPendingUpdate(string version)
+    {
+        try
+        {
+            return File.Exists(PendingUpdateMarkerFile) && File.ReadAllText(PendingUpdateMarkerFile) == version;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void MarkPendingUpdateNotified(string version)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PendingUpdateMarkerFile)!);
+            File.WriteAllText(PendingUpdateMarkerFile, version);
+        }
+        catch
+        {
+            // Notificacao de conveniencia — falha aqui nunca deve impedir a bandeja de continuar.
+        }
     }
 
     private void CopyInstanceId()

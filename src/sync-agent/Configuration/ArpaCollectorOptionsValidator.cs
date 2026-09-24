@@ -14,36 +14,9 @@ public sealed class ArpaCollectorOptionsValidator : IValidateOptions<ArpaCollect
 
         var failures = new List<string>();
 
-        if (options.UseRemoteConfig)
-        {
-            if (string.IsNullOrWhiteSpace(options.RemoteConfigCacheProtectedFile))
-            {
-                failures.Add($"{ArpaCollectorOptions.SectionName}:RemoteConfigCacheProtectedFile is required when UseRemoteConfig is true.");
-            }
-
-            if (options.RemoteConfigRefreshMinutes < 1)
-            {
-                failures.Add($"{ArpaCollectorOptions.SectionName}:RemoteConfigRefreshMinutes must be at least 1.");
-            }
-
-            if (options.RemoteConfigTimeoutSeconds < 1)
-            {
-                failures.Add($"{ArpaCollectorOptions.SectionName}:RemoteConfigTimeoutSeconds must be at least 1.");
-            }
-
-            if (options.BatchSize is < 1 or > 10_000)
-            {
-                failures.Add($"{ArpaCollectorOptions.SectionName}:BatchSize must be between 1 and 10000.");
-            }
-
-            return failures.Count == 0
-                ? ValidateOptionsResult.Success
-                : ValidateOptionsResult.Fail(failures);
-        }
-
         // Modo store local (aba Configuracoes > Arpa): Enabled=true sem
-        // ConnectionString estatica nem UseRemoteConfig. As conexoes vem do
-        // arquivo DPAPI e sao validadas em runtime, nao aqui.
+        // ConnectionString estatica. As conexoes vem do arquivo DPAPI e sao
+        // validadas em runtime, nao aqui.
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
             if (options.BatchSize is < 1 or > 10_000)

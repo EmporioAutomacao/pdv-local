@@ -63,8 +63,7 @@ Cliente que **nao usa Arpa Control**: deixar desativado (botao, ou
 Cada linha da tabela e uma conexao com um banco Arpa Control, mapeada a uma
 Loja/Estoque do ERP. Salvas **nesta maquina**, cifradas por DPAPI LocalMachine
 em `arpa-connections.dpapi` (contem senha). Precedencia sobre
-`ConnectionString`/`Entities` estaticos do `appsettings.json` e sobre
-`UseRemoteConfig`.
+`ConnectionString`/`Entities` estaticos do `appsettings.json`.
 
 Campos do formulario:
 

@@ -41,6 +41,7 @@ param(
     [switch]$SkipDatabaseBootstrap,
     [switch]$SkipServiceStart,
     [switch]$SkipTrayStartup,
+    [switch]$SkipPdv,
     [switch]$ValidateOnly
 )
 
@@ -402,6 +403,7 @@ function Install-PdvAppShortcuts {
 
 $isWindowsPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
 $layout = Resolve-PackageLayout
+$installPdv = -not $SkipPdv
 
 if ($EnableArpaCollector -and -not $isWindowsPlatform) {
     throw "-EnableArpaCollector com senha protegida requer Windows DPAPI."
@@ -425,7 +427,7 @@ if ($ValidateOnly) {
         throw "Payload Sync Tray invalido ou incompleto: $trayArtifactDir"
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $pdvAppArtifactDir "PdvLocal.App.exe"))) {
+    if ($installPdv -and -not (Test-Path -LiteralPath (Join-Path $pdvAppArtifactDir "PdvLocal.App.exe"))) {
         throw "Payload PDV invalido ou incompleto: $pdvAppArtifactDir"
     }
 
@@ -453,7 +455,12 @@ if ($ValidateOnly) {
     Write-Host "Layout root: $($layout.Root)"
     Write-Host "Sync Agent payload: $syncAgentArtifactDir"
     Write-Host "Sync Tray payload: $trayArtifactDir"
-    Write-Host "PDV payload: $pdvAppArtifactDir"
+    if ($installPdv) {
+        Write-Host "PDV payload: $pdvAppArtifactDir"
+    }
+    else {
+        Write-Host "PDV payload: ignorado (-SkipPdv)"
+    }
     Write-Host "Installer payload: $($layout.InstallerArtifact)"
     Write-Host ".NET payload: $($dotNetInstaller.FullName)"
     Write-Host "VC++ payload: $($vcRuntimeInstaller.FullName)"
@@ -473,13 +480,15 @@ if ($PublishFromSource) {
     $repoAgentProject = Join-Path $layout.Root "src\sync-agent\SyncAgent.csproj"
     $repoTrayProject = Join-Path $layout.Root "src\sync-agent-tray\SyncAgent.Tray.csproj"
     $repoPdvAppProject = Join-Path $layout.Root "src\pdv-app\PdvLocal.App.csproj"
-    if (-not (Test-Path -LiteralPath $repoAgentProject) -or -not (Test-Path -LiteralPath $repoTrayProject) -or -not (Test-Path -LiteralPath $repoPdvAppProject)) {
+    if (-not (Test-Path -LiteralPath $repoAgentProject) -or -not (Test-Path -LiteralPath $repoTrayProject) -or ($installPdv -and -not (Test-Path -LiteralPath $repoPdvAppProject))) {
         throw "-PublishFromSource requer execucao a partir do repositorio, nao do pacote de instalacao."
     }
 
     & dotnet publish $repoAgentProject -c Release -r win-x64 --self-contained false -o $syncAgentArtifactDir
     & dotnet publish $repoTrayProject -c Release -r win-x64 --self-contained false -o $trayArtifactDir
-    & dotnet publish $repoPdvAppProject -c Release -r win-x64 --self-contained false -o $pdvAppArtifactDir
+    if ($installPdv) {
+        & dotnet publish $repoPdvAppProject -c Release -r win-x64 --self-contained false -o $pdvAppArtifactDir
+    }
 }
 
 if (-not $SkipDatabaseBootstrap) {
@@ -516,7 +525,9 @@ if (-not [string]::IsNullOrWhiteSpace($AccessToken) -or -not [string]::IsNullOrW
 
 Copy-DirectoryContents -Source $syncAgentArtifactDir -Destination $syncAgentInstallDir
 Copy-DirectoryContents -Source $trayArtifactDir -Destination $trayInstallDir
-Copy-DirectoryContents -Source $pdvAppArtifactDir -Destination $pdvAppInstallDir
+if ($installPdv) {
+    Copy-DirectoryContents -Source $pdvAppArtifactDir -Destination $pdvAppInstallDir
+}
 
 if ($EnableArpaCollector) {
     $resolvedArpaPasswordProtectedFile = $ArpaPasswordProtectedFile
@@ -529,7 +540,9 @@ if ($EnableArpaCollector) {
 }
 
 Write-AgentConfig -ConfigPath (Join-Path $syncAgentInstallDir "appsettings.json")
-Write-PdvAppConfig -ConfigPath (Join-Path $pdvAppInstallDir "appsettings.json")
+if ($installPdv) {
+    Write-PdvAppConfig -ConfigPath (Join-Path $pdvAppInstallDir "appsettings.json")
+}
 
 # Deploy self-update script e arquivo VERSION (usados pelo mecanismo de auto-update)
 $selfUpdateScript = Join-Path $PSScriptRoot "self-update.ps1"
@@ -540,9 +553,11 @@ $AgentVersion | Set-Content (Join-Path $syncAgentInstallDir "VERSION") -Encoding
 
 $serviceExe = Join-Path $syncAgentInstallDir "SyncAgent.exe"
 $trayExe = Join-Path $trayInstallDir "SyncAgent.Tray.exe"
-$pdvAppExe = Join-Path $pdvAppInstallDir "PdvLocal.App.exe"
 Install-OrUpdateService -ExecutablePath $serviceExe -WorkingDirectory $syncAgentInstallDir
-Install-PdvAppShortcuts -PdvAppExecutablePath $pdvAppExe
+if ($installPdv) {
+    $pdvAppExe = Join-Path $pdvAppInstallDir "PdvLocal.App.exe"
+    Install-PdvAppShortcuts -PdvAppExecutablePath $pdvAppExe
+}
 
 if (-not $SkipTrayStartup) {
     Install-TrayStartupShortcut -TrayExecutablePath $trayExe
@@ -555,3 +570,4 @@ if (-not $SkipServiceStart) {
 Write-Host "Sync Agent installed."
 Write-Host "Service: $ServiceName"
 Write-Host "Status URL: http://127.0.0.1:47891/status"
+Write-Host "PDV: $(if ($installPdv) { 'instalado' } else { 'ignorado (-SkipPdv)' })"

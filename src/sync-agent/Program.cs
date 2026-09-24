@@ -86,9 +86,7 @@ builder.Services.AddSingleton<LocalDbMaintenanceRunner>();
 builder.Services.AddSingleton<ProvisioningStore>();
 builder.Services.AddSingleton<EffectiveSyncAgentConfigurationProvider>();
 builder.Services.AddSingleton<ErpActivationClient>();
-builder.Services.AddSingleton<ArpaConnectionConfigClient>();
 builder.Services.AddSingleton<ArpaLojaListClient>();
-builder.Services.AddSingleton<ArpaRemoteConfigCache>();
 builder.Services.AddSingleton<EffectiveArpaCollectorConfigurationProvider>();
 builder.Services.AddSingleton<ArpaCollector>();
 builder.Services.AddSingleton<ArpaResyncProcessor>();
@@ -96,6 +94,9 @@ builder.Services.AddSingleton<ErpCredentialProvider>();
 builder.Services.AddSingleton<ErpEventDispatcher>();
 builder.Services.AddSingleton<ErpHeartbeatClient>();
 builder.Services.AddSingleton<ErpResyncAckClient>();
+builder.Services.AddSingleton<ErpUpdateAckClient>();
+builder.Services.AddSingleton<PendingUpdateConfirmationState>();
+builder.Services.AddSingleton<PendingUpdateConfirmationGate>();
 builder.Services.AddSingleton<ErpReconciliationClient>();
 builder.Services.AddSingleton<PdvOperatorSnapshotClient>();
 builder.Services.AddSingleton<PdvProductSnapshotClient>();
@@ -119,8 +120,6 @@ builder.Services.AddHttpClient(PdvPaymentMethodsSnapshotHttpClient.Name)
 builder.Services.AddHttpClient(PdvCustomerSnapshotHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpActivationHttpClient.Name);
-builder.Services.AddHttpClient(ArpaConnectionConfigHttpClient.Name)
-    .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ArpaLojaListHttpClient.Name)
     .ConfigurePrimaryHttpMessageHandler(ErpHttpClientHandlerFactory.CreateHandler);
 builder.Services.AddHttpClient(ErpLatestPackageHttpClient.Name)

@@ -53,6 +53,21 @@ public sealed class LocalStatusClient : IDisposable
             ?? throw new InvalidOperationException("Update-status response is empty.");
     }
 
+    public async Task<SyncNowResponse> ConfirmPendingUpdateAsync()
+    {
+        using var response = await _httpClient.PostAsync("/pending-update/confirm", content: null);
+        return await response.Content.ReadFromJsonAsync<SyncNowResponse>()
+            ?? throw new InvalidOperationException("Pending-update/confirm response is empty.");
+    }
+
+    public async Task<SyncNowResponse> SchedulePendingUpdateAsync(DateTimeOffset scheduledAt)
+    {
+        using var content = JsonContent.Create(new { scheduled_at = scheduledAt });
+        using var response = await _httpClient.PostAsync("/pending-update/schedule", content);
+        return await response.Content.ReadFromJsonAsync<SyncNowResponse>()
+            ?? throw new InvalidOperationException("Pending-update/schedule response is empty.");
+    }
+
     public void Dispose()
     {
         _httpClient.Dispose();

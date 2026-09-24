@@ -225,7 +225,10 @@ public sealed record PendingUpdateCommand(
     [property: JsonPropertyName("version")] string Version,
     [property: JsonPropertyName("download_url")] string DownloadUrl,
     [property: JsonPropertyName("sha256")] string Sha256,
-    [property: JsonPropertyName("release_notes")] string? ReleaseNotes = null);
+    [property: JsonPropertyName("release_notes")] string? ReleaseNotes = null,
+    [property: JsonPropertyName("confirmation_mode")] string? ConfirmationMode = null,
+    [property: JsonPropertyName("deadline_at")] DateTimeOffset? DeadlineAt = null,
+    [property: JsonPropertyName("scheduled_at")] DateTimeOffset? ScheduledAt = null);
 
 public sealed record PendingResyncCommand(
     [property: JsonPropertyName("id")] int Id,

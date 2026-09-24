@@ -13,6 +13,7 @@ param(
     [string]$AccessTokenFile = "",
     [switch]$SkipDatabase,
     [switch]$SkipErp,
+    [switch]$SkipPdv,
     [string]$EvidenceOutput = ".\artifacts\sync-agent-clean-install-evidence.json"
 )
 
@@ -123,12 +124,22 @@ try {
 
     Add-Check $checks "agent_payload" (Test-Path -LiteralPath $agentPath) "SyncAgent.exe em $agentPath."
     Add-Check $checks "tray_payload" (Test-Path -LiteralPath $trayPath) "SyncAgent.Tray.exe em $trayPath."
-    Add-Check $checks "pdv_app_payload" (Test-Path -LiteralPath $pdvAppPath) "PdvLocal.App.exe em $pdvAppPath."
-    Add-Check $checks "pdv_core_payload" (Test-Path -LiteralPath $pdvCorePath) "PdvLocal.Core.dll em $pdvCorePath."
     Add-Check $checks "appsettings_exists" (Test-Path -LiteralPath $configPath) "appsettings.json em $configPath."
-    Add-Check $checks "pdv_appsettings_exists" (Test-Path -LiteralPath $pdvAppConfigPath) "appsettings.json em $pdvAppConfigPath."
-    Add-Check $checks "pdv_desktop_shortcut" (Test-Path -LiteralPath $desktopShortcutPath) "Atalho Desktop em $desktopShortcutPath."
-    Add-Check $checks "pdv_start_menu_shortcut" (Test-Path -LiteralPath $programsShortcutPath) "Atalho Menu Iniciar em $programsShortcutPath."
+
+    if ($SkipPdv) {
+        Add-Check $checks "pdv_app_payload" $true "Validacao de PDV ignorada por -SkipPdv."
+        Add-Check $checks "pdv_core_payload" $true "Validacao de PDV ignorada por -SkipPdv."
+        Add-Check $checks "pdv_appsettings_exists" $true "Validacao de PDV ignorada por -SkipPdv."
+        Add-Check $checks "pdv_desktop_shortcut" $true "Validacao de PDV ignorada por -SkipPdv."
+        Add-Check $checks "pdv_start_menu_shortcut" $true "Validacao de PDV ignorada por -SkipPdv."
+    }
+    else {
+        Add-Check $checks "pdv_app_payload" (Test-Path -LiteralPath $pdvAppPath) "PdvLocal.App.exe em $pdvAppPath."
+        Add-Check $checks "pdv_core_payload" (Test-Path -LiteralPath $pdvCorePath) "PdvLocal.Core.dll em $pdvCorePath."
+        Add-Check $checks "pdv_appsettings_exists" (Test-Path -LiteralPath $pdvAppConfigPath) "appsettings.json em $pdvAppConfigPath."
+        Add-Check $checks "pdv_desktop_shortcut" (Test-Path -LiteralPath $desktopShortcutPath) "Atalho Desktop em $desktopShortcutPath."
+        Add-Check $checks "pdv_start_menu_shortcut" (Test-Path -LiteralPath $programsShortcutPath) "Atalho Menu Iniciar em $programsShortcutPath."
+    }
 
     if (Test-Path -LiteralPath $configPath) {
         $configText = Get-Content -LiteralPath $configPath -Raw
@@ -136,7 +147,11 @@ try {
         Add-Check $checks "erp_pdv_snapshot_configured" ($configText -match '"ErpPdvSnapshot"') "Configuracao de importacao de operadores PDV presente."
     }
 
-    if (Test-Path -LiteralPath $pdvAppConfigPath) {
+    if ($SkipPdv) {
+        Add-Check $checks "pdv_app_config_has_local_api" $true "Validacao de PDV ignorada por -SkipPdv."
+        Add-Check $checks "pdv_app_config_has_tef" $true "Validacao de PDV ignorada por -SkipPdv."
+    }
+    elseif (Test-Path -LiteralPath $pdvAppConfigPath) {
         $pdvAppConfigText = Get-Content -LiteralPath $pdvAppConfigPath -Raw
         Add-Check $checks "pdv_app_config_has_local_api" ($pdvAppConfigText -match '"LocalApiBaseUrl"\s*:\s*"http://127\.0\.0\.1:47891"') "PDV App aponta para API local do SyncAgent."
         Add-Check $checks "pdv_app_config_has_tef" ($pdvAppConfigText -match '"Tef"') "PDV App tem secao Tef no appsettings."

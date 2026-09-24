@@ -315,6 +315,10 @@ try {
     foreach ($comp in $components) {
         $src = Join-Path $payloadDir $comp.Relative
         $dst = Join-Path $InstallRoot $comp.Relative
+        if ($comp.Name -eq 'PDV' -and -not (Test-Path $dst)) {
+            Write-Log "PDV nao esta instalado nesta maquina - pulando atualizacao do componente PDV."
+            continue
+        }
         if (Test-Path $src) {
             Copy-TreeWithRetry -Source $src -Destination $dst -Label $comp.Name
             Write-Log "Copiado: $($comp.Name)"

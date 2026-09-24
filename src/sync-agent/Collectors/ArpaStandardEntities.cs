@@ -49,7 +49,15 @@ public static class ArpaStandardEntities
             entities.Add(Make("vendas", "venda"));
         }
 
-        if (financeiro)
+        // Financeiro (parcelas/titulos) e obrigatorio sempre que Vendas estiver
+        // habilitado: o ERP nao gera titulo a partir do evento de venda do Arpa
+        // (apply_arpa_venda so cria Venda/VendaItem) - quem cria TituloReceber/
+        // TituloPagar e o evento entity_type=financeiro, casado a venda por
+        // codigo_venda_arpa (domain_processor.apply_financeiro). Sem essa
+        // entidade tambem habilitada, a venda chega ao ERP sem parcela. O
+        // mesmo acoplamento deve valer para o futuro modulo de Compras
+        // (entity_type=compra) quando ele for adicionado aqui.
+        if (financeiro || vendas)
         {
             entities.Add(Make("financeiro", "financeiro"));
         }

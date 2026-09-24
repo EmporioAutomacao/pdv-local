@@ -31,7 +31,7 @@ public sealed class Worker : BackgroundService
     private readonly ManualSyncSignal _manualSyncSignal;
     private readonly SyncAgentRuntimeState _runtimeState;
     private readonly ArpaSyncRunLog _arpaSyncRunLog;
-    private readonly SelfUpdater _selfUpdater;
+    private readonly PendingUpdateConfirmationGate _pendingUpdateGate;
     private readonly ArpaResyncProcessor _arpaResyncProcessor;
     private readonly ErpResyncAckClient _erpResyncAckClient;
 
@@ -53,7 +53,7 @@ public sealed class Worker : BackgroundService
         ManualSyncSignal manualSyncSignal,
         SyncAgentRuntimeState runtimeState,
         ArpaSyncRunLog arpaSyncRunLog,
-        SelfUpdater selfUpdater,
+        PendingUpdateConfirmationGate pendingUpdateGate,
         ArpaResyncProcessor arpaResyncProcessor,
         ErpResyncAckClient erpResyncAckClient)
     {
@@ -74,7 +74,7 @@ public sealed class Worker : BackgroundService
         _manualSyncSignal = manualSyncSignal;
         _runtimeState = runtimeState;
         _arpaSyncRunLog = arpaSyncRunLog;
-        _selfUpdater = selfUpdater;
+        _pendingUpdateGate = pendingUpdateGate;
         _arpaResyncProcessor = arpaResyncProcessor;
         _erpResyncAckClient = erpResyncAckClient;
     }
@@ -201,7 +201,7 @@ public sealed class Worker : BackgroundService
 
         if (heartbeatSummary.PendingUpdate is { } pendingUpdate)
         {
-            var triggered = await _selfUpdater.ApplyIfNeededAsync(pendingUpdate, cancellationToken);
+            var triggered = await _pendingUpdateGate.EvaluateAsync(pendingUpdate, cancellationToken);
             if (triggered)
             {
                 _arpaSyncRunLog.EndRun("Atualizacao do aplicativo iniciada - a sincronizacao continua apos o reinicio.");

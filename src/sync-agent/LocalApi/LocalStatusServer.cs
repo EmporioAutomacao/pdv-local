@@ -70,6 +70,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ArpaSyncRunLog _arpaSyncRunLog;
     private readonly SelfUpdater _selfUpdater;
     private readonly UpdateProgressState _updateProgress;
+    private readonly PendingUpdateConfirmationGate _pendingUpdateGate;
 
     // Pre-preenchimento da tela /setup entre tentativas. A URL do ERP nao e segredo
     // e tambem e persistida em disco; o codigo de ativacao fica apenas aqui em
@@ -96,7 +97,8 @@ public sealed class LocalStatusServer : BackgroundService
         SyncAgentRuntimeState runtimeState,
         ArpaSyncRunLog arpaSyncRunLog,
         SelfUpdater selfUpdater,
-        UpdateProgressState updateProgress)
+        UpdateProgressState updateProgress,
+        PendingUpdateConfirmationGate pendingUpdateGate)
     {
         _logger = logger;
         _options = options;
@@ -116,6 +118,7 @@ public sealed class LocalStatusServer : BackgroundService
         _arpaSyncRunLog = arpaSyncRunLog;
         _selfUpdater = selfUpdater;
         _updateProgress = updateProgress;
+        _pendingUpdateGate = pendingUpdateGate;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -385,6 +388,59 @@ public sealed class LocalStatusServer : BackgroundService
                 return;
             }
 
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/pending-update/confirm")
+            {
+                _ = Task.Run(() => _pendingUpdateGate.ConfirmNowAsync(CancellationToken.None));
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.Accepted,
+                    new { accepted = true, message = "Atualizacao confirmada - aplicando agora." },
+                    cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/pending-update/schedule")
+            {
+                DateTimeOffset? scheduledAt;
+                try
+                {
+                    scheduledAt = await ReadScheduledAtAsync(context.Request, cancellationToken);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.BadRequest,
+                        new { accepted = false, message = ex.Message },
+                        cancellationToken);
+                    return;
+                }
+
+                if (scheduledAt is null || scheduledAt <= DateTimeOffset.UtcNow)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.BadRequest,
+                        new { accepted = false, message = "Corpo deve conter {\"scheduled_at\": \"<ISO 8601 no futuro>\"}." },
+                        cancellationToken);
+                    return;
+                }
+
+                var scheduled = await _pendingUpdateGate.ScheduleAsync(scheduledAt.Value, cancellationToken);
+                await WriteJsonAsync(
+                    context.Response,
+                    scheduled ? HttpStatusCode.Accepted : HttpStatusCode.Conflict,
+                    new
+                    {
+                        accepted = scheduled,
+                        message = scheduled
+                            ? $"Atualizacao agendada para {scheduledAt.Value:yyyy-MM-dd HH:mm}."
+                            : "Nao ha atualizacao pendente para agendar.",
+                    },
+                    cancellationToken);
+                return;
+            }
+
             if (context.Request.HttpMethod == "POST" && context.Request.Url?.AbsolutePath == "/pdv-sales/reprocess")
             {
                 await HandlePdvSaleReprocessAsync(context, cancellationToken);
@@ -418,6 +474,7 @@ public sealed class LocalStatusServer : BackgroundService
         var storeStatus = await _localStore.GetStatusAsync(cancellationToken);
         var runtimeState = _runtimeState.Snapshot;
         var configWarnings = ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue);
+        var pendingUpdateConfirmation = _pendingUpdateGate.CurrentView;
 
         await WriteJsonAsync(
             response,
@@ -425,6 +482,16 @@ public sealed class LocalStatusServer : BackgroundService
             new
             {
                 status = "ok",
+                pending_update_confirmation = pendingUpdateConfirmation is null
+                    ? null
+                    : new
+                    {
+                        version = pendingUpdateConfirmation.Version,
+                        release_notes = pendingUpdateConfirmation.ReleaseNotes,
+                        deadline_at_utc = pendingUpdateConfirmation.DeadlineAtUtc,
+                        scheduled_at_utc = pendingUpdateConfirmation.ScheduledAtUtc,
+                        awaiting_choice = true,
+                    },
                 timestamp_utc = DateTimeOffset.UtcNow,
                 config_warnings = configWarnings,
                 provisioning_enabled = effectiveOptions.IsProvisioningEnabled,
@@ -709,17 +776,21 @@ public sealed class LocalStatusServer : BackgroundService
 
                 <section class="panel">
                   <h2>Atualizacao administrativa (agendada pelo ERP)</h2>
-                  <p>O operador do ERP pode enviar uma atualizacao remota para uma versao especifica, sem acesso direto a esta maquina.</p>
+                  <p>O operador do ERP pode enviar uma atualizacao remota para uma versao especifica, sem acesso direto a esta maquina, em dois modos (contrato Sync 2.14.0): <strong>Aplicar imediatamente</strong> (comportamento historico, o unico que agentes anteriores a esta versao entendem) ou <strong>Confirmar com o usuario</strong> (padrao a partir daqui).</p>
                   <table>
                     <tr><th>Etapa</th><th>Descricao</th></tr>
                     <tr><td>1. Pacote</td><td>O build script registra o pacote automaticamente em <strong>API de Sincronizacao &gt; Pacotes de atualizacao</strong> ao gerar o ZIP.</td></tr>
-                    <tr><td>2. ERP Admin</td><td>Em <strong>API de Sincronizacao &gt; Instalacoes do PDV</strong>, selecione a instalacao, acao <em>Solicitar atualizacao</em>, escolha o pacote no dropdown e clique <em>Agendar atualizacao</em>.</td></tr>
+                    <tr><td>2. ERP Admin</td><td>Em <strong>API de Sincronizacao &gt; Instalacoes do PDV</strong> (ou em <strong>Codigos de Ativacao</strong>, selecionando o codigo da maquina), acao <em>Solicitar atualizacao</em>, escolha o pacote e o modo de aplicacao, e clique <em>Agendar atualizacao</em>.</td></tr>
                     <tr><td>3. Heartbeat</td><td>Em ate 30s, o agente recebe <code>pending_update</code> na resposta do ERP.</td></tr>
-                    <tr><td>4. Download</td><td>O agente baixa o ZIP e verifica o SHA256 antes de prosseguir.</td></tr>
-                    <tr><td>5. Atualizacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico.</td></tr>
-                    <tr><td>6. Rollback</td><td>Se o servico nao iniciar, o script restaura o backup automaticamente.</td></tr>
+                    <tr><td>4. Confirmacao (so no modo "Confirmar com o usuario")</td><td>A bandeja avisa o usuario local com a versao e as notas. Ele pode clicar <strong>Atualizar agora</strong>, escolher <strong>Agendar para...</strong> um horario melhor, ou nao fazer nada - nesse caso a atualizacao aplica sozinha em 5 minutos.</td></tr>
+                    <tr><td>5. Download</td><td>O agente baixa o ZIP e verifica o SHA256 antes de prosseguir.</td></tr>
+                    <tr><td>6. Atualizacao</td><td><code>self-update.ps1</code> faz backup, substitui binarios e reinicia o servico.</td></tr>
+                    <tr><td>7. Rollback</td><td>Se o servico nao iniciar, o script restaura o backup automaticamente.</td></tr>
                   </table>
-                  <p style="margin-top:10px;">O PDV App e a bandeja encerram durante a atualizacao (qualquer um dos dois fluxos). O tempo de interrupcao e inferior a 60 segundos. A bandeja reabre sozinha ao final.</p>
+                  <p style="margin-top:10px;">O PDV App e a bandeja encerram durante a atualizacao (qualquer um dos fluxos desta pagina). O tempo de interrupcao e inferior a 60 segundos. A bandeja reabre sozinha ao final.</p>
+                  <p>Endpoints locais do fluxo de confirmacao (usados pela bandeja; tambem chamaveis manualmente para suporte):</p>
+                  <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/pending-update/confirm" -Method Post
+            Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/pending-update/schedule" -Method Post -ContentType "application/json" -Body '{"scheduled_at":"2026-09-22T18:00:00Z"}'</pre>
                   <p>Para solicitar verificacao imediata do agendamento administrativo (sem esperar o proximo ciclo, e sem buscar a ultima versao publicada):</p>
                   <pre>Invoke-RestMethod -Uri "http://127.0.0.1:{{options.LocalStatusPort}}/check-update" -Method Post</pre>
                   <p>Ou use o botao <strong>Verificar atualizacao</strong> em Detalhes Tecnicos no PDV App.</p>
@@ -2395,6 +2466,51 @@ public sealed class LocalStatusServer : BackgroundService
         }
 
         return node?["version"]?.GetValue<string>();
+    }
+
+    private static async Task<DateTimeOffset?> ReadScheduledAtAsync(
+        HttpListenerRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.ContentLength64 > MaxUpdateNowBodyBytes)
+        {
+            throw new InvalidOperationException("Corpo da requisicao excedeu o tamanho maximo aceito.");
+        }
+
+        using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+        var body = await reader.ReadToEndAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        if (Encoding.UTF8.GetByteCount(body) > MaxUpdateNowBodyBytes)
+        {
+            throw new InvalidOperationException("Corpo da requisicao excedeu o tamanho maximo aceito.");
+        }
+
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(body);
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("Corpo deve ser um JSON valido: {\"scheduled_at\": \"<ISO 8601>\"}.");
+        }
+
+        var raw = node?["scheduled_at"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (!DateTimeOffset.TryParse(raw, out var parsed))
+        {
+            throw new InvalidOperationException("scheduled_at deve ser uma data/hora ISO 8601 valida.");
+        }
+
+        return parsed;
     }
 
     private static Task<Dictionary<string, string>> ReadFormAsync(

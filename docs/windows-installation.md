@@ -142,9 +142,12 @@ O instalador:
 - importa PFX quando `-PfxPath` for informado;
 - opcionalmente protege a senha read-only do Arpa com DPAPI LocalMachine;
 - copia os artefatos para `C:\Program Files\AraraSuite.com.br`;
-- copia o PDV App para `C:\Program Files\AraraSuite.com.br\PDV`;
+- copia o PDV App para `C:\Program Files\AraraSuite.com.br\PDV`, a menos que
+  `-SkipPdv` seja informado (o SyncAgent continua funcionando sozinho, ou com
+  o coletor Arpa habilitado — util quando o cliente nao usa o PDV local da
+  AraraSuite);
 - grava `appsettings.json` provisionado do SyncAgent;
-- grava `appsettings.json` provisionado do PDV App;
+- grava `appsettings.json` provisionado do PDV App (pulado junto com `-SkipPdv`);
 - habilita `ErpPdvSnapshot` no SyncAgent instalado para importar operadores do
   ERP para `pdv.operators`;
 - instala/atualiza o Windows Service `AraraSuiteSync` (AraraSuite Sync);
@@ -214,6 +217,25 @@ Para instalar ja com o coletor Arpa habilitado no piloto Anapolis:
   -ArpaBatchSize 5000
 ```
 
+Para instalar somente o SyncAgent (sem o PDV local), por exemplo quando o
+cliente so precisa do coletor Arpa ou de outra integracao futura:
+
+```powershell
+.\infra\windows\install-sync-agent.ps1 `
+  -EnablePostInstallActivation `
+  -PostgresAdminPassword (Read-Host "Senha admin PostgreSQL" -AsSecureString) `
+  -DatabasePassword "<senha-local-pdv-sync>" `
+  -SkipPdv
+```
+
+`-SkipPdv` nao afeta o pacote de instalacao (o PDV App continua embutido no
+`.exe`/pacote) — a opcao e so sobre o que e instalado *nesta maquina*. Um
+`self-update.ps1` posterior detecta que o PDV nunca foi instalado ali e nao o
+reintroduz sozinho. Ao validar a instalacao com
+`test-sync-agent-clean-install.ps1`, passe `-SkipPdv` la tambem, senao as
+checagens de PDV (`pdv_app_payload`, `pdv_appsettings_exists`, etc.) falsamente
+acusam falha.
+
 Para instalar sem credenciais do ERP e ativar pelo dashboard local depois:
 
 ```powershell
@@ -280,6 +302,9 @@ Desktop Runtime na maquina limpa antes da instalacao.
 
 Ele coleta:
 
+- se deve instalar o PDV App nesta maquina (`Instalar o PDV (ponto de venda)`,
+  marcado por padrao — desmarque quando a instalacao for so o SyncAgent com
+  outra integracao, ex.: coletor Arpa, sem o PDV local);
 - dados do PostgreSQL local;
 - senha admin do PostgreSQL;
 - senha do usuario local `pdv_sync`;
@@ -364,7 +389,10 @@ O caminho PowerShell permanece disponivel para automacao e suporte.
 Na tela de revisao, a opcao `Executar validacao de instalacao ao concluir`
 fica marcada por padrao. Quando habilitada, o instalador chama
 `infra\test-sync-agent-clean-install.ps1 -SkipErp` apos instalar o servico e
-grava a evidencia no caminho informado.
+grava a evidencia no caminho informado — acrescentando `-SkipPdv` automaticamente
+quando a opcao `Instalar o PDV` da tela de boas-vindas estiver desmarcada, para
+as checagens de PDV nao acusarem falha por algo que nao foi instalado de
+proposito.
 
 ### Requisito rigido: PostgreSQL no instalador
 

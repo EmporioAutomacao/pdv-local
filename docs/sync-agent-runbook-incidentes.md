@@ -244,6 +244,67 @@ Passos:
 Invoke-RestMethod http://127.0.0.1:47891/status
 ```
 
+## Incidente: atualizacao pendente presa em confirmacao (contrato Sync 2.14.0)
+
+Sinais:
+
+- ERP mostra `pending_update_version` preenchido ha muito tempo, sem aplicar;
+- bandeja mostra o item de menu **Atualizacao pendente...**, mas o usuario
+  nao viu o balao ou fechou a janela sem decidir;
+- `pending_update_deadline_at`/`pending_update_scheduled_at` no admin do ERP
+  parecem no passado, mas a maquina nao atualizou.
+
+Diagnostico:
+
+1. Confirmar o estado local (arquivo na raiz da instalacao, nao na API —
+   sobrevive a reinicios do servico):
+
+```powershell
+Get-Content "C:\Program Files\AraraSuite.com.br\pending-update-confirmation.json"
+```
+
+2. Confirmar o que a API local esta reportando (fonte usada pela bandeja):
+
+```powershell
+(Invoke-RestMethod http://127.0.0.1:47891/status).pending_update_confirmation
+```
+
+3. Se `awaiting_choice=true` e o prazo (`deadline_at_utc`/`scheduled_at_utc`)
+   ja passou, o proximo heartbeat (ate 30s) deve aplicar sozinho — o
+   `PendingUpdateConfirmationGate` reavalia a cada ciclo. Se nao aplicar
+   depois de mais de 1 minuto do prazo vencido, confirmar que o servico
+   `AraraSuiteSync` esta rodando e que o heartbeat esta tendo sucesso
+   (`last_heartbeat_succeeded` em `/status`).
+
+Passos para desbloquear manualmente:
+
+- **Aplicar agora, sem esperar o prazo:**
+
+  ```powershell
+  Invoke-RestMethod http://127.0.0.1:47891/pending-update/confirm -Method Post
+  ```
+
+- **Reagendar para um horario melhor** (evita interromper o operador no meio
+  de um atendimento):
+
+  ```powershell
+  Invoke-RestMethod http://127.0.0.1:47891/pending-update/schedule -Method Post `
+    -ContentType "application/json" -Body '{"scheduled_at":"2026-09-23T20:00:00Z"}'
+  ```
+
+- **Cancelar o agendamento administrativo por completo** (se foi engano): no
+  ERP admin, **Instalacoes do PDV** > abrir a instalacao > limpar
+  `pending_update_version` manualmente, ou gerar um novo agendamento com a
+  mesma versao instalada (o ERP auto-limpa quando `pending_update_version ==
+  agent_version` no proximo heartbeat).
+
+Nao apagar `pending-update-confirmation.json` a mao como primeira tentativa —
+o ERP continua sendo a fonte de verdade (`pending_update.deadline_at`/
+`scheduled_at` no heartbeat), o arquivo local so evita reperguntar ao usuario
+e cobre janelas curtas offline. Apagar o arquivo faz o agente tratar o pedido
+como novo e reenviar `update:ack action=presented` (reinicia a contagem dos 5
+minutos) — util so se o arquivo estiver corrompido.
+
 ## Incidente: permissao read-only Arpa
 
 Sinais:

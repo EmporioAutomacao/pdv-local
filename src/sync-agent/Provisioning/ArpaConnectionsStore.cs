@@ -10,7 +10,7 @@ namespace SyncAgent.Provisioning;
 /// <summary>
 /// Persiste a lista de conexoes Arpa geridas pelo dashboard (aba
 /// Configuracoes > Arpa) num arquivo JSON cifrado por DPAPI LocalMachine.
-/// Espelha <see cref="ArpaRemoteConfigCache"/>: contem senhas, cifrado inteiro.
+/// Contem senhas, cifrado inteiro.
 /// </summary>
 public sealed class ArpaConnectionsStore
 {
