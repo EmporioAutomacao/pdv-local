@@ -576,7 +576,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
-                main { max-width: 960px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 28px; }
                 .muted { color: #64748b; margin-top: 0; }
                 {{BaseStyles}}
@@ -657,7 +656,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>Ajuda - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; line-height: 1.5; }
-                main { max-width: 980px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 28px; }
                 h2 { margin-top: 28px; font-size: 20px; }
                 h3 { margin-top: 20px; font-size: 16px; }
@@ -897,7 +895,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>Logs - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
-                main { max-width: 1180px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 28px; }
                 .muted { color: #64748b; margin-top: 0; }
                 {{BaseStyles}}
@@ -1103,7 +1100,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>Ativacao - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
-                main { max-width: 760px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 28px; }
                 h2 { margin-top: 0; font-size: 20px; }
                 .muted { color: #64748b; margin-top: 0; }
@@ -1354,7 +1350,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>Configuracoes - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
-                main { max-width: 860px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 28px; }
                 h2 { margin: 0 0 6px; font-size: 18px; }
                 .muted { color: #64748b; margin: 0; }
@@ -1436,7 +1431,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>Manutencao do banco local - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
-                main { max-width: 760px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 28px; }
                 h2 { margin-top: 0; font-size: 18px; }
                 .muted { color: #64748b; margin-top: 0; }
@@ -1714,7 +1708,6 @@ public sealed class LocalStatusServer : BackgroundService
               <title>Configuracoes - Arpa - AraraSuite Sync</title>
               <style>
                 body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
-                main { max-width: 960px; margin: 0 auto; }
                 h1 { margin-bottom: 4px; font-size: 26px; }
                 h2 { font-size: 18px; }
                 .muted { color: #64748b; }
@@ -2709,6 +2702,13 @@ public sealed class LocalStatusServer : BackgroundService
     }
 
     private static string BaseStyles => """
+                /* Largura padrao de todas as paginas do dashboard local: uma unica regra
+                   aqui em vez de repetida em cada pagina (BaseStyles entra nas 7), com
+                   respiro lateral menor em telas estreitas em vez de fixo. */
+                main { max-width: 1180px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+                @media (max-width: 640px) {
+                  body { margin: 16px; }
+                }
                 .local-nav { display: flex; gap: 8px; margin: 16px 0 24px; flex-wrap: wrap; align-items: center; }
                 .local-nav a { display: inline-flex; align-items: center; min-height: 34px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #ffffff; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; line-height: 1; box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04); }
                 .local-nav a:hover { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; text-decoration: none; }
@@ -2716,6 +2716,19 @@ public sealed class LocalStatusServer : BackgroundService
                 .local-nav a.active:hover { background: #1d4ed8; border-color: #1d4ed8; color: #ffffff; }
                 .theme-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #ffffff; color: #334155; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; margin-left: auto; }
                 .theme-toggle:hover { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+
+                /* Transicao de troca de pagina: a pagina que entra sempre recebe um
+                   fade-in leve; o clique num link de navegacao (ver script em
+                   LocalNavHtml) aplica "page-leaving" antes de navegar, fazendo a
+                   pagina atual esmaecer primeiro. Sem isso, a troca entre paginas
+                   (larguras agora iguais) ficava seca/abrupta. */
+                body { animation: local-page-in .22s ease-out; }
+                body.page-leaving { animation: local-page-out .12s ease-in forwards; }
+                @keyframes local-page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+                @keyframes local-page-out { from { opacity: 1; } to { opacity: 0; } }
+                @media (prefers-reduced-motion: reduce) {
+                  body, body.page-leaving { animation: none; }
+                }
                 @media (max-width: 520px) {
                   .local-nav { gap: 6px; }
                   .local-nav a { flex: 1 1 calc(50% - 6px); justify-content: center; }
@@ -2779,6 +2792,16 @@ public sealed class LocalStatusServer : BackgroundService
                     var saved = 'light';
                     try { saved = localStorage.getItem(KEY) || 'light'; } catch(e) { /* idem */ }
                     applyTheme(saved);
+
+                    document.querySelectorAll('.local-nav a').forEach(function(link){
+                      link.addEventListener('click', function(e){
+                        if (link.classList.contains('active') || e.defaultPrevented || e.button !== 0
+                          || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { return; }
+                        e.preventDefault();
+                        document.body.classList.add('page-leaving');
+                        setTimeout(function(){ window.location.href = link.href; }, 110);
+                      });
+                    });
                   })();
                 </script>
                 """;
