@@ -1416,6 +1416,53 @@ public sealed class LocalSyncStore
     // antiga (pre 2.10.0/2.11.0) so e corrigida re-rodando
     // infra/windows/bootstrap-sync-agent-db.ps1 com a credencial admin do
     // Postgres local - o script e idempotente (seguro re-rodar).
+    //
+    // O que da pra fazer em runtime, sem elevar nada: DETECTAR e avisar. Ver
+    // GetOutdatedEntityTypeCheckEntitiesAsync logo abaixo (leitura de
+    // pg_constraint, sem privilegio nenhum alem do DML normal) - consumido
+    // pelo dashboard (LocalStatusServer) para mostrar um alerta com link
+    // direto pra rotina "fix_entity_type_check" assim que a instalacao
+    // atualiza pra uma versao que suporta um entity_type novo, antes mesmo do
+    // primeiro erro 23514 acontecer de verdade (mesma filosofia de
+    // ErpSecurityConfigDiagnostics).
+
+    /// <summary>
+    /// Le a definicao atual de outbox_events_entity_type_check e devolve quais
+    /// entity_types do contrato atual (<see cref="SyncContractValues.EntityTypes"/>)
+    /// ainda nao estao nela. Lista vazia = constraint em dia (ou nao foi
+    /// possivel ler - fail-open: nunca bloqueia o dashboard por causa disso).
+    /// So leitura de catalogo do sistema (pg_constraint), sempre acessivel ao
+    /// usuario so-DML do runtime - nao precisa de credencial elevada so pra
+    /// detectar o problema, so pra corrigi-lo (ver comentario acima).
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetOutdatedEntityTypeCheckEntitiesAsync(CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT pg_get_constraintdef(oid)
+            FROM pg_constraint
+            WHERE conname = 'outbox_events_entity_type_check'
+              AND connamespace = 'sync_agent'::regnamespace
+            """;
+
+        try
+        {
+            await using var command = _dataSource.CreateCommand(sql);
+            var definition = (string?)await command.ExecuteScalarAsync(cancellationToken);
+            if (string.IsNullOrEmpty(definition))
+            {
+                return Array.Empty<string>();
+            }
+
+            return SyncContractValues.EntityTypes
+                .Where(entityType => !definition.Contains($"'{entityType}'", StringComparison.Ordinal))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Nao foi possivel ler outbox_events_entity_type_check para diagnostico (ignorado).");
+            return Array.Empty<string>();
+        }
+    }
     public async Task<OutboxEnqueueResult> EnqueueOutboxEventAsync(
         OutboxEventDraft draft,
         CancellationToken cancellationToken)

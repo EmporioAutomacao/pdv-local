@@ -190,7 +190,7 @@ public sealed class LocalStatusServer : BackgroundService
 
             if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigLocalDbPath)
             {
-                await WriteConfigLocalDbAsync(context.Response, null, cancellationToken);
+                await WriteConfigLocalDbAsync(context.Response, null, context.Request.Url.Query, cancellationToken);
                 return;
             }
 
@@ -468,12 +468,38 @@ public sealed class LocalStatusServer : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Junta os avisos de configuracao ErpSecurity (sincrono, so le options) com
+    /// o diagnostico de outbox_events_entity_type_check desatualizada (async,
+    /// le pg_constraint) - consumido tanto pelo JSON de /status quanto pelo
+    /// alerta no topo do dashboard. Ver LocalSyncStore.
+    /// GetOutdatedEntityTypeCheckEntitiesAsync para o porque desse aviso nao
+    /// virar um self-heal automatico.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> BuildConfigWarningsAsync(CancellationToken cancellationToken)
+    {
+        var warnings = new List<string>(ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue));
+
+        var outdatedEntityTypes = await _localStore.GetOutdatedEntityTypeCheckEntitiesAsync(cancellationToken);
+        if (outdatedEntityTypes.Count > 0)
+        {
+            warnings.Add(
+                $"O banco local esta com a lista de entity_type desatualizada (faltando: "
+                + $"{string.Join(", ", outdatedEntityTypes)}) - a sincronizacao dessas entidades vai falhar "
+                + "com o erro 23514 'outbox_events_entity_type_check'. Rode a rotina 'Corrigir "
+                + $"outbox_events_entity_type_check' em {ConfigLocalDbPath}?routine=fix_entity_type_check "
+                + "(Configuracoes > Manutencao do banco local).");
+        }
+
+        return warnings;
+    }
+
     private async Task WriteStatusAsync(HttpListenerResponse response, CancellationToken cancellationToken)
     {
         var effectiveOptions = _effectiveConfigProvider.GetCurrent();
         var storeStatus = await _localStore.GetStatusAsync(cancellationToken);
         var runtimeState = _runtimeState.Snapshot;
-        var configWarnings = ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue);
+        var configWarnings = await BuildConfigWarningsAsync(cancellationToken);
         var pendingUpdateConfirmation = _pendingUpdateGate.CurrentView;
 
         await WriteJsonAsync(
@@ -533,7 +559,7 @@ public sealed class LocalStatusServer : BackgroundService
             : effectiveOptions.IsProvisioned ? "provisioned" : "not_provisioned";
         var activationClass = effectiveOptions.IsProvisioned && !effectiveOptions.NeedsReactivation ? "ok" : "warn";
         var rejectedSalesHtml = BuildRejectedSalesHtml(rejectedSales);
-        var configWarnings = ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue);
+        var configWarnings = await BuildConfigWarningsAsync(cancellationToken);
         var configWarningsHtml = BuildConfigWarningsHtml(configWarnings);
 
         var html = $$"""
@@ -709,7 +735,7 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><td><code>last_heartbeat_succeeded</code></td><td>Resultado do ultimo heartbeat para o ERP.</td><td>Se falhar, validar autenticacao e disponibilidade da API ERP.</td></tr>
                     <tr><td><code>last_reconciliation_summary</code></td><td>Resumo local da janela reconciliada nas ultimas 24h.</td><td>Use para localizar crescimento de pendentes, rejeicoes e dead-letter por entidade.</td></tr>
                     <tr><td><code>pdv_sales_summary</code></td><td>Contagem das vendas PDV por status local: <code>pending_sync</code>, <code>sent</code>, <code>accepted</code>, <code>rejected</code>.</td><td><code>rejected</code> exige analise do dead-letter; <code>sent</code> prolongado indica envio ainda nao confirmado.</td></tr>
-                    <tr><td><code>config_warnings</code></td><td>Inconsistencias detectadas na propria configuracao <code>ErpSecurity</code> (ex.: <code>RequireMutualTls</code> sem certificado provisionado) - checado a cada requisicao de <code>/status</code>, sem precisar de nenhuma chamada real ao ERP ter falhado primeiro (a partir de 1.6.31).</td><td>Lista vazia = nada a corrigir. Nao-vazia: seguir a instrucao de cada item (tambem aparece como aviso no topo do dashboard).</td></tr>
+                    <tr><td><code>config_warnings</code></td><td>Inconsistencias detectadas na propria configuracao <code>ErpSecurity</code> (ex.: <code>RequireMutualTls</code> sem certificado provisionado) - checado a cada requisicao de <code>/status</code>, sem precisar de nenhuma chamada real ao ERP ter falhado primeiro (a partir de 1.6.31). A partir de 1.6.38 tambem inclui a constraint <code>outbox_events_entity_type_check</code> desatualizada (le <code>pg_constraint</code> diretamente, sem precisar do erro 23514 acontecer primeiro).</td><td>Lista vazia = nada a corrigir. Nao-vazia: seguir a instrucao de cada item (tambem aparece como aviso no topo do dashboard, com link direto pra rotina de correcao quando aplicavel).</td></tr>
                   </table>
                 </section>
 
@@ -734,7 +760,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <p>Erros comuns que exigem essa tela (o runtime nunca consegue corrigir sozinho - so-DML de proposito, por seguranca):</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
-                    <tr><td><code>23514: viola a restricao de verificacao "outbox_events_entity_type_check"</code></td><td>Instalacao criada antes do agente suportar esse <code>entity_type</code> (tipicamente <code>cobranca</code>/<code>plano_historico</code>) - a view Arpa ate le certo, mas o banco local recusa o INSERT.</td><td>Rotina <strong>"Corrigir outbox_events_entity_type_check"</strong> (a partir de 1.6.20).</td></tr>
+                    <tr><td><code>23514: viola a restricao de verificacao "outbox_events_entity_type_check"</code></td><td>Instalacao atualizada antes do agente suportar esse <code>entity_type</code> (ex.: <code>compra</code>, <code>cobranca</code>, <code>plano_historico</code>) - a view Arpa ate le certo, mas o banco local recusa o INSERT. A partir de 1.6.38 esse problema aparece sozinho em <code>config_warnings</code>/no topo do dashboard assim que a instalacao atualiza, com link direto pra rotina - nao precisa mais esperar o erro acontecer de verdade pra descobrir.</td><td>Rotina <strong>"Corrigir outbox_events_entity_type_check"</strong> (a partir de 1.6.20).</td></tr>
                     <tr><td><code>42501: e necessario ser o dono da tabela sale_items</code></td><td>Instalacao que nunca rodou de novo o init SQL do banco local desde que as colunas de unidade (<code>unit_label</code>, <code>unit_external_key</code>, <code>unit_factor</code>) foram adicionadas em <code>pdv.sale_items</code> - persiste mesmo apos atualizar a versao do agente, porque o auto-update nao roda migracao de schema. A partir de 1.6.29 esse erro fica so em log (nao derruba a publicacao de vendas), mas as colunas continuam faltando ate essa rotina rodar.</td><td>Rotina <strong>"Adicionar colunas de unidade em pdv.sale_items"</strong> (a partir de 1.6.29).</td></tr>
                   </table>
                 </section>
@@ -1371,18 +1397,30 @@ public sealed class LocalStatusServer : BackgroundService
     private async Task WriteConfigLocalDbAsync(
         HttpListenerResponse response,
         string? flashMessage,
+        string? queryString,
         CancellationToken cancellationToken)
     {
         var messageHtml = string.IsNullOrWhiteSpace(flashMessage)
             ? string.Empty
             : $"""<div class="message okbox">{Html(flashMessage)}</div>""";
 
+        // Pre-seleciona a rotina quando chega por um link direto (ex.: alerta
+        // de outbox_events_entity_type_check desatualizada no dashboard) -
+        // poupa o usuario de precisar achar a rotina certa no dropdown.
+        var preselectedRoutine = ReadQueryParam(queryString, "routine");
+
+        var preselectedDescription = "";
         var routineOptions = new StringBuilder();
         routineOptions.Append("""<option value="">Selecione...</option>""");
         foreach (var routine in LocalDbMaintenanceRunner.Routines)
         {
+            var selectedAttr = routine.Key == preselectedRoutine ? " selected" : "";
+            if (routine.Key == preselectedRoutine)
+            {
+                preselectedDescription = routine.Description;
+            }
             routineOptions.Append(
-                $"""<option value="{Html(routine.Key)}" data-desc="{Html(routine.Description)}">{Html(routine.Label)}</option>""");
+                $"""<option value="{Html(routine.Key)}" data-desc="{Html(routine.Description)}"{selectedAttr}>{Html(routine.Label)}</option>""");
         }
 
         var html = $$"""
@@ -1442,7 +1480,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <select id="f_routine" onchange="document.getElementById('routine-desc').textContent = this.selectedOptions[0].dataset.desc || '';">
                     {{routineOptions}}
                   </select>
-                  <div id="routine-desc"></div>
+                  <div id="routine-desc">{{Html(preselectedDescription)}}</div>
                   <button type="button" id="btn-routine" onclick="runRoutine()">Executar rotina selecionada</button>
                   <div id="status-routine"></div>
 
@@ -2720,6 +2758,33 @@ public sealed class LocalStatusServer : BackgroundService
         return summary.ToString();
     }
 
+    /// <summary>
+    /// Escapa o texto do aviso normalmente, exceto pelo caminho literal
+    /// "/config/local-db?routine=..." embutido por BuildConfigWarningsAsync,
+    /// que vira um &lt;a&gt; clicavel - unico link hoje esperado dentro de um
+    /// aviso de config_warnings, entao nao precisa de um parser generico.
+    /// </summary>
+    private static string LinkifyLocalDbPath(string warning)
+    {
+        const string marker = ConfigLocalDbPath + "?routine=";
+        var markerIndex = warning.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return Html(warning);
+        }
+
+        var pathEnd = markerIndex + marker.Length;
+        while (pathEnd < warning.Length && (char.IsLetterOrDigit(warning[pathEnd]) || warning[pathEnd] == '_'))
+        {
+            pathEnd++;
+        }
+
+        var before = warning[..markerIndex];
+        var path = warning[markerIndex..pathEnd];
+        var after = warning[pathEnd..];
+        return $"""{Html(before)}<a href="{Html(path)}">{Html(path)}</a>{Html(after)}""";
+    }
+
     private static string BuildConfigWarningsHtml(IReadOnlyList<string> warnings)
     {
         if (warnings.Count == 0)
@@ -2730,7 +2795,7 @@ public sealed class LocalStatusServer : BackgroundService
         var items = new StringBuilder();
         foreach (var warning in warnings)
         {
-            items.AppendLine($"<li>{Html(warning)}</li>");
+            items.AppendLine($"<li>{LinkifyLocalDbPath(warning)}</li>");
         }
 
         return $$"""
