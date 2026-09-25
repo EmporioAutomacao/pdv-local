@@ -37,6 +37,8 @@ param(
     [ValidateSet("None", "AnapolisInitialLoad")]
     [string]$ArpaCollectorPreset = "None",
 
+    [int]$ErpDispatcherBatchSize = 1000,
+
     [switch]$PublishFromSource,
     [switch]$SkipDatabaseBootstrap,
     [switch]$SkipServiceStart,
@@ -246,7 +248,7 @@ function Write-AgentConfig {
         }
         ErpDispatcher = @{
             Enabled = $true
-            BatchSize = 50
+            BatchSize = $ErpDispatcherBatchSize
             TimeoutSeconds = 30
             MaxAttempts = 8
             InitialBackoffSeconds = 60

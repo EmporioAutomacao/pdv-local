@@ -4,7 +4,7 @@ namespace SyncAgent.Runtime;
 
 public sealed class ManualSyncSignal
 {
-    private readonly Channel<DateTimeOffset> _signals = Channel.CreateBounded<DateTimeOffset>(
+    private readonly Channel<ManualSyncRequest> _signals = Channel.CreateBounded<ManualSyncRequest>(
         new BoundedChannelOptions(capacity: 1)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
@@ -12,12 +12,16 @@ public sealed class ManualSyncSignal
             SingleWriter = false
         });
 
-    public bool TrySignal()
+    /// <summary>Sinaliza "rode o proximo ciclo agora". <paramref name="entityTypes"/>
+    /// nulo/vazio (o default de todos os call-sites existentes) mantem o
+    /// comportamento historico: processa tudo. Um filtro so vale para o ciclo que
+    /// ele mesmo disparar - nunca e persistido.</summary>
+    public bool TrySignal(IReadOnlyCollection<string>? entityTypes = null)
     {
-        return _signals.Writer.TryWrite(DateTimeOffset.UtcNow);
+        return _signals.Writer.TryWrite(new ManualSyncRequest(DateTimeOffset.UtcNow, Normalize(entityTypes)));
     }
 
-    public async Task<bool> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    public async Task<ManualSyncWaitResult> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
         var readTask = _signals.Reader.WaitToReadAsync(cancellationToken).AsTask();
         var delayTask = Task.Delay(timeout, cancellationToken);
@@ -25,13 +29,35 @@ public sealed class ManualSyncSignal
         var completedTask = await Task.WhenAny(readTask, delayTask);
         if (completedTask != readTask || !await readTask)
         {
-            return false;
+            return ManualSyncWaitResult.NotTriggered;
         }
 
-        while (_signals.Reader.TryRead(out _))
+        ManualSyncRequest? last = null;
+        while (_signals.Reader.TryRead(out var request))
         {
+            last = request; // mantem so o mais recente, mesmo coalescimento de antes
         }
 
-        return true;
+        return new ManualSyncWaitResult(true, last?.EntityTypes);
     }
+
+    private static IReadOnlySet<string>? Normalize(IReadOnlyCollection<string>? entityTypes)
+    {
+        if (entityTypes is null || entityTypes.Count == 0)
+        {
+            return null;
+        }
+
+        var set = new HashSet<string>(
+            entityTypes.Where(entityType => !string.IsNullOrWhiteSpace(entityType)),
+            StringComparer.OrdinalIgnoreCase);
+        return set.Count == 0 ? null : set;
+    }
+}
+
+public sealed record ManualSyncRequest(DateTimeOffset RequestedAtUtc, IReadOnlySet<string>? EntityTypes);
+
+public sealed record ManualSyncWaitResult(bool Triggered, IReadOnlySet<string>? EntityTypes)
+{
+    public static readonly ManualSyncWaitResult NotTriggered = new(false, null);
 }

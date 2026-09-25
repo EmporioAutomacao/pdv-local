@@ -31,6 +31,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _heartbeatItem = new ToolStripMenuItem("Heartbeat: -") { Enabled = false };
         _reconciliationItem = new ToolStripMenuItem("Reconciliacao: -") { Enabled = false };
 
+        var openDashboardItem = new ToolStripMenuItem("Dashboard", null, (_, _) => OpenDashboard());
         var syncNowItem = new ToolStripMenuItem("Sincronizar agora", null, async (_, _) => await SyncNowAsync());
         var updateAppItem = new ToolStripMenuItem("Atualizar App", null, (_, _) => OpenUpdateProgress());
         _pendingUpdateMenuItem = new ToolStripMenuItem("Atualizacao pendente...", null, (_, _) => OpenPendingUpdateConfirmation())
@@ -38,7 +39,6 @@ public sealed class TrayApplicationContext : ApplicationContext
             Visible = false,
             Font = new Font(Control.DefaultFont, FontStyle.Bold),
         };
-        var openHelpItem = new ToolStripMenuItem("Abrir ajuda", null, (_, _) => OpenHelp());
         var copyInstanceItem = new ToolStripMenuItem("Copiar ID da instalacao", null, (_, _) => CopyInstanceId());
         var refreshItem = new ToolStripMenuItem("Atualizar status", null, async (_, _) => await RefreshStatusAsync());
         var exitItem = new ToolStripMenuItem("Sair", null, (_, _) => ExitThread());
@@ -61,11 +61,11 @@ public sealed class TrayApplicationContext : ApplicationContext
             _heartbeatItem,
             _reconciliationItem,
             new ToolStripSeparator(),
+            openDashboardItem,
             syncNowItem,
             updateAppItem,
             _pendingUpdateMenuItem,
             refreshItem,
-            openHelpItem,
             copyInstanceItem,
             new ToolStripSeparator(),
             exitItem
@@ -336,13 +336,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             ToolTipIcon.Info);
     }
 
-    private void OpenHelp()
+    private void OpenDashboard()
     {
         try
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "http://127.0.0.1:47891/help",
+                FileName = "http://127.0.0.1:47891/",
                 UseShellExecute = true
             });
         }
@@ -351,7 +351,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _notifyIcon.ShowBalloonTip(
                 3000,
                 "AraraSuite Sync",
-                $"Nao foi possivel abrir a ajuda: {ex.Message}",
+                $"Nao foi possivel abrir o dashboard: {ex.Message}",
                 ToolTipIcon.Warning);
         }
     }

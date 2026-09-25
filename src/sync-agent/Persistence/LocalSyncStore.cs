@@ -563,17 +563,36 @@ public sealed class LocalSyncStore
     /// Sem o registro, <see cref="GetDateTimeOffsetStateAsync"/> devolve o
     /// default (epoch) e o coletor re-le tudo. Usado pelo botao "Sincronizar
     /// tudo" (Configuracoes &gt; Arpa) para backfill / corrigir erros.
+    /// <paramref name="entityTypes"/> nulo/vazio = todas as entidades
+    /// (comportamento historico); com filtro, so as entidades selecionadas
+    /// tem o watermark apagado - as demais ficam como estavam.
     /// </summary>
-    public async Task<int> ResetArpaWatermarksAsync(string connectionId, CancellationToken cancellationToken)
+    public async Task<int> ResetArpaWatermarksAsync(
+        string connectionId,
+        IReadOnlyCollection<string>? entityTypes,
+        CancellationToken cancellationToken)
     {
+        if (entityTypes is null || entityTypes.Count == 0)
+        {
+            const string sqlAll = """
+                DELETE FROM sync_agent.agent_state
+                WHERE state_key LIKE 'collector.arpa.' || @conn || '.%'
+                AND state_key NOT LIKE 'collector.arpa.' || @conn || '.resync_generation'
+                """;
+
+            await using var commandAll = _dataSource.CreateCommand(sqlAll);
+            commandAll.Parameters.AddWithValue("conn", connectionId);
+            return await commandAll.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         const string sql = """
             DELETE FROM sync_agent.agent_state
-            WHERE state_key LIKE 'collector.arpa.' || @conn || '.%'
-            AND state_key NOT LIKE 'collector.arpa.' || @conn || '.resync_generation'
+            WHERE state_key = ANY(@keys)
             """;
 
+        var keys = entityTypes.Select(entityType => $"collector.arpa.{connectionId}.{entityType}.watermark").ToArray();
         await using var command = _dataSource.CreateCommand(sql);
-        command.Parameters.AddWithValue("conn", connectionId);
+        command.Parameters.AddWithValue("keys", keys);
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -581,18 +600,22 @@ public sealed class LocalSyncStore
     /// Alternativa a <see cref="ResetArpaWatermarksAsync"/> para um resync
     /// parcial: em vez de apagar o watermark (que volta pro epoch e rele o
     /// historico inteiro), fixa-o numa data especifica - ex.: "so os ultimos
-    /// 3 meses" em vez de "desde sempre". Usa
+    /// 3 meses" em vez de "desde sempre". Sem filtro, usa
     /// <see cref="SyncContractValues.EntityTypes"/> (a mesma lista que
     /// <c>ArpaStandardEntities.Build</c> usa para nomear as entidades) para
     /// cobrir toda entidade que o coletor suporta, mesmo as desligadas nessa
     /// conexao (marcador parado nao atrapalha - so e lido se o toggle ligar).
+    /// Com <paramref name="entityTypes"/> informado, so essas entidades tem o
+    /// watermark ajustado.
     /// </summary>
     public async Task SetArpaWatermarksSinceAsync(
         string connectionId,
         DateTimeOffset since,
+        IReadOnlyCollection<string>? entityTypes,
         CancellationToken cancellationToken)
     {
-        foreach (var entityType in SyncContractValues.EntityTypes)
+        var types = entityTypes is null || entityTypes.Count == 0 ? SyncContractValues.EntityTypes : entityTypes;
+        foreach (var entityType in types)
         {
             var stateKey = $"collector.arpa.{connectionId}.{entityType}.watermark";
             await SetDateTimeOffsetStateAsync(stateKey, since, cancellationToken);

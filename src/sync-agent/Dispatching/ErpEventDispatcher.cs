@@ -21,6 +21,7 @@ public sealed class ErpEventDispatcher
     private readonly ILogger<ErpEventDispatcher> _logger;
     private readonly EffectiveSyncAgentConfigurationProvider _effectiveConfigProvider;
     private readonly IOptionsMonitor<ErpDispatcherOptions> _dispatcherOptions;
+    private readonly ErpDispatcherSettingsStore _dispatcherSettingsStore;
     private readonly LocalSyncStore _localStore;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ErpCredentialProvider _credentialProvider;
@@ -29,6 +30,7 @@ public sealed class ErpEventDispatcher
         ILogger<ErpEventDispatcher> logger,
         EffectiveSyncAgentConfigurationProvider effectiveConfigProvider,
         IOptionsMonitor<ErpDispatcherOptions> dispatcherOptions,
+        ErpDispatcherSettingsStore dispatcherSettingsStore,
         LocalSyncStore localStore,
         IHttpClientFactory httpClientFactory,
         ErpCredentialProvider credentialProvider)
@@ -36,6 +38,7 @@ public sealed class ErpEventDispatcher
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
         _dispatcherOptions = dispatcherOptions;
+        _dispatcherSettingsStore = dispatcherSettingsStore;
         _localStore = localStore;
         _httpClientFactory = httpClientFactory;
         _credentialProvider = credentialProvider;
@@ -55,7 +58,7 @@ public sealed class ErpEventDispatcher
         _credentialProvider.ValidateProvisionedForRemoteEndpoint(erpApiBaseUri);
 
         var events = await _localStore.ClaimPendingOutboxEventsAsync(
-            dispatcherOptions.BatchSize,
+            _dispatcherSettingsStore.EffectiveBatchSize(),
             TimeSpan.FromSeconds(dispatcherOptions.InFlightRecoverySeconds),
             cancellationToken);
 

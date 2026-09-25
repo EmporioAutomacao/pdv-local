@@ -54,7 +54,15 @@ public sealed class ArpaCollector
         _ => ex.Message,
     };
 
-    public async Task<ArpaCollectorRunSummary> CollectAsync(CancellationToken cancellationToken)
+    /// <param name="entityTypeFilter">Nulo (default) processa tudo que estiver com o
+    /// toggle ligado em cada conexao, igual a sempre. Quando informado (disparado pelo
+    /// botao "Sincronizar" com uma selecao especifica), so as entidades nele sao
+    /// coletadas nesta chamada - as demais sao puladas sem tocar no watermark, ou
+    /// seja, nao e um resync delas, so "nao colete isso agora". Vale so para esta
+    /// chamada; nunca e persistido.</param>
+    public async Task<ArpaCollectorRunSummary> CollectAsync(
+        CancellationToken cancellationToken,
+        IReadOnlySet<string>? entityTypeFilter = null)
     {
         var connections = await _effectiveCollectorConfigProvider.GetCurrentAsync(cancellationToken);
         if (connections.Count == 0)
@@ -92,6 +100,12 @@ public sealed class ArpaCollector
             {
                 foreach (var entity in connection.Entities)
                 {
+                    if (entityTypeFilter is not null && !entityTypeFilter.Contains(entity.EntityType))
+                    {
+                        _runLog.Add("info", $"  {EntityLabel(entity.EntityType)}: pulado (fora da selecao desta sincronizacao manual).");
+                        continue;
+                    }
+
                     totalEntities++;
                     try
                     {

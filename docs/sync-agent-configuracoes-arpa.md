@@ -15,8 +15,10 @@ ligar/desligar, o dropdown de Loja e a trava anti-duplicata sao de 1.6.2).
 ```
 Configuracoes > Arpa
 ├── Coletor Arpa: [Ativado|Desativado]   <- botao Ativar/Desativar coletor
+├── Envio ao ERP                          <- tamanho do lote de envio (1.6.36+)
+├── Sincronizar agora                     <- checkboxes de entidade + botao (1.6.36+)
 ├── Conexoes (tabela)                     <- uma linha por banco Arpa Control
-│     Editar | Sincronizar | Remover
+│     Editar | Sincronizar | Sincronizar tudo (+ checkboxes de entidade) | Remover
 └── Adicionar / Editar conexao (form)
       Nome, Loja/Estoque (dropdown do ERP),
       Host/Porta/Database, Usuario/Senha (read-only), Batch size,
@@ -27,6 +29,11 @@ Configuracoes > Arpa
       > Preparar banco Arpa (requer credencial DBA)
           [Preparar views sync_export] [Criar usuario read-only]
 ```
+
+Todas as telas do dashboard local (incluindo esta) ganharam um botao de
+**modo escuro** na barra de navegacao a partir de 1.6.36 — preferencia
+lembrada no navegador (`localStorage`), sem afetar nenhum outro usuario nem
+o proprio agente.
 
 ## 1. Ligar/desligar o coletor (botao)
 
@@ -58,7 +65,43 @@ deixa de importar para esse liga/desliga.
 Cliente que **nao usa Arpa Control**: deixar desativado (botao, ou
 `Enabled=false` se o botao nunca foi usado).
 
-## 2. Conexoes
+## 2. Envio ao ERP (1.6.36+)
+
+Painel logo abaixo do liga/desliga do coletor. Controla `ErpDispatcher:BatchSize`
+— quantos eventos **ja coletados** vao em cada `POST /v1/sync/events:batch`
+para o ERP. **Nao confundir com o Batch size de cada conexao** (secao 3): esse
+outro e sobre **leitura** das views Arpa, este aqui e sobre **envio**.
+
+- Padrao **1000** (antes era 50 fixo no instalador, sem como editar sem mexer
+  em `appsettings.json`).
+- Campo numerico (1-5000) + botao **Salvar**. Efeito imediato no proximo
+  ciclo de despacho, sem reiniciar o servico.
+- Preferencia fica em `erp-dispatcher-settings.json` (JSON simples, sem
+  segredo: `{"batchSize": N}`), mesmo diretorio dos outros arquivos de
+  preferencia local (secao "Arquivos nesta maquina"). Enquanto o campo nunca
+  foi usado, vale o `ErpDispatcher:BatchSize` do `appsettings.json`.
+
+Endpoint: `POST /config/arpa/erp-batch-size` (`batch_size`, validado 1-5000
+tanto no navegador quanto no servidor).
+
+## 3. Sincronizar agora — o que sincronizar (1.6.36+)
+
+Painel com uma checkbox por tipo de entidade (Clientes, Produtos, Estoque,
+Vendas, Financeiro, Compras, Cobranca, Plano-hist) + "Selecionar/Desmarcar
+tudo". Controla o que o botao **Sincronizar** (por linha, na tabela de
+conexoes — ver secao 4) processa da proxima vez que for clicado.
+
+- Todas marcadas por padrao — se ninguem mexer, o comportamento e identico
+  ao de antes desta selecao existir (processa tudo que estiver com o toggle
+  ligado em cada conexao).
+- **E uma selecao de uma vez so, nao muda nada permanente.** Desmarcar
+  "Produtos" aqui e clicar Sincronizar so pula Produtos **nesse ciclo** — o
+  toggle "Produtos" de cada conexao continua ligado, e o proximo ciclo
+  automatico (ou um novo clique com tudo marcado) volta a processar produtos
+  normalmente. Nao zera nem mexe em nenhum watermark — as entidades fora da
+  selecao simplesmente nao sao lidas naquele ciclo.
+
+## 4. Conexoes
 
 Cada linha da tabela e uma conexao com um banco Arpa Control, mapeada a uma
 Loja/Estoque do ERP. Salvas **nesta maquina**, cifradas por DPAPI LocalMachine
@@ -70,9 +113,9 @@ Campos do formulario:
 | Campo | Observacao |
 |---|---|
 | **Nome** | Rotulo livre da conexao (ex.: "Loja Centro"). Ao escolher a Loja no dropdown, e pre-preenchido com o nome dela se estiver vazio. |
-| **Loja/Estoque (nome no ERP)** | Dropdown - ver secao 3. |
+| **Loja/Estoque (nome no ERP)** | Dropdown - ver secao 5. |
 | **Host / Porta / Database** | Conexao Postgres do Arpa Control. |
-| **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 4). Ao **editar** uma conexao a Senha vem em branco (nunca vai para o navegador) e assim fica: *Salvar* e *Testar conexao* usam a senha ja guardada. So digite para trocar. |
+| **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 6). Ao **editar** uma conexao a Senha vem em branco (nunca vai para o navegador) e assim fica: *Salvar* e *Testar conexao* usam a senha ja guardada. So digite para trocar. |
 | **Batch size** | Linhas por lote na leitura das views (default 5000). |
 | **Produtos / Clientes / Estoque / Vendas / Financeiro** | O que essa conexao sincroniza. O agente monta a query padrao contra `sync_export.<view>`. |
 | **Compras** | Compras/notas de entrada (`entity_type=compra`) → `compras.Compra` + `CompraItem` no ERP, ja recebidas (sem passar pelo fluxo manual de confirmacao/recebimento). Vinculo com `financeiro.TituloPagar` ja sincronizado (`compra_externa_id`) e feito automaticamente pelo ERP nos dois sentidos, sem depender de ordem de chegada — nao precisa ligar Financeiro para Compras funcionar, nem o contrario. View `sync_export.compras` **best-effort** (sem schema padrao fixo conhecido — so o fallback dinamico; sem tabela de itens identificavel, a compra ainda e criada com itens vazios). |
@@ -86,7 +129,9 @@ Botoes por linha: **Editar**, **Sincronizar**, **Sincronizar tudo**, **Remover**
 **Sincronizar** (1.6.6+) dispara um ciclo agora e abre um painel de **log ao
 vivo** logo abaixo da tabela, mostrando linha a linha o que esta acontecendo:
 por entidade (`Produtos: N lido(s), M novo(s)/alterado(s)`, idem
-Clientes/Estoque/Vendas/Financeiro), o envio ao ERP (`aceitos`, `rejeitados`,
+Clientes/Estoque/Vendas/Financeiro — a partir de 1.6.36, entidades fora da
+selecao do painel "Sincronizar agora" (secao 3) aparecem como `pulado (fora
+da selecao desta sincronizacao manual)`), o envio ao ERP (`aceitos`, `rejeitados`,
 `falhas`), os snapshots que vem do ERP (operadores/produtos/pagamentos/clientes
 do PDV) e o resultado final. Se ja houver uma sincronizacao em andamento, o
 painel espera ela comecar. O botao **Fechar** aparece ao concluir.
@@ -96,8 +141,13 @@ Endpoint: `GET /config/arpa/sync-log` (JSON: `run_id`, `running`, `lines`).
 e dispara um ciclo — a coleta re-le e re-envia o cadastro ao ERP (produtos,
 clientes, estoque, vendas, financeiro, compras, cobranca, plano_historico - as
 entidades ligadas nessa conexao). Use para backfill ou para corrigir dados
-errados no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam a
-500/lote).
+errados no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam ao
+tamanho de lote configurado em "Envio ao ERP", secao 2).
+
+A partir de 1.6.36, um grupo de checkboxes de entidade (por linha, ao lado do
+botao) restringe **quais entidades** tem o watermark zerado/ajustado — as
+demais ficam como estavam, sem nenhum efeito (nao e resync delas). Todas
+marcadas por padrao (comportamento identico ao de antes).
 
 A partir de 1.6.25, um seletor ao lado do botao escolhe o **periodo** do
 reenvio em vez de sempre "desde sempre":
@@ -120,7 +170,7 @@ Endpoint: `POST /config/arpa/full-resync` (`id`, `since_preset=all|3m|1d|custom`
 Botoes do formulario: **Salvar**, **Testar conexao** (valida credencial +
 presenca das views `sync_export`), **Limpar**.
 
-## 3. Loja/Estoque - dropdown do ERP (1.6.2+)
+## 5. Loja/Estoque - dropdown do ERP (1.6.2+)
 
 O campo *Loja/Estoque (nome no ERP)* e um **dropdown** com as Lojas/Estoque
 realmente cadastradas no ERP do cliente, buscadas em
@@ -140,7 +190,7 @@ texto livre e um typo criava uma Loja nova sem querer no ERP.
   na mesma Loja, o ERP nao sabe qual e a fonte. Um aviso ja aparece no
   formulario antes de salvar.
 
-## 4. Preparar banco Arpa (requer credencial DBA)
+## 6. Preparar banco Arpa (requer credencial DBA)
 
 Bloco recolhivel para o primeiro setup de uma conexao. Pede uma credencial de
 **administrador do Postgres do Arpa**, usada **so naquele comando** e **nunca
@@ -177,10 +227,11 @@ e nao consegue usar essa auth).
 | GET | `/config/arpa/lojas` | Lista de Lojas do ERP (proxy autenticado para `GET /v1/sync/agents/{id}/lojas`). `{ok:false}` quando offline/nao provisionado. |
 | GET | `/config/arpa/sync-log` | Log ao vivo da ultima sincronizacao (`run_id`, `running`, `lines[]`). |
 | POST | `/config/arpa/set-enabled` | `enabled=true|false` - grava `arpa-collector-settings.json` |
+| POST | `/config/arpa/erp-batch-size` | `batch_size` (1-5000) - grava `erp-dispatcher-settings.json` (1.6.36+) |
 | POST | `/config/arpa/save` | Cria/edita conexao. **409** se a Loja ja estiver em outra conexao. |
 | POST | `/config/arpa/delete` | Remove conexao (`id`) |
-| POST | `/config/arpa/sync-now` | Dispara um ciclo |
-| POST | `/config/arpa/full-resync` | Ajusta os watermarks da conexao (`id`, `since_preset=all\|3m\|1d\|custom` + `since_date`) + dispara ciclo — re-envia o periodo escolhido (1.6.9+; periodo a partir de 1.6.25) |
+| POST | `/config/arpa/sync-now` | Dispara um ciclo. `entity_types` opcional (lista separada por virgula, 1.6.36+) filtra so para esse ciclo, sem tocar watermark. |
+| POST | `/config/arpa/full-resync` | Ajusta os watermarks da conexao (`id`, `since_preset=all\|3m\|1d\|custom` + `since_date`) + dispara ciclo — re-envia o periodo escolhido (1.6.9+; periodo a partir de 1.6.25). `entity_types` opcional (1.6.36+) restringe quais entidades tem o watermark tocado. |
 | POST | `/config/arpa/test` | Testa conexao |
 | POST | `/config/arpa/prepare-views` | Roda o script unico de views + GRANT ao Usuario (credencial DBA no corpo) |
 | POST | `/config/arpa/create-user` | Cria role read-only (credencial DBA no corpo) |
@@ -190,9 +241,10 @@ e nao consegue usar essa auth).
 | Arquivo | Conteudo | Cifrado |
 |---|---|---|
 | `arpa-collector-settings.json` | `{"enabled": bool}` - liga/desliga do botao | nao (nao e segredo) |
+| `erp-dispatcher-settings.json` | `{"batchSize": int}` - tamanho do lote de envio ao ERP (1.6.36+) | nao (nao e segredo) |
 | `arpa-connections.dpapi` | lista de conexoes, **com senha** | DPAPI LocalMachine |
 
-Ambos no diretorio de `Provisioning:ProtectedFile` (padrao:
+Todos no diretorio de `Provisioning:ProtectedFile` (padrao:
 `<InstallRoot>\Sync\Secrets\`).
 
 ## Ver tambem

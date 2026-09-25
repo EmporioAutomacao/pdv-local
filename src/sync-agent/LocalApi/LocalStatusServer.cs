@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using SyncAgent.Configuration;
+using SyncAgent.Contracts;
 using SyncAgent.Persistence;
 using SyncAgent.Provisioning;
 using SyncAgent.Runtime;
@@ -61,6 +62,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ErpActivationClient _erpActivationClient;
     private readonly ArpaConnectionsStore _arpaConnectionsStore;
     private readonly ArpaCollectorSettingsStore _arpaSettingsStore;
+    private readonly ErpDispatcherSettingsStore _erpDispatcherSettingsStore;
     private readonly ArpaLojaListClient _arpaLojaListClient;
     private readonly ArpaDdlRunner _arpaDdlRunner;
     private readonly LocalDbMaintenanceRunner _localDbMaintenanceRunner;
@@ -89,6 +91,7 @@ public sealed class LocalStatusServer : BackgroundService
         ErpActivationClient erpActivationClient,
         ArpaConnectionsStore arpaConnectionsStore,
         ArpaCollectorSettingsStore arpaSettingsStore,
+        ErpDispatcherSettingsStore erpDispatcherSettingsStore,
         ArpaLojaListClient arpaLojaListClient,
         ArpaDdlRunner arpaDdlRunner,
         LocalDbMaintenanceRunner localDbMaintenanceRunner,
@@ -109,6 +112,7 @@ public sealed class LocalStatusServer : BackgroundService
         _erpActivationClient = erpActivationClient;
         _arpaConnectionsStore = arpaConnectionsStore;
         _arpaSettingsStore = arpaSettingsStore;
+        _erpDispatcherSettingsStore = erpDispatcherSettingsStore;
         _arpaLojaListClient = arpaLojaListClient;
         _arpaDdlRunner = arpaDdlRunner;
         _localDbMaintenanceRunner = localDbMaintenanceRunner;
@@ -743,7 +747,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro,compras,cobranca,plano_historico}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6), com etapas e barra de acompanhamento do envio (a partir de 1.6.14). O botao <strong>Sincronizar tudo</strong> zera os marcadores e reenvia dessa conexao ao ERP (a partir de 1.6.13); a partir de 1.6.25 um seletor ao lado escolhe o <strong>periodo</strong> (tudo / ultimos 3 meses / ultimo dia / data especifica) em vez de sempre reenviar o historico inteiro. Vendas/financeiro/cobranca tem um fallback dinamico para schemas Arpa fora do padrao fixo original (a partir de 1.6.17). Produtos exportam <strong>unidade de medida</strong> quando o Arpa tiver a coluna (contrato Sync 2.13.0, a partir de 1.6.24). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro,compras,cobranca,plano_historico}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6), com etapas e barra de acompanhamento do envio (a partir de 1.6.14). O botao <strong>Sincronizar tudo</strong> zera os marcadores e reenvia dessa conexao ao ERP (a partir de 1.6.13); a partir de 1.6.25 um seletor ao lado escolhe o <strong>periodo</strong> (tudo / ultimos 3 meses / ultimo dia / data especifica) em vez de sempre reenviar o historico inteiro. A partir de 1.6.36, os dois botoes ganham checkboxes de <strong>tipo de entidade</strong> (produtos, vendas, financeiro etc.) — "Sincronizar" le um painel global de selecao valido para o proximo ciclo (sem mexer em watermark nem nos toggles da conexao), "Sincronizar tudo" tem seu proprio grupo por linha (so as entidades marcadas tem o watermark tocado); nesse mesmo release o painel <strong>Envio ao ERP</strong> passa a deixar o tamanho do lote de envio (<code>ErpDispatcher:BatchSize</code>, padrao 1000, antes 50 fixo) editavel direto na tela, sem reiniciar o servico. Vendas/financeiro/cobranca tem um fallback dinamico para schemas Arpa fora do padrao fixo original (a partir de 1.6.17). Produtos exportam <strong>unidade de medida</strong> quando o Arpa tiver a coluna (contrato Sync 2.13.0, a partir de 1.6.24). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
@@ -1602,6 +1606,8 @@ public sealed class LocalStatusServer : BackgroundService
         CancellationToken cancellationToken)
     {
         var enabled = _arpaSettingsStore.IsEffectivelyEnabled();
+        var erpBatchSize = _erpDispatcherSettingsStore.EffectiveBatchSize();
+        var syncNowEntityChecksHtml = BuildEntityTypeChecksHtml("sync_now_entities", "sne");
         var connections = _arpaConnectionsStore.ReadAll();
         var lojasEmUsoJson = JsonSerializer.Serialize(
             connections
@@ -1650,6 +1656,9 @@ public sealed class LocalStatusServer : BackgroundService
                     <input type="date" id="resync_date_{{Html(c.Id)}}" class="mini" style="width:auto; display:none">
                     <button type="button" class="mini" onclick="fullResync('{{Html(c.Id)}}')">Sincronizar tudo</button>
                     <button type="button" class="mini danger" onclick="if(confirm('Remover a conexao {{Html(c.Nome)}}?'))postAct('delete','{{Html(c.Id)}}')">Remover</button>
+                    <div style="margin-top:6px">
+                      {{BuildEntityTypeChecksHtml($"resync_entities_{Html(c.Id)}", $"re_{Html(c.Id)}", compact: true)}}
+                    </div>
                   </td>
                 </tr>
                 """);
@@ -1770,6 +1779,21 @@ public sealed class LocalStatusServer : BackgroundService
                 </section>
 
                 <section class="panel">
+                  <h2>Envio ao ERP</h2>
+                  <p class="muted" style="margin:4px 0 0">Quantos eventos ja coletados vao em cada envio ao ERP (POST /v1/sync/events:batch). Nao confundir com o Batch size de cada conexao Arpa abaixo, que e sobre leitura, nao envio.</p>
+                  <label for="erp_batch_size">Tamanho do lote de envio</label>
+                  <input type="number" id="erp_batch_size" min="1" max="5000" value="{{erpBatchSize}}" style="max-width:160px">
+                  <button type="button" class="mini" onclick="saveErpBatchSize()">Salvar</button>
+                  <span id="erp_batch_status" class="muted"></span>
+                </section>
+
+                <section class="panel">
+                  <h2>Sincronizar agora</h2>
+                  <p class="muted" style="margin:4px 0 0">Escolha o que sincronizar ao clicar em "Sincronizar" em qualquer conexao abaixo. Vale so para o proximo ciclo — nao muda o que fica ligado permanentemente por conexao.</p>
+                  {{syncNowEntityChecksHtml}}
+                </section>
+
+                <section class="panel">
                   <h2>Conexoes</h2>
                   <div style="overflow-x: auto">
                     <table>
@@ -1867,6 +1891,18 @@ public sealed class LocalStatusServer : BackgroundService
                     .then(function(r){ return r.json(); })
                     .then(function(j){ location.href = '/config/arpa?msg=' + encodeURIComponent(j.message || 'OK.'); })
                     .catch(function(e){ setStatus(String(e), false); });
+                }
+
+                function saveErpBatchSize(){
+                  var v = parseInt(document.getElementById('erp_batch_size').value, 10);
+                  var status = document.getElementById('erp_batch_status');
+                  if(!v || v < 1 || v > 5000){ status.textContent = 'Informe um valor entre 1 e 5000.'; return; }
+                  status.textContent = 'Salvando...';
+                  var b = new URLSearchParams(); b.set('batch_size', v.toString());
+                  fetch('/config/arpa/erp-batch-size', { method:'POST', body: b })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ status.textContent = j.message || (j.ok ? 'Salvo.' : 'Falha.'); })
+                    .catch(function(e){ status.textContent = 'Falha: ' + e; });
                 }
 
                 function populateLojaSelect(selectedNome){
@@ -2072,7 +2108,19 @@ public sealed class LocalStatusServer : BackgroundService
                   }).catch(function(){ /* API pode cair momentaneamente; proxima poll tenta */ });
                 }
 
+                function selectedEntityTypes(cssClass){
+                  var boxes = document.querySelectorAll('input.' + cssClass);
+                  return Array.prototype.slice.call(boxes).filter(function(b){ return b.checked; }).map(function(b){ return b.value; }).join(',');
+                }
+                function toggleAllEntityChecks(containerId){
+                  var boxes = document.getElementById(containerId).querySelectorAll('input[type=checkbox]');
+                  var allChecked = Array.prototype.every.call(boxes, function(b){ return b.checked; });
+                  Array.prototype.forEach.call(boxes, function(b){ b.checked = !allChecked; });
+                }
+
                 function startSync(){
+                  var entityTypes = selectedEntityTypes('sne');
+                  if(!entityTypes){ alert('Selecione ao menos um tipo de dado em "Sincronizar agora".'); return; }
                   var panel = document.getElementById('synclogpanel');
                   panel.hidden = false;
                   document.getElementById('synclogclose').hidden = true;
@@ -2084,7 +2132,8 @@ public sealed class LocalStatusServer : BackgroundService
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
                     SYNCLOG_BASELINE = j.run_id;
-                    return fetch('/config/arpa/sync-now', { method:'POST' });
+                    var b = new URLSearchParams(); b.set('entity_types', entityTypes);
+                    return fetch('/config/arpa/sync-now', { method:'POST', body: b });
                   }).then(function(){
                     if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); }
                     SYNCLOG_TIMER = setInterval(pollSyncLog, 1000);
@@ -2108,6 +2157,8 @@ public sealed class LocalStatusServer : BackgroundService
                   if(scope === 'custom' && !document.getElementById('resync_date_' + id).value){
                     alert('Escolha uma data.'); return;
                   }
+                  var entityTypes = selectedEntityTypes('re_' + id);
+                  if(!entityTypes){ alert('Selecione ao menos um tipo de dado.'); return; }
                   if(!confirm('Re-enviar ' + scopeLabel + ' desta conexao ao ERP? Pode gerar muitos eventos.')) return;
                   var panel = document.getElementById('synclogpanel');
                   panel.hidden = false;
@@ -2120,7 +2171,7 @@ public sealed class LocalStatusServer : BackgroundService
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
                     SYNCLOG_BASELINE = j.run_id;
-                    var b = new URLSearchParams(); b.set('id', id); b.set('since_preset', scope);
+                    var b = new URLSearchParams(); b.set('id', id); b.set('since_preset', scope); b.set('entity_types', entityTypes);
                     if(scope === 'custom'){ b.set('since_date', document.getElementById('resync_date_' + id).value); }
                     return fetch('/config/arpa/full-resync', { method:'POST', body: b });
                   }).then(function(r){ return r.json(); }).then(function(j){
@@ -2245,6 +2296,25 @@ public sealed class LocalStatusServer : BackgroundService
         bool B(string k) => form.ContainsKey(k) && form[k] is "on" or "true" or "1";
         int I(string k, int fallback) => int.TryParse(V(k), out var n) ? n : fallback;
 
+        // "entity_types" vem como string separada por virgula (o parser de form aqui
+        // e um Dictionary<string,string>, sem suporte a valores repetidos pra mesma
+        // chave). Null = sem filtro (processa tudo, comportamento de antes desta
+        // selecao existir) - tanto ausente quanto vazio quanto so ids desconhecidos.
+        HashSet<string>? ParseEntityTypes(string key)
+        {
+            var raw = V(key);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            var set = new HashSet<string>(
+                raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(t => SyncContractValues.EntityTypes.Contains(t, StringComparer.OrdinalIgnoreCase)),
+                StringComparer.OrdinalIgnoreCase);
+            return set.Count == 0 ? null : set;
+        }
+
         switch (action)
         {
             case "save":
@@ -2341,8 +2411,22 @@ public sealed class LocalStatusServer : BackgroundService
 
             case "sync-now":
             {
-                var accepted = _manualSyncSignal.TrySignal();
+                var accepted = _manualSyncSignal.TrySignal(ParseEntityTypes("entity_types"));
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = true, accepted, message = accepted ? "Sincronizacao solicitada." : "Ja existe uma sincronizacao pendente." }, cancellationToken);
+                return;
+            }
+
+            case "erp-batch-size":
+            {
+                var batchSize = I("batch_size", -1);
+                if (batchSize is < 1 or > 5000)
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe um valor entre 1 e 5000." }, cancellationToken);
+                    return;
+                }
+
+                _erpDispatcherSettingsStore.SetBatchSizeOverride(batchSize);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = true, message = $"Tamanho do lote de envio ao ERP ajustado para {batchSize}." }, cancellationToken);
                 return;
             }
 
@@ -2425,15 +2509,17 @@ public sealed class LocalStatusServer : BackgroundService
                     _ => null,
                 };
 
+                var entityTypes = ParseEntityTypes("entity_types");
+
                 string escopoMsg;
                 if (since is null)
                 {
-                    var cleared = await _localStore.ResetArpaWatermarksAsync(id, cancellationToken);
+                    var cleared = await _localStore.ResetArpaWatermarksAsync(id, entityTypes, cancellationToken);
                     escopoMsg = $"{cleared} marcador(es) zerado(s)";
                 }
                 else
                 {
-                    await _localStore.SetArpaWatermarksSinceAsync(id, since.Value, cancellationToken);
+                    await _localStore.SetArpaWatermarksSinceAsync(id, since.Value, entityTypes, cancellationToken);
                     escopoMsg = $"marcadores ajustados para {since.Value.ToLocalTime():dd/MM/yyyy HH:mm}";
                 }
 
@@ -2628,23 +2714,73 @@ public sealed class LocalStatusServer : BackgroundService
                 .local-nav a:hover { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; text-decoration: none; }
                 .local-nav a.active { background: #2563eb; border-color: #2563eb; color: #ffffff; }
                 .local-nav a.active:hover { background: #1d4ed8; border-color: #1d4ed8; color: #ffffff; }
+                .theme-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #ffffff; color: #334155; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; margin-left: auto; }
+                .theme-toggle:hover { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
                 @media (max-width: 520px) {
                   .local-nav { gap: 6px; }
                   .local-nav a { flex: 1 1 calc(50% - 6px); justify-content: center; }
+                  .theme-toggle { margin-left: 0; flex: 1 1 100%; justify-content: center; }
                 }
+
+                /* Modo escuro: cobre os elementos comuns entre as paginas do dashboard local
+                   (paineis, tabelas, formularios, nav, mensagens). Ligado via classe "dark" no
+                   <body>, alternada pelo botao no LocalNavHtml e lembrada em localStorage. */
+                body.dark { background: #0f172a; color: #e2e8f0; }
+                body.dark h1, body.dark h2, body.dark h3 { color: #f1f5f9; }
+                body.dark .muted { color: #94a3b8; }
+                body.dark a { color: #60a5fa; }
+                body.dark .panel, body.dark .card { background: #1e293b; border-color: #334155; }
+                body.dark table { color: #e2e8f0; }
+                body.dark th, body.dark td { border-color: #334155; }
+                body.dark th { color: #94a3b8; }
+                body.dark input[type=text], body.dark input[type=password], body.dark input[type=number],
+                body.dark input[type=date], body.dark select, body.dark textarea {
+                  background: #0f172a; border-color: #475569; color: #e2e8f0;
+                }
+                body.dark label { color: #94a3b8; }
+                body.dark pre, body.dark code { background: #020617; color: #e2e8f0; }
+                body.dark .local-nav a, body.dark .theme-toggle { background: #1e293b; border-color: #475569; color: #cbd5e1; }
+                body.dark .local-nav a:hover, body.dark .theme-toggle:hover { background: #334155; border-color: #64748b; color: #ffffff; }
+                body.dark .local-nav a.active { background: #2563eb; border-color: #2563eb; color: #ffffff; }
+                body.dark button.secondary { background: #475569; }
+                body.dark button.mini { background: #1e3a8a; color: #bfdbfe; }
+                body.dark button.mini.danger { background: #7f1d1d; color: #fecaca; }
+                body.dark .okbox { background: #14532d; color: #bbf7d0; }
+                body.dark .warnbox { background: #78350f; color: #fde68a; }
+                body.dark .ok { color: #4ade80; }
+                body.dark .warn { color: #fbbf24; }
                 """;
 
     private static string LocalNavHtml(string activePath)
     {
-        return $"""
+        return $$"""
                 <nav class="local-nav" aria-label="Navegacao local">
-                  {LocalNavLink(DashboardPath, "Dashboard", activePath)}
-                  {LocalNavLink(SetupPath, "Ativacao", activePath)}
-                  {LocalNavLink(ConfigPath, "Configuracoes", activePath)}
-                  {LocalNavLink(LogsPath, "Logs", activePath)}
-                  {LocalNavLink(HelpPath, "Ajuda", activePath)}
-                  {LocalNavLink(StatusPath, "JSON tecnico", activePath)}
+                  {{LocalNavLink(DashboardPath, "Dashboard", activePath)}}
+                  {{LocalNavLink(SetupPath, "Ativacao", activePath)}}
+                  {{LocalNavLink(ConfigPath, "Configuracoes", activePath)}}
+                  {{LocalNavLink(LogsPath, "Logs", activePath)}}
+                  {{LocalNavLink(HelpPath, "Ajuda", activePath)}}
+                  {{LocalNavLink(StatusPath, "JSON tecnico", activePath)}}
+                  <button type="button" id="themetoggle" class="theme-toggle" onclick="toggleTheme()"></button>
                 </nav>
+                <script>
+                  (function(){
+                    var KEY = 'sync-dashboard-theme';
+                    function applyTheme(theme){
+                      document.body.classList.toggle('dark', theme === 'dark');
+                      var btn = document.getElementById('themetoggle');
+                      if(btn){ btn.textContent = theme === 'dark' ? 'Claro' : 'Escuro'; }
+                    }
+                    window.toggleTheme = function(){
+                      var next = document.body.classList.contains('dark') ? 'light' : 'dark';
+                      try { localStorage.setItem(KEY, next); } catch(e) { /* sem storage disponivel, so nao lembra na proxima visita */ }
+                      applyTheme(next);
+                    };
+                    var saved = 'light';
+                    try { saved = localStorage.getItem(KEY) || 'light'; } catch(e) { /* idem */ }
+                    applyTheme(saved);
+                  })();
+                </script>
                 """;
     }
 
@@ -2658,6 +2794,37 @@ public sealed class LocalStatusServer : BackgroundService
     private static string Html(string value)
     {
         return WebUtility.HtmlEncode(value);
+    }
+
+    private static readonly (string EntityType, string Label)[] EntityTypeLabels =
+    [
+        ("cliente", "Clientes"),
+        ("produto", "Produtos"),
+        ("estoque", "Estoque"),
+        ("venda", "Vendas"),
+        ("financeiro", "Financeiro"),
+        ("compra", "Compras"),
+        ("cobranca", "Cobranca"),
+        ("plano_historico", "Plano-hist"),
+    ];
+
+    /// <summary>Grupo de checkboxes de tipo de entidade (produtos, vendas, etc.),
+    /// reutilizado tanto no painel global "Sincronizar agora" quanto por linha de
+    /// conexao em "Sincronizar tudo". Todas marcadas por padrao — se o usuario nao
+    /// mexer em nada, o comportamento e identico ao de antes desta selecao existir
+    /// (processa tudo que estiver com o toggle ligado na conexao).</summary>
+    private static string BuildEntityTypeChecksHtml(string containerId, string cssClass, bool compact = false)
+    {
+        var sizeClass = compact ? " mini" : "";
+        var items = string.Join("\n", EntityTypeLabels.Select(e =>
+            $"""<label><input type="checkbox" class="{cssClass}{sizeClass}" value="{e.EntityType}" checked> {Html(e.Label)}</label>"""));
+
+        return $"""
+            <div class="checks" id="{containerId}">
+              {items}
+            </div>
+            <button type="button" class="mini" onclick="toggleAllEntityChecks('{containerId}')">Selecionar/Desmarcar tudo</button>
+            """;
     }
 
     private static string FormatHeartbeat(LocalSyncStoreStatus storeStatus)

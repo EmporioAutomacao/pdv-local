@@ -8,9 +8,9 @@ public sealed class ErpDispatcherOptionsValidator : IValidateOptions<ErpDispatch
     {
         var failures = new List<string>();
 
-        if (options.BatchSize is < 1 or > 500)
+        if (options.BatchSize is < 1 or > 5000)
         {
-            failures.Add($"{ErpDispatcherOptions.SectionName}:BatchSize must be between 1 and 500.");
+            failures.Add($"{ErpDispatcherOptions.SectionName}:BatchSize must be between 1 and 5000.");
         }
 
         if (options.TimeoutSeconds is < 5 or > 300)

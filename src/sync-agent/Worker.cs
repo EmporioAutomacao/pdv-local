@@ -83,6 +83,7 @@ public sealed class Worker : BackgroundService
     {
         _logger.LogInformation("Sync agent started.");
         var trigger = "startup";
+        IReadOnlySet<string>? manualEntityFilter = null;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -91,7 +92,7 @@ public sealed class Worker : BackgroundService
 
             try
             {
-                await RunSyncCycleAsync(options, trigger, stoppingToken);
+                await RunSyncCycleAsync(options, trigger, manualEntityFilter, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -104,15 +105,16 @@ public sealed class Worker : BackgroundService
                 _logger.LogWarning(ex, "Sync cycle failed. The agent will retry on the next interval.");
             }
 
-            trigger = await _manualSyncSignal.WaitAsync(interval, stoppingToken)
-                ? "manual"
-                : "scheduled";
+            var waitResult = await _manualSyncSignal.WaitAsync(interval, stoppingToken);
+            trigger = waitResult.Triggered ? "manual" : "scheduled";
+            manualEntityFilter = waitResult.Triggered ? waitResult.EntityTypes : null;
         }
     }
 
     private async Task RunSyncCycleAsync(
         SyncAgentOptions options,
         string trigger,
+        IReadOnlySet<string>? manualEntityFilter,
         CancellationToken cancellationToken)
     {
         _runtimeState.MarkCycleStarted(trigger);
@@ -140,7 +142,7 @@ public sealed class Worker : BackgroundService
             cancellationToken);
 
         _arpaSyncRunLog.BeginRun(trigger);
-        var collectorSummary = await _arpaCollector.CollectAsync(cancellationToken);
+        var collectorSummary = await _arpaCollector.CollectAsync(cancellationToken, manualEntityFilter);
         var pdvSalesPublishSummary = await _pdvSalesPublisher.PublishAsync(cancellationToken);
         if (pdvSalesPublishSummary.Enabled && pdvSalesPublishSummary.Published > 0)
         {
