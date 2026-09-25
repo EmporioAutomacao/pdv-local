@@ -48,6 +48,7 @@ public sealed class ArpaResyncProcessor
         "estoque" => "estoque",
         "venda" => "vendas",
         "financeiro" => "financeiro",
+        "compra" => "compras",
         "cobranca" => "cobranca",
         "plano_historico" => "plano_historico",
         _ => entityType,
@@ -198,7 +199,7 @@ public sealed class ArpaResyncProcessor
             var payload = JsonNode.Parse(payloadJson)?.AsObject()
                 ?? throw new InvalidOperationException($"sync_export.{ViewName(item.EntityType)} retornou payload_json invalido.");
 
-            if ((item.EntityType == "estoque" || item.EntityType == "venda")
+            if ((item.EntityType == "estoque" || item.EntityType == "venda" || item.EntityType == "compra")
                 && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
                 && payload["loja_codigo"] is null)
             {

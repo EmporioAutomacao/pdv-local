@@ -65,6 +65,18 @@ public sealed record ArpaLocalConnection
     /// </summary>
     public bool SyncPlanoHistorico { get; init; }
 
+    /// <summary>
+    /// Compras (<c>entity_type=compra</c>). View <c>sync_export.compras</c>
+    /// best-effort. Diferente do par Vendas-&gt;Financeiro, NAO e forcado por
+    /// <see cref="SyncFinanceiro"/> nem forca-o: a correlacao entre
+    /// TituloPagar e Compra e feita nos dois sentidos pelo ERP
+    /// (<c>sync_api.domain_processor.resolve_compra_for_financeiro</c> e
+    /// <c>vincular_titulos_pagar_soltos</c>), sem depender de ordem de chegada
+    /// nem de acoplamento de toggles no agente. Desligado por padrao (opt-in),
+    /// igual a <see cref="SyncCobranca"/>/<see cref="SyncPlanoHistorico"/>.
+    /// </summary>
+    public bool SyncCompra { get; init; }
+
     public int BatchSize { get; init; } = 5000;
 
     public bool Enabled { get; init; } = true;

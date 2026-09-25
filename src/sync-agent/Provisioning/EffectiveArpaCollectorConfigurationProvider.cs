@@ -99,6 +99,7 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
             connection.SyncEstoque,
             connection.SyncVendas,
             connection.SyncFinanceiro,
+            connection.SyncCompra,
             connection.SyncCobranca,
             connection.SyncPlanoHistorico);
 

@@ -967,3 +967,154 @@ BEGIN
   END;
 END;
 $cob$;
+
+-- =================== COMPRAS (best-effort, so fallback dinamico) ===================
+-- entity_type=compra. Diferente de vendas/financeiro, NAO ha schema padrao
+-- fixo conhecido para compras: so ha evidencia direta da cadeia
+-- apagar_nota_compra -> cabecalho_nota_compra usada acima (fallback de
+-- sync_export.financeiro, ramo pagar) e em
+-- financeiro/a_pagar.py::_consultar_titulos_pagar_arpa (ERP) para achar o
+-- numero da nota a partir de um titulo a pagar - nao ha confirmacao de
+-- schema de itens nem de fornecedor com CNPJ. Por isso esta view so tem o
+-- caminho introspectivo (_first_table + _pick), com lista ampla de
+-- candidatos; sem itens ou sem CNPJ do fornecedor identificaveis ela ainda
+-- cria a compra com o que houver - sync_api.domain_processor.apply_compra
+-- (ERP) aceita itens=[] e cria um fornecedor com documento provisorio
+-- quando falta fornecedor_documento, sem rejeitar o evento.
+DO $compras$
+DECLARE
+    v_tz  text := 'Etc/GMT+3';
+    fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
+    t text; it_t text;
+    cc_cod text; cc_nota text; cc_serie text; cc_emissao text; cc_entrada text;
+    cc_forn text; cc_chave text; cc_frete text; cc_seguro text; cc_desc text;
+    cc_outras text; cc_natureza text;
+    fo_t text; fo_code text; fo_name text; fo_doc text;
+    it_ord text; it_prod text; it_desc text; it_qty text; it_unit text; it_disc text;
+    it_ean text; it_ncm text; it_cfop text; it_codforn text;
+    itens_expr text; forn_join text; forn_doc_expr text; forn_nome_expr text;
+    occ_expr text; pairs text; sql text;
+BEGIN
+    BEGIN
+        IF current_setting('TimeZone') IS NOT NULL
+           AND position('/' in current_setting('TimeZone')) = 0
+           AND upper(current_setting('TimeZone')) NOT IN ('GMT','UTC','UCT','ZULU','GREENWICH','LOCALTIME','FACTORY') THEN
+            v_tz := current_setting('TimeZone');
+        END IF;
+    EXCEPTION WHEN OTHERS THEN v_tz := 'Etc/GMT+3';
+    END;
+
+  BEGIN
+    t := sync_export._first_table(ARRAY['cabecalho_nota_compra','nota_compra','notascompra',
+        'compras','compra','pedidoscompra','pedido_compra']);
+    IF t IS NULL THEN
+        RAISE NOTICE 'sync_export.compras pulada (tabela de nota de compra nao encontrada).';
+    ELSE
+        cc_cod      := sync_export._pick(t, ARRAY['codigo','id','nota']);
+        cc_nota     := sync_export._pick(t, ARRAY['nota','numero','numeronota','numero_nota']);
+        cc_serie    := sync_export._pick(t, ARRAY['serie','serienota']);
+        cc_emissao  := sync_export._pick(t, ARRAY['dataemissao','data_emissao','emissao','data']);
+        cc_entrada  := sync_export._pick(t, ARRAY['dataentrada','data_entrada','datafechamento','entrada']);
+        cc_forn     := sync_export._pick(t, ARRAY['fornecedor','codfornecedor','cod_fornecedor','id_fornecedor']);
+        cc_chave    := sync_export._pick(t, ARRAY['chaveacesso','chave_acesso','chavenfe','chave']);
+        cc_frete    := sync_export._pick(t, ARRAY['frete','valorfrete','vlr_frete']);
+        cc_seguro   := sync_export._pick(t, ARRAY['seguro','valorseguro','vlr_seguro']);
+        cc_desc     := sync_export._pick(t, ARRAY['desconto','valordesconto','desconto_total','vlr_desconto']);
+        cc_outras   := sync_export._pick(t, ARRAY['outrasdespesas','outras_despesas','despesasacessorias']);
+        cc_natureza := sync_export._pick(t, ARRAY['naturezaoperacao','natureza_operacao','natureza']);
+
+        IF cc_cod IS NULL THEN
+            RAISE NOTICE 'sync_export.compras pulada (tabela % sem coluna de codigo).', t;
+        ELSE
+            -- fornecedor: mesma tabela de clientes na maioria dos schemas Arpa
+            -- (fornecedor = Cliente com flag) - mesmo join usado no ramo pagar
+            -- de sync_export.financeiro acima, aqui tambem tentando o CNPJ
+            -- (nunca lido pelo caminho legado de financeiro, mas necessario
+            -- para apply_compra resolver o fornecedor com seguranca).
+            fo_t := sync_export._first_table(ARRAY['fornecedores','fornecedor','clientes','cliente']);
+            forn_join := ''; forn_nome_expr := 'NULL'; forn_doc_expr := 'NULL';
+            IF fo_t IS NOT NULL AND cc_forn IS NOT NULL THEN
+                fo_code := sync_export._pick(fo_t, ARRAY['codigo','id','fornecedor']);
+                fo_name := sync_export._pick(fo_t, ARRAY['nome','razao','razao_social','fantasia']);
+                fo_doc  := sync_export._pick(fo_t, ARRAY['cnpj_cpf','cpf_cnpj','cnpj','cpf','documento']);
+                IF fo_code IS NOT NULL THEN
+                    forn_join := format(' LEFT JOIN public.%I forn ON CAST(forn.%I AS TEXT) = CAST(cc.%I AS TEXT)', fo_t, fo_code, cc_forn);
+                    IF fo_name IS NOT NULL THEN forn_nome_expr := format('forn.%I', fo_name); END IF;
+                    IF fo_doc  IS NOT NULL THEN forn_doc_expr  := format('forn.%I', fo_doc); END IF;
+                END IF;
+            END IF;
+
+            -- itens: candidatos amplos, ligados por FK ao codigo da nota
+            -- (cc_cod). Sem tabela de itens identificavel a compra ainda e
+            -- criada com itens=[] (ver comentario do bloco acima).
+            it_t := sync_export._first_table(ARRAY['itens_nota_compra','itenspedidocompra','itens_compra',
+                'itenscompra','itens_nf_entrada','itensnotacompra']);
+            itens_expr := '''[]''::jsonb';
+            IF it_t IS NOT NULL THEN
+                it_ord := sync_export._pick(it_t, ARRAY['nota','codigo_nota','pedido','compra','id_nota']);
+                IF it_ord IS NOT NULL THEN
+                    it_prod    := sync_export._pick(it_t, ARRAY['produto','cod_produto','id_produto','codigo_produto']);
+                    it_desc    := sync_export._pick(it_t, ARRAY['descricao','produto_descricao','descricao_produto']);
+                    it_qty     := sync_export._pick(it_t, ARRAY['quantidade','qtd','qtde']);
+                    it_unit    := sync_export._pick(it_t, ARRAY['valorunitario','valor_unitario','preco_unitario','unitario','preco']);
+                    it_disc    := sync_export._pick(it_t, ARRAY['desconto','valor_desconto','vlr_desconto']);
+                    it_ean     := sync_export._pick(it_t, ARRAY['ean','codigobarras','codigo_barras','gtin']);
+                    it_ncm     := sync_export._pick(it_t, ARRAY['ncm','codigo_ncm','cod_ncm']);
+                    it_cfop    := sync_export._pick(it_t, ARRAY['cfop','codigo_cfop']);
+                    it_codforn := sync_export._pick(it_t, ARRAY['codigoprodutofornecedor','codigo_produto_fornecedor','referenciafornecedor']);
+
+                    itens_expr := format(
+                        'COALESCE((SELECT jsonb_agg(jsonb_build_object(' ||
+                        '''codigo_produto_arpa'', %s, ''produto_descricao'', %s, ''quantidade'', %s, ' ||
+                        '''valor_unitario'', %s, ''desconto'', %s, ''ean'', %s, ''ncm'', %s, ''cfop'', %s, ' ||
+                        '''codigo_produto_fornecedor'', %s)) FROM public.%I i WHERE CAST(i.%I AS TEXT) = CAST(cc.%I AS TEXT)), ''[]''::jsonb)',
+                        CASE WHEN it_prod    IS NOT NULL THEN format('i.%I', it_prod)    ELSE 'NULL' END,
+                        CASE WHEN it_desc    IS NOT NULL THEN format('i.%I', it_desc)    ELSE 'NULL' END,
+                        CASE WHEN it_qty     IS NOT NULL THEN format('i.%I', it_qty)     ELSE 'NULL' END,
+                        CASE WHEN it_unit    IS NOT NULL THEN format('i.%I', it_unit)    ELSE 'NULL' END,
+                        CASE WHEN it_disc    IS NOT NULL THEN format('i.%I', it_disc)    ELSE 'NULL' END,
+                        CASE WHEN it_ean     IS NOT NULL THEN format('i.%I', it_ean)     ELSE 'NULL' END,
+                        CASE WHEN it_ncm     IS NOT NULL THEN format('i.%I', it_ncm)     ELSE 'NULL' END,
+                        CASE WHEN it_cfop    IS NOT NULL THEN format('i.%I', it_cfop)    ELSE 'NULL' END,
+                        CASE WHEN it_codforn IS NOT NULL THEN format('i.%I', it_codforn) ELSE 'NULL' END,
+                        it_t, it_ord, cc_cod);
+                END IF;
+            END IF;
+
+            pairs := format('''codigo_compra_arpa'', cc.%I::text', cc_cod);
+            IF cc_nota     IS NOT NULL THEN pairs := pairs || format(', ''numero_nf'', cc.%I::text', cc_nota); END IF;
+            IF cc_serie    IS NOT NULL THEN pairs := pairs || format(', ''serie_nf'', cc.%I::text', cc_serie); END IF;
+            IF cc_emissao  IS NOT NULL THEN pairs := pairs || format(', ''data_emissao'', cc.%I', cc_emissao); END IF;
+            IF cc_entrada  IS NOT NULL THEN pairs := pairs || format(', ''data_entrada'', cc.%I', cc_entrada); END IF;
+            IF cc_chave    IS NOT NULL THEN pairs := pairs || format(', ''chave_acesso'', cc.%I::text', cc_chave); END IF;
+            IF cc_frete    IS NOT NULL THEN pairs := pairs || format(', ''frete'', cc.%I', cc_frete); END IF;
+            IF cc_seguro   IS NOT NULL THEN pairs := pairs || format(', ''seguro'', cc.%I', cc_seguro); END IF;
+            IF cc_desc     IS NOT NULL THEN pairs := pairs || format(', ''desconto_total'', cc.%I', cc_desc); END IF;
+            IF cc_outras   IS NOT NULL THEN pairs := pairs || format(', ''outras_despesas'', cc.%I', cc_outras); END IF;
+            IF cc_natureza IS NOT NULL THEN pairs := pairs || format(', ''natureza_operacao'', cc.%I::text', cc_natureza); END IF;
+            IF cc_forn     IS NOT NULL THEN pairs := pairs || format(', ''fornecedor_codigo'', cc.%I::text', cc_forn); END IF;
+            pairs := pairs || format(', ''fornecedor_nome'', %s, ''fornecedor_documento'', %s', forn_nome_expr, forn_doc_expr);
+            pairs := pairs || format(', ''itens'', %s', itens_expr);
+
+            occ_expr := CASE
+                WHEN cc_emissao IS NOT NULL THEN format('COALESCE(%s, %s)', sync_export._occurred_expr('cc', t, cc_emissao, v_tz), fixed)
+                ELSE fixed
+            END;
+
+            sql := 'CREATE OR REPLACE VIEW sync_export.compras AS SELECT '
+                || format('cc.%I::text', cc_cod) || ' AS entity_key, '
+                || occ_expr || ' AS occurred_at_utc, '
+                || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                || format('(''arpa-compra-'' || cc.%I)::text', cc_cod) || ' AS trace_id '
+                || format('FROM public.%I cc', t) || forn_join
+                || format(' WHERE cc.%I IS NOT NULL', cc_cod);
+            EXECUTE sql;
+            RAISE NOTICE 'sync_export.compras criada (tabela %; itens: %).',
+                t, CASE WHEN it_t IS NOT NULL THEN it_t ELSE 'nao encontrado' END;
+        END IF;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export.compras pulada (%).', SQLERRM;
+  END;
+END;
+$compras$;

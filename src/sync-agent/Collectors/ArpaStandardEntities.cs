@@ -24,6 +24,7 @@ public static class ArpaStandardEntities
         bool estoque,
         bool vendas = false,
         bool financeiro = false,
+        bool compras = false,
         bool cobranca = false,
         bool planoHistorico = false)
     {
@@ -53,13 +54,23 @@ public static class ArpaStandardEntities
         // habilitado: o ERP nao gera titulo a partir do evento de venda do Arpa
         // (apply_arpa_venda so cria Venda/VendaItem) - quem cria TituloReceber/
         // TituloPagar e o evento entity_type=financeiro, casado a venda por
-        // codigo_venda_arpa (domain_processor.apply_financeiro). Sem essa
-        // entidade tambem habilitada, a venda chega ao ERP sem parcela. O
-        // mesmo acoplamento deve valer para o futuro modulo de Compras
-        // (entity_type=compra) quando ele for adicionado aqui.
+        // codigo_venda_arpa (domain_processor.apply_financeiro).
+        //
+        // Compras NAO segue o mesmo acoplamento: diferente de Vendas, o ERP ja
+        // cria TituloPagar a partir do proprio evento financeiro (natureza=
+        // pagar) independente de Compras existir ou nao - e o inverso disso
+        // (TituloPagar.compra) e resolvido nos dois sentidos pelo ERP
+        // (resolve_compra_for_financeiro / vincular_titulos_pagar_soltos), sem
+        // depender de ordem de chegada. Por isso SyncCompra fica como toggle
+        // independente, sem forcar nem ser forcado por SyncFinanceiro.
         if (financeiro || vendas)
         {
             entities.Add(Make("financeiro", "financeiro"));
+        }
+
+        if (compras)
+        {
+            entities.Add(Make("compras", "compra"));
         }
 
         if (cobranca)

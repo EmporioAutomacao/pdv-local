@@ -560,3 +560,9 @@ Para contratos:
   schema - mais amplo que a politica de `docs/arpa-readonly-security-
   policy.md`. Ver secao "Desvio registrado em 2026-09-11" nesse documento
   antes de decidir revogar.
+- O contrato Sync ganhou o entity_type `compra` (domínio Compras, view
+  `sync_export.compras` best-effort — sem schema padrão fixo conhecido, só
+  fallback dinâmico). Mesmo problema do item acima se aplica: instalações
+  atualizadas antes dessa mudança precisam rodar de novo a rotina
+  "Corrigir outbox_events_entity_type_check" (Configuracoes > Manutencao do
+  banco local) para o toggle Compras funcionar.

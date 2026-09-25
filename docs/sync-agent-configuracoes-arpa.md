@@ -20,8 +20,8 @@ Configuracoes > Arpa
 └── Adicionar / Editar conexao (form)
       Nome, Loja/Estoque (dropdown do ERP),
       Host/Porta/Database, Usuario/Senha (read-only), Batch size,
-      toggles: Produtos / Clientes / Estoque / Vendas / Financeiro / Cobranca /
-      Plano de historicos,
+      toggles: Produtos / Clientes / Estoque / Vendas / Financeiro / Compras /
+      Cobranca / Plano de historicos,
       "Controla o estoque desta Loja", "Ativa"
       [Salvar] [Testar conexao] [Limpar]
       > Preparar banco Arpa (requer credencial DBA)
@@ -75,6 +75,7 @@ Campos do formulario:
 | **Usuario / Senha** | Deve ser um usuario **read-only** (ver secao 4). Ao **editar** uma conexao a Senha vem em branco (nunca vai para o navegador) e assim fica: *Salvar* e *Testar conexao* usam a senha ja guardada. So digite para trocar. |
 | **Batch size** | Linhas por lote na leitura das views (default 5000). |
 | **Produtos / Clientes / Estoque / Vendas / Financeiro** | O que essa conexao sincroniza. O agente monta a query padrao contra `sync_export.<view>`. |
+| **Compras** | Compras/notas de entrada (`entity_type=compra`) → `compras.Compra` + `CompraItem` no ERP, ja recebidas (sem passar pelo fluxo manual de confirmacao/recebimento). Vinculo com `financeiro.TituloPagar` ja sincronizado (`compra_externa_id`) e feito automaticamente pelo ERP nos dois sentidos, sem depender de ordem de chegada — nao precisa ligar Financeiro para Compras funcionar, nem o contrario. View `sync_export.compras` **best-effort** (sem schema padrao fixo conhecido — so o fallback dinamico; sem tabela de itens identificavel, a compra ainda e criada com itens vazios). |
 | **Cobranca** | Contas bancarias de cobranca (`entity_type=cobranca`, contrato Sync 2.10.0) → `cobranca.ContaCobranca` no ERP. View `sync_export.cobranca` **best-effort** (o schema de contas bancarias do Arpa varia muito) — se nao bater, aparece "pulada" no log e o toggle nao coleta nada. |
 | **Plano de historicos** | Catalogo de planos de historico financeiro (`entity_type=plano_historico`, contrato Sync 2.11.0) → `financeiro.PlanoHistoricoFinanceiro`. View `sync_export.plano_historico` **best-effort**. |
 | **Controla o estoque desta Loja** | Quando marcado, eventos `estoque` desta conexao gravam o saldo na Loja; senao so cadastro. |
@@ -93,7 +94,7 @@ Endpoint: `GET /config/arpa/sync-log` (JSON: `run_id`, `running`, `lines`).
 
 **Sincronizar tudo** (1.6.9+) **zera os marcadores (watermarks)** desta conexao
 e dispara um ciclo — a coleta re-le e re-envia o cadastro ao ERP (produtos,
-clientes, estoque, vendas, financeiro, cobranca, plano_historico - as
+clientes, estoque, vendas, financeiro, compras, cobranca, plano_historico - as
 entidades ligadas nessa conexao). Use para backfill ou para corrigir dados
 errados no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam a
 500/lote).

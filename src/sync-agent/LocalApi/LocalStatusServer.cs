@@ -717,7 +717,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro,cobranca,plano_historico}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6), com etapas e barra de acompanhamento do envio (a partir de 1.6.14). O botao <strong>Sincronizar tudo</strong> zera os marcadores e reenvia dessa conexao ao ERP (a partir de 1.6.13); a partir de 1.6.25 um seletor ao lado escolhe o <strong>periodo</strong> (tudo / ultimos 3 meses / ultimo dia / data especifica) em vez de sempre reenviar o historico inteiro. Vendas/financeiro/cobranca tem um fallback dinamico para schemas Arpa fora do padrao fixo original (a partir de 1.6.17). Produtos exportam <strong>unidade de medida</strong> quando o Arpa tiver a coluna (contrato Sync 2.13.0, a partir de 1.6.24). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro,compras,cobranca,plano_historico}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6), com etapas e barra de acompanhamento do envio (a partir de 1.6.14). O botao <strong>Sincronizar tudo</strong> zera os marcadores e reenvia dessa conexao ao ERP (a partir de 1.6.13); a partir de 1.6.25 um seletor ao lado escolhe o <strong>periodo</strong> (tudo / ultimos 3 meses / ultimo dia / data especifica) em vez de sempre reenviar o historico inteiro. Vendas/financeiro/cobranca tem um fallback dinamico para schemas Arpa fora do padrao fixo original (a partir de 1.6.17). Produtos exportam <strong>unidade de medida</strong> quando o Arpa tiver a coluna (contrato Sync 2.13.0, a partir de 1.6.24). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
@@ -1588,6 +1588,7 @@ public sealed class LocalStatusServer : BackgroundService
                 c.SyncEstoque ? "Estoque" : null,
                 c.SyncVendas ? "Vendas" : null,
                 c.SyncFinanceiro ? "Financeiro" : null,
+                c.SyncCompra ? "Compras" : null,
                 c.SyncCobranca ? "Cobranca" : null,
                 c.SyncPlanoHistorico ? "Plano-hist" : null,
             }.Where(t => t is not null));
@@ -1636,6 +1637,7 @@ public sealed class LocalStatusServer : BackgroundService
                     syncEstoque = c.SyncEstoque,
                     syncVendas = c.SyncVendas,
                     syncFinanceiro = c.SyncFinanceiro,
+                    syncCompra = c.SyncCompra,
                     syncCobranca = c.SyncCobranca,
                     syncPlanoHistorico = c.SyncPlanoHistorico,
                     batchSize = c.BatchSize,
@@ -1782,6 +1784,7 @@ public sealed class LocalStatusServer : BackgroundService
                       <label><input type="checkbox" id="f_estoque" name="sync_estoque"> Estoque</label>
                       <label><input type="checkbox" id="f_vendas" name="sync_vendas" onchange="onVendasToggle()"> Vendas</label>
                       <label><input type="checkbox" id="f_financeiro" name="sync_financeiro"> Financeiro <span class="muted" style="font-size:11px">(obrigatorio com Vendas - sem isso a venda chega sem parcela)</span></label>
+                      <label><input type="checkbox" id="f_compra" name="sync_compra"> Compras</label>
                       <label><input type="checkbox" id="f_cobranca" name="sync_cobranca"> Cobranca</label>
                       <label><input type="checkbox" id="f_plano_hist" name="sync_plano_historico"> Plano de historicos</label>
                       <label><input type="checkbox" id="f_controla" name="controla_estoque"> Controla o estoque desta Loja</label>
@@ -2122,6 +2125,7 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_estoque').checked = !!c.syncEstoque;
                   document.getElementById('f_vendas').checked = !!c.syncVendas;
                   document.getElementById('f_financeiro').checked = !!c.syncFinanceiro;
+                  document.getElementById('f_compra').checked = !!c.syncCompra;
                   document.getElementById('f_cobranca').checked = !!c.syncCobranca;
                   document.getElementById('f_plano_hist').checked = !!c.syncPlanoHistorico;
                   document.getElementById('f_controla').checked = !!c.controlaEstoque;
@@ -2260,6 +2264,7 @@ public sealed class LocalStatusServer : BackgroundService
                     // coletado, mesmo se o POST vier direto da API sem passar
                     // pela UI (que ja desabilita o checkbox nesse caso).
                     SyncFinanceiro = B("sync_financeiro") || B("sync_vendas"),
+                    SyncCompra = B("sync_compra"),
                     SyncCobranca = B("sync_cobranca"),
                     SyncPlanoHistorico = B("sync_plano_historico"),
                     BatchSize = I("batch_size", 5000),
@@ -2325,7 +2330,7 @@ public sealed class LocalStatusServer : BackgroundService
                     V("host"), I("port", 5432), V("database"), V("username"), testPassword,
                     B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"),
                     B("sync_financeiro") || B("sync_vendas"),
-                    B("sync_cobranca"), B("sync_plano_historico"),
+                    B("sync_compra"), B("sync_cobranca"), B("sync_plano_historico"),
                     cancellationToken);
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
                 return;
