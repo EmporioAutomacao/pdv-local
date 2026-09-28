@@ -748,4 +748,19 @@ Para remover arquivos instalados em `C:\Program Files\AraraSuite.com.br`:
 O banco local nao e removido automaticamente para preservar outbox,
 dead-letter, auditoria e evidencias de sincronizacao.
 
+## Melhorias futuras
+
+Itens planejados para uma proxima versao, ainda nao implementados:
+
+- **Deteccao de porta ocupada no bootstrap do PostgreSQL.** Hoje
+  `infra\windows\install-postgresql17-local.ps1` usa `-Port` fixo (padrao
+  `5432`, ver linha com `[int]$Port = 5432`) sem checar se a porta ja esta em
+  uso antes de instalar/inicializar o banco. Proposta: antes de instalar,
+  verificar se `5432` esta livre (ex.: `Test-NetConnection` ou
+  `pg_isready` contra a porta) e, se estiver ocupada, cair automaticamente
+  para `5433` (e registrar a porta escolhida no output/summary da
+  instalacao), evitando conflito com uma instancia de PostgreSQL ja existente
+  na maquina. Isso tambem precisa refletir no instalador interativo (secao
+  "Instalador interativo") e na string de conexao gerada para o SyncAgent.
+
 

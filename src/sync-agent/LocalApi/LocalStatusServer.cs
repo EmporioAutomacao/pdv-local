@@ -2101,6 +2101,31 @@ public sealed class LocalStatusServer : BackgroundService
                   }).catch(function(){ /* API pode cair momentaneamente; proxima poll tenta */ });
                 }
 
+                // Restaura o painel ao carregar/recarregar a pagina (ou ao voltar de
+                // outra aba, ja que aqui cada aba e uma navegacao de pagina completa):
+                // sem isso, uma sincronizacao em andamento ou recem-concluida (inclusive
+                // disparada automaticamente por um ciclo agendado, nao so por clique)
+                // ficava invisivel ate o operador clicar em "Sincronizar" de novo.
+                function initSyncLogPanel(){
+                  fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
+                    if(!j.lines || !j.lines.length){ return; }
+                    SYNCLOG_BASELINE = j.run_id;
+                    SYNCLOG_STARTED = true;
+                    document.getElementById('synclogpanel').hidden = false;
+                    renderSyncLog(j);
+                    if(j.running){
+                      document.getElementById('synclogclose').hidden = true;
+                      if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); }
+                      SYNCLOG_TIMER = setInterval(pollSyncLog, 1000);
+                    } else {
+                      document.getElementById('synclogclose').hidden = false;
+                      fetch('/status').then(function(r){ return r.json(); }).then(function(s){
+                        startDrainPoll(s.pending_outbox_events, s.dead_letter_events);
+                      }).catch(function(){ /* sem status agora, a barra so nao aparece */ });
+                    }
+                  }).catch(function(){ /* API pode cair momentaneamente; painel so fica oculto */ });
+                }
+
                 function selectedEntityTypes(cssClass){
                   var boxes = document.querySelectorAll('input.' + cssClass);
                   return Array.prototype.slice.call(boxes).filter(function(b){ return b.checked; }).map(function(b){ return b.value; }).join(',');
@@ -2238,6 +2263,7 @@ public sealed class LocalStatusServer : BackgroundService
                     .catch(function(e){ setStatus(String(e), false); });
                 }
                 loadLojas();
+                initSyncLogPanel();
               </script>
             </body>
             </html>
