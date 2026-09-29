@@ -188,6 +188,24 @@ public sealed class ArpaCollector
                 payload["loja_codigo"] = connection.LojaCodigo;
             }
 
+            // Empresa dona da Loja acima (obtida do ERP quando a Loja foi escolhida
+            // no dropdown, nao digitada a mao) - sem isso o ERP so resolve a Empresa
+            // pelo fallback de "empresa unica ativa" em apply_arpa_venda, que roda
+            // depois da resolucao de estoque e pode deixar a Loja sem empresa
+            // vinculada. Nunca sobrescreve um valor que a propria view ja trouxer.
+            if (entity.EntityType is "estoque" or "venda" or "compra")
+            {
+                if (!string.IsNullOrWhiteSpace(connection.EmpresaCnpj) && payload["empresa_cnpj"] is null)
+                {
+                    payload["empresa_cnpj"] = connection.EmpresaCnpj;
+                }
+
+                if (!string.IsNullOrWhiteSpace(connection.EmpresaNome) && payload["empresa_nome"] is null)
+                {
+                    payload["empresa_nome"] = connection.EmpresaNome;
+                }
+            }
+
             var normalizedPayload = _normalizers.Normalize(entity.EntityType, row.EntityKey, payload);
 
             // Geracao > 0 (apos "Sincronizar tudo") entra no seed do event_id,

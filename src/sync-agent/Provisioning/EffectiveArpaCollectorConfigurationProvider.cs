@@ -71,6 +71,8 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
                 _localConnectionStringProvider.GetConnectionString(),
                 options.BatchSize,
                 string.Empty,
+                string.Empty,
+                string.Empty,
                 options.Entities),
         ];
         return Task.FromResult(result);
@@ -109,6 +111,8 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
             connectionString,
             connection.BatchSize <= 0 ? 5000 : connection.BatchSize,
             connection.LojaCodigo,
+            connection.EmpresaCnpj,
+            connection.EmpresaNome,
             entities);
     }
 
@@ -175,4 +179,6 @@ public sealed record EffectiveArpaCollectorConnection(
     string ConnectionString,
     int BatchSize,
     string LojaCodigo,
+    string EmpresaCnpj,
+    string EmpresaNome,
     IReadOnlyList<ArpaEntityCollectorOptions> Entities);

@@ -112,4 +112,5 @@ public sealed record ArpaLojaListResponse(
 public sealed record ArpaLoja(
     [property: JsonPropertyName("id")] long Id,
     [property: JsonPropertyName("nome")] string Nome,
-    [property: JsonPropertyName("empresa_nome")] string EmpresaNome);
+    [property: JsonPropertyName("empresa_nome")] string EmpresaNome,
+    [property: JsonPropertyName("empresa_cnpj")] string? EmpresaCnpj = null);

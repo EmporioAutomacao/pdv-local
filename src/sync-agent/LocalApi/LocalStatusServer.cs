@@ -1672,6 +1672,8 @@ public sealed class LocalStatusServer : BackgroundService
                     database = c.Database,
                     username = c.Username,
                     lojaCodigo = c.LojaCodigo,
+                    empresaCnpj = c.EmpresaCnpj,
+                    empresaNome = c.EmpresaNome,
                     controlaEstoque = c.ControlaEstoque,
                     syncProdutos = c.SyncProdutos,
                     syncClientes = c.SyncClientes,
@@ -1820,6 +1822,8 @@ public sealed class LocalStatusServer : BackgroundService
                         <select id="f_loja_select" onchange="onLojaSelectChange()"></select>
                         <input type="text" id="f_loja_custom" placeholder="Nome da Loja/Estoque no ERP" style="display:none; margin-top:6px" oninput="onLojaCustomInput()">
                         <input type="hidden" id="f_loja" name="loja_codigo">
+                        <input type="hidden" id="f_empresa_cnpj" name="empresa_cnpj">
+                        <input type="hidden" id="f_empresa_nome" name="empresa_nome">
                         <div id="loja_warning" class="muted" style="margin-top:4px; font-size:12px"></div>
                       </div>
                     </div>
@@ -1898,7 +1902,19 @@ public sealed class LocalStatusServer : BackgroundService
                     .catch(function(e){ status.textContent = 'Falha: ' + e; });
                 }
 
-                function populateLojaSelect(selectedNome){
+                // Empresa (cnpj/nome) e derivada da Loja escolhida no dropdown - vem do
+                // ERP (GET /config/arpa/lojas), nunca digitada a mao. Se o ERP nao
+                // estiver acessivel agora ou a Loja nao aparecer mais na lista, usa o
+                // que ja estava salvo na conexao (fallback*) em vez de apagar - so fica
+                // vazio de verdade quando nao ha nem match nem valor previo (ex.: Loja
+                // "Outro (digitar manualmente)", que nunca teve Empresa conhecida).
+                function syncEmpresaFieldsFromLoja(nome, fallbackCnpj, fallbackNome){
+                  var match = LOJAS.find(function(l){ return l.nome === nome; });
+                  document.getElementById('f_empresa_cnpj').value = match ? (match.empresa_cnpj || '') : (fallbackCnpj || '');
+                  document.getElementById('f_empresa_nome').value = match ? (match.empresa_nome || '') : (fallbackNome || '');
+                }
+
+                function populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome){
                   var sel = document.getElementById('f_loja_select');
                   sel.innerHTML = '';
                   var placeholder = document.createElement('option');
@@ -1931,6 +1947,7 @@ public sealed class LocalStatusServer : BackgroundService
                     customInput.value = '';
                   }
                   document.getElementById('f_loja').value = selectedNome || '';
+                  syncEmpresaFieldsFromLoja(selectedNome || '', fallbackEmpresaCnpj, fallbackEmpresaNome);
                   checkLojaDuplicada();
                 }
 
@@ -1942,10 +1959,12 @@ public sealed class LocalStatusServer : BackgroundService
                     custom.value = '';
                     custom.focus();
                     document.getElementById('f_loja').value = '';
+                    syncEmpresaFieldsFromLoja('');
                   } else {
                     custom.style.display = 'none';
                     custom.value = '';
                     document.getElementById('f_loja').value = sel.value;
+                    syncEmpresaFieldsFromLoja(sel.value);
                     var nomeField = document.getElementById('f_nome');
                     if(sel.value && !nomeField.value){ nomeField.value = sel.value; }
                   }
@@ -1967,11 +1986,11 @@ public sealed class LocalStatusServer : BackgroundService
                   warn.style.color = conflito ? '#b45309' : '#64748b';
                 }
 
-                function loadLojas(selectedNome){
+                function loadLojas(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome){
                   fetch('/config/arpa/lojas')
                     .then(function(r){ return r.json(); })
-                    .then(function(j){ LOJAS = (j.ok && j.lojas) ? j.lojas : []; populateLojaSelect(selectedNome); })
-                    .catch(function(){ LOJAS = []; populateLojaSelect(selectedNome); });
+                    .then(function(j){ LOJAS = (j.ok && j.lojas) ? j.lojas : []; populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome); })
+                    .catch(function(){ LOJAS = []; populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome); });
                 }
 
                 var SYNCLOG_TIMER = null;
@@ -2219,7 +2238,7 @@ public sealed class LocalStatusServer : BackgroundService
                   var c = CONNS[id]; if(!c) return;
                   document.getElementById('f_id').value = c.id;
                   document.getElementById('f_nome').value = c.nome || '';
-                  loadLojas(c.lojaCodigo || '');
+                  loadLojas(c.lojaCodigo || '', c.empresaCnpj || '', c.empresaNome || '');
                   document.getElementById('f_host').value = c.host || '';
                   document.getElementById('f_port').value = c.port || 5432;
                   document.getElementById('f_db').value = c.database || '';
@@ -2293,7 +2312,7 @@ public sealed class LocalStatusServer : BackgroundService
             new
             {
                 ok = true,
-                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome }),
+                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome, empresa_cnpj = l.EmpresaCnpj ?? string.Empty }),
             },
             cancellationToken);
     }
@@ -2380,6 +2399,8 @@ public sealed class LocalStatusServer : BackgroundService
                     // senha em branco no form de edicao mantem a atual
                     Password = string.IsNullOrEmpty(V("password")) && existing is not null ? existing.Password : V("password"),
                     LojaCodigo = lojaCodigo,
+                    EmpresaCnpj = V("empresa_cnpj"),
+                    EmpresaNome = V("empresa_nome"),
                     ControlaEstoque = B("controla_estoque"),
                     SyncProdutos = B("sync_produtos"),
                     SyncClientes = B("sync_clientes"),

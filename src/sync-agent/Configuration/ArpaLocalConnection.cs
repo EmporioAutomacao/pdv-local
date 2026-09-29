@@ -32,6 +32,25 @@ public sealed record ArpaLocalConnection
     /// </summary>
     public string LojaCodigo { get; init; } = string.Empty;
 
+    /// <summary>
+    /// CNPJ da Empresa dona da Loja acima, obtido de <see cref="Provisioning.ArpaLoja.EmpresaCnpj"/>
+    /// quando o operador escolhe a Loja no dropdown (nunca digitado a mao). Vai
+    /// como <c>empresa_cnpj</c> no payload dos eventos de estoque/venda/compra -
+    /// sem ele, <c>sync_api.domain_processor.resolve_empresa_for_venda</c> no ERP
+    /// nao consegue resolver a Empresa a partir do payload e cai no fallback de
+    /// "empresa unica ativa", que pode deixar a Loja/Estoque sem empresa
+    /// vinculada quando esse fallback roda depois da resolucao de estoque.
+    /// Vazio para conexoes com Loja "Outro (digitar manualmente)", que nao tem
+    /// Empresa conhecida do ERP.
+    /// </summary>
+    public string EmpresaCnpj { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Razao social da Empresa dona da Loja acima (mesma origem de <see cref="EmpresaCnpj"/>).
+    /// Vai como <c>empresa_nome</c> no payload junto com <see cref="EmpresaCnpj"/>.
+    /// </summary>
+    public string EmpresaNome { get; init; } = string.Empty;
+
     public bool ControlaEstoque { get; init; }
 
     public bool SyncProdutos { get; init; } = true;
