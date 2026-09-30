@@ -20,6 +20,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PdvLocal.Core.Tests", "test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PdvLocal.Homologation", "src\pdv-homologation\PdvLocal.Homologation.csproj", "{75BE4DA9-E434-4609-80BF-29BAE08CB857}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SyncAgent.Tests", "tests\sync-agent-tests\SyncAgent.Tests.csproj", "{C3EAC3D7-B670-4512-BF51-63E443586CF9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -54,6 +56,10 @@ Global
 		{75BE4DA9-E434-4609-80BF-29BAE08CB857}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{75BE4DA9-E434-4609-80BF-29BAE08CB857}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{75BE4DA9-E434-4609-80BF-29BAE08CB857}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C3EAC3D7-B670-4512-BF51-63E443586CF9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C3EAC3D7-B670-4512-BF51-63E443586CF9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C3EAC3D7-B670-4512-BF51-63E443586CF9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C3EAC3D7-B670-4512-BF51-63E443586CF9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -65,5 +71,6 @@ Global
 		{A5BB9542-4FC2-438E-A58B-E5F0A24CF05F} = {D9C1A079-CFA5-4958-9AEE-3EF935F15812}
 		{C705ABA0-2750-4DF1-AF8C-04D2BDC6ECD7} = {BC340FAE-F087-4C87-973B-5B04178348E8}
 		{75BE4DA9-E434-4609-80BF-29BAE08CB857} = {D9C1A079-CFA5-4958-9AEE-3EF935F15812}
+		{C3EAC3D7-B670-4512-BF51-63E443586CF9} = {BC340FAE-F087-4C87-973B-5B04178348E8}
 	EndGlobalSection
 EndGlobal
