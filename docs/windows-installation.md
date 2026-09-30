@@ -152,7 +152,15 @@ O instalador:
   ERP para `pdv.operators`;
 - instala/atualiza o Windows Service `AraraSuiteSync` (AraraSuite Sync);
 - configura restart automatico do servico em falha;
-- cria atalho do tray na inicializacao do Windows.
+- cria atalho do tray na inicializacao do Windows **e inicia o processo do
+  Tray imediatamente nesta mesma sessao** (nao so no proximo logon - o atalho
+  em Startup sozinho deixava o Tray fora do ar ate o usuario deslogar/logar
+  de novo ou reiniciar, mesmo com o servico do SyncAgent ja rodando; ver
+  `Start-TrayIfNotRunning` em `install-sync-agent.ps1`). So nao inicia se ja
+  houver um processo do Tray rodando, e nunca falha a instalacao caso nao
+  consiga (instalacao nao-interativa via WinRM/servico, sem sessao de
+  desktop - nesse caso o atalho em Startup continua garantindo o proximo
+  logon interativo).
 - cria atalho `AraraSuite PDV.lnk` na area de trabalho publica.
 - cria atalho `AraraSuite PDV.lnk` no Menu Iniciar.
 
@@ -748,19 +756,25 @@ Para remover arquivos instalados em `C:\Program Files\AraraSuite.com.br`:
 O banco local nao e removido automaticamente para preservar outbox,
 dead-letter, auditoria e evidencias de sincronizacao.
 
-## Melhorias futuras
+## Deteccao de porta ocupada no bootstrap do PostgreSQL
 
-Itens planejados para uma proxima versao, ainda nao implementados:
+O instalador interativo (`SyncAgent.Installer.exe`, wizard "PostgreSQL")
+verifica, antes de iniciar a instalacao, se a porta `5432` ja esta em uso na
+maquina (via `IPGlobalProperties.GetActiveTcpListeners`). Isso so vale
+quando o operador deixou a porta no valor padrao `5432` e escolheu "Instalar
+PostgreSQL 17 automaticamente" - uma porta customizada digitada de proposito,
+ou o modo "Usar PostgreSQL 17 ja instalado", nunca sao alterados
+automaticamente. Se `5432` estiver ocupada, a instalacao passa a usar `5433`
+para o novo PostgreSQL local, registra a troca no log da instalacao e no
+resumo, e a mesma porta resolvida e usada tanto para instalar o banco quanto
+para a string de conexao gravada em `appsettings.json` do SyncAgent (e na
+validacao pos-instalacao). Ver `EnsureDefaultPostgresPortIsFree` em
+`src\sync-agent-installer\InstallerWizardForm.cs`.
 
-- **Deteccao de porta ocupada no bootstrap do PostgreSQL.** Hoje
-  `infra\windows\install-postgresql17-local.ps1` usa `-Port` fixo (padrao
-  `5432`, ver linha com `[int]$Port = 5432`) sem checar se a porta ja esta em
-  uso antes de instalar/inicializar o banco. Proposta: antes de instalar,
-  verificar se `5432` esta livre (ex.: `Test-NetConnection` ou
-  `pg_isready` contra a porta) e, se estiver ocupada, cair automaticamente
-  para `5433` (e registrar a porta escolhida no output/summary da
-  instalacao), evitando conflito com uma instancia de PostgreSQL ja existente
-  na maquina. Isso tambem precisa refletir no instalador interativo (secao
-  "Instalador interativo") e na string de conexao gerada para o SyncAgent.
+Os scripts PowerShell usados fora do wizard (`install-postgresql17-local.ps1`,
+`invoke-sync-agent-clean-install-homologation.ps1`) continuam recebendo a
+porta explicitamente via `-Port`/`-PostgresPort` sem deteccao automatica -
+uso tipico e homologacao/CI, onde o operador ja escolhe a porta certa por
+parametro.
 
 

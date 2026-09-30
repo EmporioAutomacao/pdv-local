@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net.NetworkInformation;
 using System.Security.Principal;
 using System.Text;
 
@@ -749,11 +750,46 @@ $$;
             null);
     }
 
+    private const int DefaultPostgresPort = 5432;
+    private const int FallbackPostgresPort = 5433;
+
+    // So mexe na porta quando o operador deixou o default (5432) e esta
+    // instalando um PostgreSQL novo aqui - uma porta customizada digitada de
+    // proposito, ou o modo "usar PostgreSQL ja instalado" (onde a porta
+    // aponta pra uma instancia que ja existe e ja esta ouvindo), nunca sao
+    // trocadas por baixo dos panos.
+    private void EnsureDefaultPostgresPortIsFree()
+    {
+        if (!_installPostgres.Checked || _postgresPort.Value != DefaultPostgresPort)
+        {
+            return;
+        }
+
+        if (!IsTcpPortInUse(DefaultPostgresPort))
+        {
+            return;
+        }
+
+        _postgresPort.Value = FallbackPostgresPort;
+        var message = $"Porta {DefaultPostgresPort} ja esta em uso nesta maquina - usando {FallbackPostgresPort} para evitar conflito de instalacao.";
+        AppendLog(message);
+        _postgresStatus.ForeColor = Color.DarkOrange;
+        _postgresStatus.Text = message;
+    }
+
+    private static bool IsTcpPortInUse(int port)
+    {
+        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
+        return ipGlobalProperties.GetActiveTcpListeners().Any(endpoint => endpoint.Port == port);
+    }
+
     private async Task<bool> InstallAsync()
     {
         _nextButton.Enabled = false;
         _backButton.Enabled = false;
         _logBox.Text = "Iniciando instalacao...\r\n";
+
+        EnsureDefaultPostgresPortIsFree();
 
         var script = ResolveInstallScript();
         var vcRuntimeInstallScript = ResolveVcRuntimeInstallScript();

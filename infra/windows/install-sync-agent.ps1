@@ -355,6 +355,34 @@ function Install-TrayStartupShortcut {
     $shortcut.Save()
 }
 
+function Start-TrayIfNotRunning {
+    param([string]$TrayExecutablePath)
+
+    # O atalho em Startup so entra em vigor no PROXIMO logon interativo - uma
+    # instalacao limpa nao tinha o Tray rodando ate o usuario deslogar/logar
+    # de novo (ou reiniciar a maquina), mesmo com o servico do SyncAgent ja
+    # ativo. Inicia o processo agora, na mesma sessao do instalador, pra
+    # fechar essa lacuna.
+    $exeName = [IO.Path]::GetFileNameWithoutExtension($TrayExecutablePath)
+    $running = Get-Process -Name $exeName -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Host "Tray ja esta em execucao (PID $($running[0].Id)) - nao iniciando outra instancia."
+        return
+    }
+
+    try {
+        Start-Process -FilePath $TrayExecutablePath -WorkingDirectory (Split-Path -Parent $TrayExecutablePath) | Out-Null
+        Write-Host "Tray iniciado nesta sessao."
+    }
+    catch {
+        # Instalacao nao-interativa (ex.: via WinRM/Invoke-Command numa
+        # sessao sem desktop) nao consegue exibir a bandeja agora - o atalho
+        # em Startup garante que ela sobe no proximo logon interativo. Nao
+        # falha a instalacao por causa disso.
+        Write-Warning "Nao foi possivel iniciar o Tray agora (normal em instalacao nao-interativa via WinRM/servico): $($_.Exception.Message)"
+    }
+}
+
 function New-Shortcut {
     param(
         [string]$ShortcutPath,
@@ -563,6 +591,7 @@ if ($installPdv) {
 
 if (-not $SkipTrayStartup) {
     Install-TrayStartupShortcut -TrayExecutablePath $trayExe
+    Start-TrayIfNotRunning -TrayExecutablePath $trayExe
 }
 
 if (-not $SkipServiceStart) {
