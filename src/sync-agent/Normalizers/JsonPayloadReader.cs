@@ -130,4 +130,22 @@ internal static class JsonPayloadReader
         var digits = new string(value.Where(char.IsDigit).ToArray());
         return string.IsNullOrWhiteSpace(digits) ? null : digits;
     }
+
+    /// <summary>
+    /// Remove pontuacao mas preserva letras, maiusculo - ao contrario de
+    /// <see cref="OnlyDigits"/>, nao serve pra CNPJ/CPF: o novo formato de
+    /// CNPJ alfanumerico da Receita Federal usa letras nas posicoes 1-12, e
+    /// OnlyDigits apaga essas letras, corrompendo o documento antes mesmo de
+    /// chegar ao ERP.
+    /// </summary>
+    public static string? OnlyAlphanumericUpper(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var chars = new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        return string.IsNullOrWhiteSpace(chars) ? null : chars;
+    }
 }

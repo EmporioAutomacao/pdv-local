@@ -27,7 +27,7 @@ public sealed class ArpaClientePayloadNormalizer : IArpaPayloadNormalizer
         JsonPayloadReader.AddIfPresent(
             normalized,
             "documento",
-            JsonPayloadReader.OnlyDigits(JsonPayloadReader.ReadFirstString(sourcePayload, "cnpj_cpf", "cpf_cnpj", "cnpj", "cpf", "documento")));
+            JsonPayloadReader.OnlyAlphanumericUpper(JsonPayloadReader.ReadFirstString(sourcePayload, "cnpj_cpf", "cpf_cnpj", "cnpj", "cpf", "documento")));
         JsonPayloadReader.AddIfPresent(
             normalized,
             "email",
