@@ -249,7 +249,7 @@ function Write-AgentConfig {
         ErpDispatcher = @{
             Enabled = $true
             BatchSize = $ErpDispatcherBatchSize
-            TimeoutSeconds = 30
+            TimeoutSeconds = 90
             MaxAttempts = 8
             InitialBackoffSeconds = 60
             MaxBackoffSeconds = 3600

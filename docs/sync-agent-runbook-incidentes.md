@@ -91,7 +91,112 @@ Invoke-RestMethod -Method Post http://127.0.0.1:47891/sync-now
 
 5. Conferir `last_error` em `/status`.
 
+### Padrao "desce e sobe o mesmo tanto, sem nunca drenar"
+
+Caso real (2026-10-01): instalacao com `Pendentes` oscilando em torno do
+mesmo valor (ex.: cai ~1000, sobe ~1000, de novo e de novo) a cada ciclo,
+nunca drenando de verdade, junto com `Dead-letter` na casa de dezenas de
+milhares e `Heartbeat: ok / degraded`.
+
+Causa: o dispatcher reserva um lote inteiro (`ErpDispatcher:BatchSize` -
+500/1000 por padrao) e muda o status pra `in_flight` **antes** de mandar -
+isso ja tira aquele tanto do contador de `Pendentes`. Se a chamada HTTP pro
+ERP falhar **como um todo** (timeout, erro de certificado mTLS, 5xx), o lote
+inteiro volta pra `pending` (`ReleaseDispatchedEventsAsync`) e o contador
+de `Pendentes` conta `status='pending'` sem olhar se o item esta em espera
+de backoff - entao o numero sobe de volta na hora, mesmo que aqueles itens
+so vao ser tentados de novo depois de minutos/horas. Resultado: parece que
+"desce mil, sobe mil" pra sempre, mas na real e sempre o mesmo lote
+entrando e saindo da reserva, com a causa de fundo (timeout/conectividade)
+nunca resolvida.
+
+Nota sobre `Heartbeat: ok / degraded`: esse campo fica `degraded` **pra
+sempre** assim que `Dead-letter > 0` (`Worker.cs` `ResolveConnectivity`) -
+nao e um indicador de conectividade em tempo real, e so "esta instalacao ja
+teve DLQ alguma vez". Nao usar isso sozinho pra concluir que a conexao esta
+ruim agora.
+
+Diagnostico, antes de mexer em qualquer config:
+
+```sql
+SELECT entity_type, reason, count(*) FROM sync_agent.dead_letter_events GROUP BY entity_type, reason;
+```
+
+- Se a razao dominante for erro de timeout/conexao/certificado: o problema e
+  o tamanho do lote e/ou o timeout da chamada (ver correcoes abaixo).
+- Se for algo como `produto codigo_arpa=X not found`: e um problema de dado
+  (ver secao "Incidente: dead-letter" abaixo) - reduzir lote/aumentar
+  timeout nao resolve isso.
+
+Correcoes pra timeout/lote grande demais:
+
+1. **Reduzir o tamanho do lote** - ajustavel **sem reiniciar o servico**,
+   direto no dashboard: Configuracoes > Arpa > secao "Envio ao ERP" > campo
+   de tamanho do lote (1 a 5000) > Salvar. O ERP processa o lote inteiro
+   **sequencialmente, dentro de uma unica transacao** (`sync_api.services.
+   ingest_events_batch`), entao o tempo da chamada cresce proporcional ao
+   tamanho do lote - um lote de 1000 pode estourar o timeout onde um de 500
+   nao estouraria.
+2. **Aumentar `ErpDispatcher:TimeoutSeconds`** - esse campo **nao tem
+   controle no dashboard**, precisa editar o `appsettings.json` da
+   instalacao e reiniciar o servico `AraraSuiteSync`:
+
+```powershell
+$path = "C:\Program Files\AraraSuite.com.br\Sync\Agent\appsettings.json"
+$json = Get-Content $path -Raw | ConvertFrom-Json
+$json.ErpDispatcher.TimeoutSeconds = 90
+$json | ConvertTo-Json -Depth 20 | Set-Content $path -Encoding utf8
+Restart-Service "AraraSuiteSync"
+```
+
+   O valor padrao do agente (codigo, `appsettings.json` shipado e o
+   provisionado por `install-sync-agent.ps1`) foi elevado de **30s para
+   90s** depois desse caso - 30s era curto demais pra um lote de 500-1000
+   itens processado sequencialmente numa unica transacao no ERP, sem
+   margem nenhuma. O piloto de Anapolis ja rodava com 120s sem problema
+   registrado; 90s fica com folga do teto pratico de ~100s do proxy
+   (Cloudflare) na frente do ERP. Instalacoes mais antigas, provisionadas
+   antes dessa mudanca, continuam com 30s gravado no `appsettings.json`
+   local ate alguem editar manualmente (o valor shipado so vale pra
+   instalacao nova; auto-update nunca reescreve `appsettings.json`
+   existente).
+3. Nao assumir que so aumentar o timeout resolve: se a causa real for
+   `RequireMutualTls` sem certificado (ver incidente especifico abaixo) ou
+   um problema de dado (produto/cliente ausente), aumentar timeout so
+   atrasa a mesma falha, nao evita ela.
+
 ## Incidente: dead-letter
+
+O que significa um registro em dead-letter: e o estado **final e
+permanente** de um evento - diferente de uma falha de conexao/timeout
+(que volta pra `pending` pra nova tentativa automatica, ver secao acima),
+dead-letter significa que o **ERP recebeu o evento e respondeu
+explicitamente rejeitando** aquele `event_id` especifico (veio em
+`rejected_events` na resposta do batch) - schema invalido, regra de negocio
+quebrada (ex.: produto referenciado nao existe), ou `event_id` repetido com
+`payload_hash` diferente. O agente nao tenta de novo sozinho nesse caso
+(`MarkDispatchRejectedAsync`) - fica gravado com o motivo ate alguem agir.
+
+**Importante - DLQ nao se autocorrige, nem quando o problema de fundo ja
+sumiu**: cada tentativa de sincronizar uma mesma entidade (venda, produto,
+etc.) gera um `event_id` proprio, calculado a partir de varios campos
+(entidade, data do evento e, em caso de "Sincronizar tudo", o numero da
+geracao de resync). Se uma venda falhar e virar dead-letter, e depois uma
+sincronizacao posterior pegar essa mesma venda de novo e o ERP aceitar
+dessa vez, isso acontece com um `event_id` **diferente** do que falhou -
+sao dois registros completamente independentes aos olhos do sistema. O
+registro antigo **continua marcado como dead-letter para sempre**, mesmo
+que o dado em si (a venda) ja esteja correto no ERP via o evento novo que
+deu certo. Reenviar manualmente o `event_id` identico tambem nao ajuda: o
+ERP, ao ver um `event_id` que ja conhece com o mesmo conteudo, nem
+re-executa a logica de negocio - so repete o motivo de rejeicao que ja
+tinha salvo (`sync_api.services.ingest_events_batch`, branch de
+`event_id`+`payload_hash` ja existentes). Por isso a contagem de
+dead-letter e um **historico acumulado de tentativas que falharam em algum
+momento**, nao um indicador confiavel de "quantos problemas existem hoje" -
+pode (e costuma) ter bastante registro antigo ali que ja se resolveu
+sozinho por outro caminho, sem que ninguem tenha "fechado" o registro
+velho.
 
 Sinais:
 
@@ -111,7 +216,55 @@ LIMIT 50;
 
 2. Se erro for payload invalido, corrigir normalizador/contrato antes de reprocessar.
 3. Se erro for dependencia ausente no ERP, criar/corrigir entidade base e reprocessar manualmente com engenharia.
-4. Nunca apagar DLQ para "limpar painel" sem decisao tecnica.
+4. Antes de decidir reprocessar, verificar pelo `entity_key` (nao pelo
+   `event_id`) se a entidade ja existe correta no ERP via um evento
+   posterior que deu certo - se ja existir, o registro antigo pode ser
+   arquivado/fechado como resolvido em vez de reprocessado.
+5. Nao existe hoje reprocessamento automatico nem em lote pra entidades
+   vindas do Arpa (so ha um botao manual, por linha, pra vendas feitas no
+   proprio PDV - `RequeueRejectedPdvSaleAsync`/`/pdv-sales/reprocess`).
+   Construir isso exigiria mudanca nos dois lados (ERP precisaria de uma
+   acao para resetar o `SyncReceivedEvent` antes de aceitar reprocessar o
+   mesmo `event_id`; o agente precisaria filtrar por motivo pra nao
+   reprocessar infinitamente erro de dado malformado, que nunca se resolve
+   sozinho) - nao tratar como pendencia trivial.
+6. Nunca apagar DLQ para "limpar painel" sem decisao tecnica.
+
+## Incidente: "Sincronizar tudo" usado mais de uma vez gera duplicacao de eventos
+
+"Sincronizar tudo" (full-resync, por conexao Arpa) **nao e idempotente** -
+cada clique incrementa um contador de "geracao de resync"
+(`BumpArpaResyncGenerationAsync`) que entra no calculo do `event_id` de
+cada linha reenviada nesse ciclo. Isso e proposital (sem isso o reenvio
+bateria na deduplicacao por `event_id` e nao mandaria nada de novo pro
+ERP) - mas o efeito colateral e que **cada clique gera um lote de eventos
+novo e distinto pros mesmos dados historicos**, sem substituir nem
+deduplicar o(s) clique(s) anterior(es).
+
+Risco concreto: se os dados por tras do resync ja tem um problema (ex.:
+produto nao encontrado, erro de conectividade estrutural), cada clique em
+"Sincronizar tudo" **nao corrige nada - so empilha mais linhas em
+`pending`/`dead_letter` em cima do que ja existia**. Uma instalacao com
+`Pendentes`/`Dead-letter` muito acima do volume normal de vendas/produtos
+dessa loja e um sinal de que alguem pode ter clicado "Sincronizar tudo"
+mais de uma vez tentando "forcar" uma correcao, sem resolver a causa raiz
+antes.
+
+O que **e** seguro clicar quantas vezes quiser: o botao comum
+"Sincronizar agora" (incremental, nao mexe na geracao de resync) - os
+`event_id` ficam iguais entre execucoes e a deduplicacao
+(`ON CONFLICT (event_id) DO NOTHING`) absorve o reenvio sem duplicar nada.
+
+Passos antes de usar "Sincronizar tudo" numa instalacao com fila presa:
+
+1. Rodar a query de `dead_letter_events` (secao anterior) e resolver a
+   causa raiz primeiro (timeout/certificado ou dado faltando no ERP).
+2. So depois disso considerar um full-resync, e preferir o escopo mais
+   estreito possivel (3 meses / 1 dia / data especifica) em vez de "Tudo",
+   pra nao reenviar anos de historico de uma vez so.
+3. Nunca usar "Sincronizar tudo" como tentativa repetida de "ver se agora
+   funciona" sem checar o motivo do dead-letter entre uma tentativa e
+   outra - cada clique sem diagnostico so aumenta o volume preso.
 
 ## Incidente: reconciliacao divergente
 

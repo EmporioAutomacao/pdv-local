@@ -8,7 +8,7 @@ public sealed class ErpDispatcherOptions
 
     public int BatchSize { get; set; } = 1000;
 
-    public int TimeoutSeconds { get; set; } = 30;
+    public int TimeoutSeconds { get; set; } = 90;
 
     public int MaxAttempts { get; set; } = 8;
 
