@@ -56,6 +56,7 @@ public sealed class EffectiveSyncAgentConfigurationProvider
                 false);
         }
 
+        var graceDays = options.LicenseGraceDays;
         return new EffectiveSyncAgentConfiguration(
             true,
             true,
@@ -69,6 +70,9 @@ public sealed class EffectiveSyncAgentConfigurationProvider
             credentials.AccessTokenExpiresAtUtc,
             credentials.RefreshToken,
             credentials.RefreshTokenExpiresAtUtc,
-            credentials.RequiredMtls);
+            credentials.RequiredMtls,
+            credentials.GetLicenseState(DateTimeOffset.UtcNow, graceDays),
+            credentials.LicenseBlockedSinceUtc,
+            credentials.LicenseBlockedSinceUtc?.AddDays(graceDays));
     }
 }

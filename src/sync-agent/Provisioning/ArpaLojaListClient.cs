@@ -113,4 +113,13 @@ public sealed record ArpaLoja(
     [property: JsonPropertyName("id")] long Id,
     [property: JsonPropertyName("nome")] string Nome,
     [property: JsonPropertyName("empresa_nome")] string EmpresaNome,
-    [property: JsonPropertyName("empresa_cnpj")] string? EmpresaCnpj = null);
+    [property: JsonPropertyName("empresa_cnpj")] string? EmpresaCnpj = null,
+    [property: JsonPropertyName("em_uso_por")] ArpaLojaEmUsoPor? EmUsoPor = null);
+
+/// <summary>
+/// Conexao Arpa de OUTRO SyncAgent que ja usa a Loja/Estoque (o ERP so deixa
+/// um Estoque vinculado a uma conexao). Null = livre para este agente.
+/// </summary>
+public sealed record ArpaLojaEmUsoPor(
+    [property: JsonPropertyName("conexao_nome")] string ConexaoNome,
+    [property: JsonPropertyName("installation_label")] string InstallationLabel);

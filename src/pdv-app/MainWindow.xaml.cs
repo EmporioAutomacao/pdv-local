@@ -37,6 +37,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _statusRefreshTimer;
     private readonly DispatcherTimer _clockTimer;
     private bool _isRefreshingStatus;
+    // So vira true quando o SyncAgent informa license_state=blocked (ERP recusou o plano e a
+    // carencia acabou). Agente offline / sem resposta nunca bloqueia vendas.
+    private bool _licenseBlocked;
     private readonly ObservableCollection<UiProductSearchResult> _productSearchResults = [];
     private readonly ObservableCollection<UiSaleItem> _saleItems = [];
     private readonly ObservableCollection<UiPayment> _payments = [];
@@ -730,6 +733,13 @@ public partial class MainWindow : Window
 
     private async Task AddSelectedProductToCartAsync()
     {
+        // Venda em andamento termina normalmente; o bloqueio vale para iniciar uma nova.
+        if (_licenseBlocked && _saleItems.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Licenca suspensa: nao e possivel iniciar novas vendas. Regularize o plano com o suporte.");
+        }
+
         if (_selectedProduct is null)
         {
             throw new InvalidOperationException("Busque e selecione um produto antes de adicionar.");
@@ -1210,7 +1220,35 @@ public partial class MainWindow : Window
 
     private void ApplyStatus(SyncAgentStatusResponse status)
     {
-        if (status.NeedsReactivation)
+        _licenseBlocked = status.LicenseState == "blocked";
+
+        if (_licenseBlocked)
+        {
+            SetBanner(
+                "Licenca suspensa: o plano deste cliente nao esta ativo e o prazo de carencia acabou. " +
+                "Novas vendas estao bloqueadas (a venda em andamento pode ser concluida). " +
+                "Regularize com o suporte; o PDV volta ao normal sozinho apos a reativacao.",
+                "#FEE2E2",
+                "#FCA5A5",
+                "#991B1B",
+                showActions: false);
+            SyncStatusText.Text = "Sync: licenca suspensa";
+        }
+        else if (status.LicenseState == "grace")
+        {
+            var restante = status.LicenseGraceEndsAtUtc is { } fim
+                ? $" Regularize ate {fim.ToLocalTime():dd/MM/yyyy HH:mm}."
+                : string.Empty;
+            SetBanner(
+                "Atencao: o plano deste cliente nao esta ativo e a sincronizacao esta pausada. " +
+                "Em breve novas vendas serao bloqueadas." + restante,
+                "#FEF3C7",
+                "#F59E0B",
+                "#92400E",
+                showActions: false);
+            SyncStatusText.Text = "Sync: plano em carencia";
+        }
+        else if (status.NeedsReactivation)
         {
             SetBanner(
                 "A conexao com o ERP expirou e a sincronizacao esta parada (operadores, produtos e vendas nao " +
@@ -1266,6 +1304,7 @@ public partial class MainWindow : Window
     private void ApplyOfflineState(string message)
     {
         OperatorsImportPanel.Visibility = Visibility.Collapsed;
+        _licenseBlocked = false;
         SetBanner(message, "#FEE2E2", "#FCA5A5", "#991B1B", showActions: false);
         SyncStatusText.Text = "Sync: offline";
     }

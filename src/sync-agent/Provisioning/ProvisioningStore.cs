@@ -67,7 +67,11 @@ public sealed class ProvisioningStore
 
         var json = JsonSerializer.Serialize(credentials, JsonOptions);
         var protectedValue = ProtectWindowsDpapiSecret(json);
-        await File.WriteAllTextAsync(path, protectedValue, Encoding.ASCII, cancellationToken);
+        // O refresh e regravado a cada rotacao: grava em arquivo temporario e troca de uma vez,
+        // para uma queda no meio nunca deixar as credenciais truncadas.
+        var tempPath = path + ".tmp";
+        await File.WriteAllTextAsync(tempPath, protectedValue, Encoding.ASCII, cancellationToken);
+        File.Move(tempPath, path, overwrite: true);
     }
 
     [SupportedOSPlatform("windows")]

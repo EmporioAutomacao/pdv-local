@@ -16,6 +16,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _heartbeatItem;
     private readonly ToolStripMenuItem _reconciliationItem;
     private readonly ToolStripMenuItem _pendingUpdateMenuItem;
+    private readonly ToolStripMenuItem _updateAppItem;
+    private readonly ToolStripMenuItem _licenseItem;
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private AgentStatusResponse? _lastStatus;
 
@@ -30,16 +32,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         _deadLetterItem = new ToolStripMenuItem("Dead-letter: -") { Enabled = false };
         _heartbeatItem = new ToolStripMenuItem("Heartbeat: -") { Enabled = false };
         _reconciliationItem = new ToolStripMenuItem("Reconciliacao: -") { Enabled = false };
+        _licenseItem = new ToolStripMenuItem("Licenca: -") { Enabled = false };
 
         var openDashboardItem = new ToolStripMenuItem("Dashboard", null, (_, _) => OpenDashboard());
         var syncNowItem = new ToolStripMenuItem("Sincronizar agora", null, async (_, _) => await SyncNowAsync());
-        var updateAppItem = new ToolStripMenuItem("Atualizar App", null, (_, _) => OpenUpdateProgress());
+        _updateAppItem = new ToolStripMenuItem("Atualizar App", null, (_, _) => OpenUpdateProgress());
         _pendingUpdateMenuItem = new ToolStripMenuItem("Atualizacao pendente...", null, (_, _) => OpenPendingUpdateConfirmation())
         {
             Visible = false,
             Font = new Font(Control.DefaultFont, FontStyle.Bold),
         };
-        var copyInstanceItem = new ToolStripMenuItem("Copiar ID da instalacao", null, (_, _) => CopyInstanceId());
         var refreshItem = new ToolStripMenuItem("Atualizar status", null, async (_, _) => await RefreshStatusAsync());
         var exitItem = new ToolStripMenuItem("Sair", null, (_, _) => ExitThread());
 
@@ -60,13 +62,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             _deadLetterItem,
             _heartbeatItem,
             _reconciliationItem,
+            _licenseItem,
             new ToolStripSeparator(),
             openDashboardItem,
             syncNowItem,
-            updateAppItem,
+            _updateAppItem,
             _pendingUpdateMenuItem,
             refreshItem,
-            copyInstanceItem,
             new ToolStripSeparator(),
             exitItem
         ]);
@@ -110,7 +112,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             _heartbeatItem.Text = $"Heartbeat: {FormatHeartbeat(_lastStatus)}";
             _reconciliationItem.Text = $"Reconciliacao: {FormatReconciliation(_lastStatus)}";
             _notifyIcon.Text = BuildNotifyText(_lastStatus.RuntimeStatus);
+            _updateAppItem.Text = UpdateAvailableDialog.BuildTitle(_lastStatus.AgentVersion);
             CheckPendingUpdateConfirmation(_lastStatus);
+            ApplyLicenseState(_lastStatus);
 
             if (showBalloon)
             {
@@ -130,6 +134,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _deadLetterItem.Text = "Dead-letter: -";
             _heartbeatItem.Text = "Heartbeat: -";
             _reconciliationItem.Text = "Reconciliacao: -";
+            _licenseItem.Text = "Licenca: -";
             _notifyIcon.Text = BuildNotifyText("Offline");
             _notifyIcon.ShowBalloonTip(
                 3000,
@@ -279,6 +284,95 @@ public sealed class TrayApplicationContext : ApplicationContext
             ToolTipIcon.Info);
     }
 
+    /// <summary>
+    /// Mostra a situacao da licenca (plano do cliente no CP) e avisa uma unica vez por estado:
+    /// carencia (sync pausada, vendas ainda liberadas) e bloqueio (novas vendas bloqueadas).
+    /// "Reativacao necessaria" so aparece quando o ERP nao reconhece mais a instalacao.
+    /// </summary>
+    private void ApplyLicenseState(AgentStatusResponse status)
+    {
+        string? noticeKey = null;
+        string? noticeText = null;
+
+        if (status.NeedsReactivation)
+        {
+            _licenseItem.Text = "Licenca: reativacao necessaria";
+            noticeKey = "reactivation";
+            noticeText = "A instalacao precisa ser reativada. Abra o Dashboard > Configuracao e informe um novo codigo de ativacao.";
+        }
+        else if (status.LicenseState == "blocked")
+        {
+            _licenseItem.Text = "Licenca: suspensa (vendas bloqueadas)";
+            noticeKey = "blocked";
+            noticeText = "Plano suspenso: novas vendas estao bloqueadas no PDV. Regularize com o suporte; volta sozinho apos a reativacao.";
+        }
+        else if (status.LicenseState == "grace")
+        {
+            var ate = status.LicenseGraceEndsAtUtc?.ToLocalTime().ToString("dd/MM HH:mm") ?? "-";
+            _licenseItem.Text = $"Licenca: em carencia ate {ate}";
+            noticeKey = "grace";
+            noticeText = $"O plano nao esta ativo e a sincronizacao esta pausada. Regularize ate {ate} para evitar o bloqueio de vendas.";
+        }
+        else
+        {
+            _licenseItem.Text = "Licenca: ativa";
+            ClearLicenseNotifiedMarker();
+            return;
+        }
+
+        if (HasAlreadyNotifiedLicense(noticeKey))
+        {
+            return;
+        }
+
+        MarkLicenseNotified(noticeKey);
+        _notifyIcon.ShowBalloonTip(8000, "AraraSuite Sync", noticeText!, ToolTipIcon.Warning);
+    }
+
+    private static string LicenseMarkerFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "AraraSuite", "license-notified.txt");
+
+    private static bool HasAlreadyNotifiedLicense(string key)
+    {
+        try
+        {
+            return File.Exists(LicenseMarkerFile) && File.ReadAllText(LicenseMarkerFile) == key;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void MarkLicenseNotified(string key)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LicenseMarkerFile)!);
+            File.WriteAllText(LicenseMarkerFile, key);
+        }
+        catch
+        {
+            // Notificacao de conveniencia.
+        }
+    }
+
+    private static void ClearLicenseNotifiedMarker()
+    {
+        try
+        {
+            if (File.Exists(LicenseMarkerFile))
+            {
+                File.Delete(LicenseMarkerFile);
+            }
+        }
+        catch
+        {
+            // Notificacao de conveniencia.
+        }
+    }
+
     private void OpenPendingUpdateConfirmation()
     {
         var pending = _lastStatus?.PendingUpdateConfirmation;
@@ -319,21 +413,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             // Notificacao de conveniencia — falha aqui nunca deve impedir a bandeja de continuar.
         }
-    }
-
-    private void CopyInstanceId()
-    {
-        if (_lastStatus is null)
-        {
-            return;
-        }
-
-        Clipboard.SetText(_lastStatus.InstanceId);
-        _notifyIcon.ShowBalloonTip(
-            2000,
-            "AraraSuite Sync",
-            "ID da instalacao copiado.",
-            ToolTipIcon.Info);
     }
 
     private void OpenDashboard()

@@ -18,7 +18,9 @@ internal sealed record SyncAgentStatusResponse(
     [property: JsonPropertyName("last_heartbeat_succeeded")] bool? LastHeartbeatSucceeded,
     [property: JsonPropertyName("last_heartbeat_connectivity")] string? LastHeartbeatConnectivity,
     [property: JsonPropertyName("runtime_status")] string? RuntimeStatus,
-    [property: JsonPropertyName("last_error")] string? LastError);
+    [property: JsonPropertyName("last_error")] string? LastError,
+    [property: JsonPropertyName("license_state")] string? LicenseState = null,
+    [property: JsonPropertyName("license_grace_ends_at_utc")] DateTimeOffset? LicenseGraceEndsAtUtc = null);
 
 internal sealed class UiProductSearchResult
 {

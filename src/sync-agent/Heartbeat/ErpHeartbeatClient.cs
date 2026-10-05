@@ -151,7 +151,8 @@ public sealed class ErpHeartbeatClient
 
             return new HeartbeatSummary(
                 true, true, heartbeatResponse.NextPollSeconds, null,
-                heartbeatResponse.PendingUpdate, heartbeatResponse.PendingResyncs);
+                heartbeatResponse.PendingUpdate, heartbeatResponse.PendingResyncs,
+                heartbeatResponse.License?.Status);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -185,7 +186,8 @@ public sealed record HeartbeatSummary(
     int? NextPollSeconds,
     string? LastError,
     PendingUpdateCommand? PendingUpdate = null,
-    IReadOnlyList<PendingResyncCommand>? PendingResyncs = null)
+    IReadOnlyList<PendingResyncCommand>? PendingResyncs = null,
+    string? LicenseStatus = null)
 {
     public static HeartbeatSummary Disabled { get; } = new(false, false, null, null);
 }
@@ -220,7 +222,12 @@ public sealed record HeartbeatResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("next_poll_seconds")] int? NextPollSeconds,
     [property: JsonPropertyName("pending_update")] PendingUpdateCommand? PendingUpdate = null,
-    [property: JsonPropertyName("pending_resyncs")] IReadOnlyList<PendingResyncCommand>? PendingResyncs = null);
+    [property: JsonPropertyName("pending_resyncs")] IReadOnlyList<PendingResyncCommand>? PendingResyncs = null,
+    [property: JsonPropertyName("license")] HeartbeatLicense? License = null);
+
+public sealed record HeartbeatLicense(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("reason")] string? Reason = null);
 
 public sealed record PendingUpdateCommand(
     [property: JsonPropertyName("version")] string Version,

@@ -1,3 +1,5 @@
+using SyncAgent.Provisioning;
+
 namespace SyncAgent.Configuration;
 
 public sealed class SyncAgentOptions
@@ -15,6 +17,12 @@ public sealed class SyncAgentOptions
     public int PollingIntervalSeconds { get; init; } = 30;
 
     public int LocalStatusPort { get; init; } = 47891;
+
+    /// <summary>
+    /// Dias de carencia entre a primeira recusa do ERP por plano suspenso/cancelado e o
+    /// bloqueio de novas vendas no PDV.
+    /// </summary>
+    public int LicenseGraceDays { get; init; } = LicenseStateCalculator.DefaultGraceDays;
 
     public bool SelfUpdateEnabled { get; init; } = true;
 }

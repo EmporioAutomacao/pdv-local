@@ -186,12 +186,13 @@ public sealed class ErpActivationClient
             return new TokenRefreshResult(true, false, "Refresh token ausente.");
         }
 
-        if (credentials.RefreshTokenExpiresAtUtc is not null
-            && credentials.RefreshTokenExpiresAtUtc <= DateTimeOffset.UtcNow)
+        if (credentials.RefreshRejectedAtUtc is not null)
         {
-            return new TokenRefreshResult(true, false, "Refresh token expirado.");
+            return new TokenRefreshResult(true, false, "Refresh token recusado pelo ERP.", TokenRefreshOutcome.Invalid);
         }
 
+        // A data local de expiracao do refresh nao e mais motivo para desistir: o ERP
+        // (2.16.0+) o aceita enquanto o cliente estiver ativo e rotaciona a cada uso.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, _provisioningOptions.CurrentValue.ActivationTimeoutSeconds)));
 
@@ -213,29 +214,97 @@ public sealed class ErpActivationClient
                 "application/json")
         };
 
-        using var response = await client.SendAsync(httpRequest, timeout.Token);
-        if (!response.IsSuccessStatusCode)
+        HttpResponseMessage response;
+        try
         {
-            var error = await ReadErrorAsync(response, timeout.Token);
-            return new TokenRefreshResult(true, false, error.Message);
+            response = await client.SendAsync(httpRequest, timeout.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            // Rede/ERP fora do ar: nunca altera o estado de licenca nem exige reativacao.
+            return new TokenRefreshResult(true, false, $"ERP inacessivel ao renovar token: {ex.Message}", TokenRefreshOutcome.Transient);
         }
 
-        var body = await response.Content.ReadFromJsonAsync<TokenRefreshResponse>(JsonOptions, timeout.Token);
-        if (body is null || string.IsNullOrWhiteSpace(body.AccessToken))
+        using (response)
         {
-            return new TokenRefreshResult(true, false, "ERP retornou resposta invalida ao renovar token.");
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await ReadErrorAsync(response, timeout.Token);
+                var outcome = ClassifyRefreshFailure((int)response.StatusCode, error.Error);
+                if (outcome == TokenRefreshOutcome.Revoked)
+                {
+                    await _provisioningStore.SaveAsync(
+                        credentials with { LicenseBlockedSinceUtc = credentials.LicenseBlockedSinceUtc ?? DateTimeOffset.UtcNow },
+                        timeout.Token);
+                }
+                else if (outcome == TokenRefreshOutcome.Invalid)
+                {
+                    await _provisioningStore.SaveAsync(
+                        credentials with { RefreshRejectedAtUtc = DateTimeOffset.UtcNow },
+                        timeout.Token);
+                }
+
+                return new TokenRefreshResult(true, false, error.Message, outcome);
+            }
+
+            var body = await response.Content.ReadFromJsonAsync<TokenRefreshResponse>(JsonOptions, timeout.Token);
+            if (body is null || string.IsNullOrWhiteSpace(body.AccessToken))
+            {
+                return new TokenRefreshResult(true, false, "ERP retornou resposta invalida ao renovar token.", TokenRefreshOutcome.Transient);
+            }
+
+            var updatedCredentials = credentials with
+            {
+                AccessToken = body.AccessToken,
+                AccessTokenExpiresAtUtc = body.AccessTokenExpiresAtUtc,
+                RefreshToken = string.IsNullOrWhiteSpace(body.RefreshToken) ? credentials.RefreshToken : body.RefreshToken,
+                RefreshTokenExpiresAtUtc = body.RefreshTokenExpiresAtUtc ?? credentials.RefreshTokenExpiresAtUtc,
+                RefreshRejectedAtUtc = null,
+                LicenseBlockedSinceUtc = null
+            };
+
+            await _provisioningStore.SaveAsync(updatedCredentials, timeout.Token);
+            return new TokenRefreshResult(true, true, null, TokenRefreshOutcome.Refreshed);
+        }
+    }
+
+    /// <summary>
+    /// 403 installation_revoked/tenant_invalid = plano do cliente suspenso/cancelado (recuperavel
+    /// quando o CP reativar); 401 = o ERP nao reconhece mais o refresh (exige reativacao);
+    /// qualquer outra coisa (5xx, 429...) e transitoria.
+    /// </summary>
+    public static TokenRefreshOutcome ClassifyRefreshFailure(int statusCode, string? errorCode) => statusCode switch
+    {
+        403 when errorCode is "installation_revoked" or "tenant_invalid" => TokenRefreshOutcome.Revoked,
+        401 when errorCode == "refresh_token_invalid" => TokenRefreshOutcome.Invalid,
+        _ => TokenRefreshOutcome.Transient,
+    };
+
+    /// <summary>
+    /// Licenca informada pelo heartbeat (campo opcional <c>license</c>, contrato 2.16.0): atualiza
+    /// LicenseBlockedSinceUtc sem esperar o proximo refresh. Ausente (ERP antigo) = nao muda nada.
+    /// </summary>
+    public async Task ApplyHeartbeatLicenseAsync(string? licenseStatus, CancellationToken cancellationToken)
+    {
+        if (licenseStatus is null)
+        {
+            return;
         }
 
-        var updatedCredentials = credentials with
+        var credentials = _provisioningStore.TryRead();
+        if (credentials is null)
         {
-            AccessToken = body.AccessToken,
-            AccessTokenExpiresAtUtc = body.AccessTokenExpiresAtUtc,
-            RefreshToken = string.IsNullOrWhiteSpace(body.RefreshToken) ? credentials.RefreshToken : body.RefreshToken,
-            RefreshTokenExpiresAtUtc = body.RefreshTokenExpiresAtUtc ?? credentials.RefreshTokenExpiresAtUtc
-        };
+            return;
+        }
 
-        await _provisioningStore.SaveAsync(updatedCredentials, timeout.Token);
-        return new TokenRefreshResult(true, true, null);
+        if (licenseStatus == "blocked" && credentials.LicenseBlockedSinceUtc is null)
+        {
+            await _provisioningStore.SaveAsync(credentials with { LicenseBlockedSinceUtc = DateTimeOffset.UtcNow }, cancellationToken);
+        }
+        else if (licenseStatus == "active" && credentials.LicenseBlockedSinceUtc is not null)
+        {
+            await _provisioningStore.SaveAsync(credentials with { LicenseBlockedSinceUtc = null }, cancellationToken);
+        }
     }
 
     private static async Task<(HttpResponseMessage? Response, ActivationResult? Error)> SendActivationRequestAsync(
@@ -344,7 +413,17 @@ public sealed record TokenRefreshResponse(
     [property: JsonPropertyName("refresh_token")] string? RefreshToken,
     [property: JsonPropertyName("refresh_token_expires_at_utc")] DateTimeOffset? RefreshTokenExpiresAtUtc);
 
+public enum TokenRefreshOutcome
+{
+    NotNeeded,
+    Refreshed,
+    Transient,
+    Revoked,
+    Invalid
+}
+
 public sealed record TokenRefreshResult(
     bool Provisioned,
     bool Refreshed,
-    string? Error);
+    string? Error,
+    TokenRefreshOutcome Outcome = TokenRefreshOutcome.NotNeeded);

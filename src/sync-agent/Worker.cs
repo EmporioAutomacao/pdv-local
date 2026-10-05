@@ -129,8 +129,14 @@ public sealed class Worker : BackgroundService
         var tokenRefresh = await _erpActivationClient.RefreshTokenIfNeededAsync(cancellationToken);
         if (tokenRefresh.Error is not null)
         {
+            // Plano suspenso/cancelado (Revoked) e rede fora (Transient) encerram so este ciclo:
+            // o refresh e tentado de novo no proximo, entao a recuperacao e automatica quando o
+            // CP reativar o cliente / a rede voltar, sem nenhuma interacao humana.
             _runtimeState.MarkCycleFailed(DateTimeOffset.UtcNow, trigger, tokenRefresh.Error);
-            _logger.LogWarning("Sync agent token refresh failed. Error={Error}", tokenRefresh.Error);
+            _logger.LogWarning(
+                "Sync agent token refresh failed. Outcome={Outcome}; Error={Error}",
+                tokenRefresh.Outcome,
+                tokenRefresh.Error);
             return;
         }
 
@@ -185,6 +191,8 @@ public sealed class Worker : BackgroundService
             storeStatus,
             connectivity,
             cancellationToken);
+
+        await _erpActivationClient.ApplyHeartbeatLicenseAsync(heartbeatSummary.LicenseStatus, cancellationToken);
 
         if (heartbeatSummary.PendingResyncs is { Count: > 0 } pendingResyncs)
         {

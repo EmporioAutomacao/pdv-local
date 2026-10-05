@@ -24,4 +24,7 @@ public sealed record AgentStatusResponse(
     [property: JsonPropertyName("last_cycle_completed_at_utc")] DateTimeOffset? LastCycleCompletedAtUtc,
     [property: JsonPropertyName("last_cycle_trigger")] string? LastCycleTrigger,
     [property: JsonPropertyName("last_error")] string? LastError,
-    [property: JsonPropertyName("pending_update_confirmation")] PendingUpdateConfirmationInfo? PendingUpdateConfirmation = null);
+    [property: JsonPropertyName("pending_update_confirmation")] PendingUpdateConfirmationInfo? PendingUpdateConfirmation = null,
+    [property: JsonPropertyName("needs_reactivation")] bool NeedsReactivation = false,
+    [property: JsonPropertyName("license_state")] string? LicenseState = null,
+    [property: JsonPropertyName("license_grace_ends_at_utc")] DateTimeOffset? LicenseGraceEndsAtUtc = null);

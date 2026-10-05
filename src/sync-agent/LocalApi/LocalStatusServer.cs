@@ -527,6 +527,9 @@ public sealed class LocalStatusServer : BackgroundService
                 provisioning_enabled = effectiveOptions.IsProvisioningEnabled,
                 provisioned = effectiveOptions.IsProvisioned,
                 needs_reactivation = effectiveOptions.NeedsReactivation,
+                license_state = effectiveOptions.LicenseState.ToString().ToLowerInvariant(),
+                license_blocked_since_utc = effectiveOptions.LicenseBlockedSinceUtc,
+                license_grace_ends_at_utc = effectiveOptions.LicenseGraceEndsAtUtc,
                 instance_id = effectiveOptions.InstanceId,
                 erp_tenant_id = effectiveOptions.TenantId,
                 erp_api_base_url = effectiveOptions.ErpApiBaseUrl,
@@ -1056,7 +1059,7 @@ public sealed class LocalStatusServer : BackgroundService
         var reactivationNoticeHtml = effectiveOptions.IsProvisioned && effectiveOptions.NeedsReactivation
             ? $$"""
                 <div class="message warnbox">
-                  A conexao desta instalacao com o ERP expirou (token de renovacao vencido) e a sincronizacao esta parada
+                  O ERP nao reconhece mais o token de renovacao desta instalacao e a sincronizacao esta parada
                   desde entao — operadores, produtos e vendas nao sao mais atualizados automaticamente.
                   Peca a um administrador do ERP para gerar um novo codigo em
                   <strong>API de Sincronizacao &gt; Codigos de Ativacao &gt; Gerar codigo de ativacao</strong>
@@ -1925,6 +1928,13 @@ public sealed class LocalStatusServer : BackgroundService
                     var opt = document.createElement('option');
                     opt.value = l.nome;
                     opt.textContent = l.empresa_nome ? (l.nome + ' — ' + l.empresa_nome) : l.nome;
+                    // Estoque ja vinculado a conexao de outro SyncAgent: ofuscado, sem selecao.
+                    // A propria Loja da conexao em edicao nunca vem com em_uso_por (o ERP exclui
+                    // as conexoes da mesma instalacao).
+                    if(l.em_uso_por){
+                      opt.disabled = true;
+                      opt.textContent += ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')';
+                    }
                     sel.appendChild(opt);
                   });
                   var custom = document.createElement('option');
@@ -2312,7 +2322,7 @@ public sealed class LocalStatusServer : BackgroundService
             new
             {
                 ok = true,
-                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome, empresa_cnpj = l.EmpresaCnpj ?? string.Empty }),
+                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome, empresa_cnpj = l.EmpresaCnpj ?? string.Empty, em_uso_por = l.EmUsoPor is null ? null : new { conexao_nome = l.EmUsoPor.ConexaoNome, installation_label = l.EmUsoPor.InstallationLabel } }),
             },
             cancellationToken);
     }
@@ -2383,6 +2393,25 @@ public sealed class LocalStatusServer : BackgroundService
                             context.Response,
                             HttpStatusCode.Conflict,
                             new { ok = false, message = $"A Loja/Estoque '{lojaCodigo}' ja esta vinculada a conexao '{conflicting.Nome}'. Cada Loja/Estoque so pode estar em uma conexao." },
+                            cancellationToken);
+                        return;
+                    }
+                }
+
+                // Mesma regra, mas entre SyncAgents diferentes: o ERP informa em `em_uso_por`
+                // se outra instalacao ja usa esta Loja. ERP offline = so vale o check local.
+                if (!string.IsNullOrWhiteSpace(lojaCodigo))
+                {
+                    var lojasResult = await _arpaLojaListClient.FetchAsync(cancellationToken);
+                    var emUso = lojasResult.Lojas?.FirstOrDefault(l =>
+                        l.EmUsoPor is not null
+                        && string.Equals(l.Nome.Trim(), lojaCodigo.Trim(), StringComparison.OrdinalIgnoreCase))?.EmUsoPor;
+                    if (emUso is not null)
+                    {
+                        await WriteJsonAsync(
+                            context.Response,
+                            HttpStatusCode.Conflict,
+                            new { ok = false, message = $"A Loja/Estoque '{lojaCodigo}' ja esta sendo sincronizada pela conexao '{emUso.ConexaoNome}' do SyncAgent '{emUso.InstallationLabel}'." },
                             cancellationToken);
                         return;
                     }
