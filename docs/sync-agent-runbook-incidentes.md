@@ -397,6 +397,35 @@ Passos:
 Invoke-RestMethod http://127.0.0.1:47891/status
 ```
 
+## Incidente: credenciais de provisionamento corrompidas
+
+Sinais (agente < 1.6.48):
+
+- `/status`, `/`, `/help` e `/update-check` retornam 500; a bandeja para de
+  atualizar e o "Atualizar App" falha;
+- Event Log `SyncAgent` a cada ~30s com `FormatException: The input is not a
+  valid Base-64 string` em `ProvisioningStore.TryRead`.
+
+Causa observada (VM de homologacao, 2026-10-14): queda de energia logo apos o
+agente regravar `Sync\Secrets\sync-agent-provisioning.dpapi` numa rotacao do
+refresh token - arquivo com o tamanho certo e conteudo zerado. Nao se recupera
+sozinho.
+
+A partir da 1.6.48 o agente move o arquivo ilegivel para
+`sync-agent-provisioning.dpapi.corrupt-<data>` (log de erro no Event Log) e
+volta como "nao ativado"; a gravacao tambem passou a forcar os dados para o
+disco antes de substituir o arquivo.
+
+Passos:
+
+1. Atualizar para >= 1.6.48 (ou, em versao anterior: parar o servico, mover o
+   `.dpapi` para fora da pasta e iniciar o servico).
+2. No ERP, desativar a instalacao antiga e as conexoes Arpa espelhadas dela
+   (senao o estoque continua vinculado a instalacao antiga e preco/estoque da
+   nova sao ignorados).
+3. Gerar novo codigo de ativacao e ativar em `/setup`.
+4. Depois de ativado, o `.corrupt-*` pode ser apagado.
+
 ## Incidente: atualizacao pendente presa em confirmacao (contrato Sync 2.14.0)
 
 Sinais:

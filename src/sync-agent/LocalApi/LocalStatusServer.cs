@@ -2819,11 +2819,14 @@ public sealed class LocalStatusServer : BackgroundService
                 body.dark .muted { color: #94a3b8; }
                 body.dark a { color: #60a5fa; }
                 body.dark .panel, body.dark .card { background: #1e293b; border-color: #334155; }
-                body.dark table { color: #e2e8f0; }
+                /* Tabela da Ajuda ("Ativacao com o ERP e erros comuns" etc.) tem
+                   background: white proprio - sem isto ficava branca no tema escuro. */
+                body.dark table { color: #e2e8f0; background: transparent; }
                 body.dark th, body.dark td { border-color: #334155; }
                 body.dark th { color: #94a3b8; }
                 body.dark input[type=text], body.dark input[type=password], body.dark input[type=number],
-                body.dark input[type=date], body.dark select, body.dark textarea {
+                body.dark input[type=date], body.dark input[type=url], body.dark input:not([type]),
+                body.dark select, body.dark textarea {
                   background: #0f172a; border-color: #475569; color: #e2e8f0;
                 }
                 body.dark label { color: #94a3b8; }
@@ -2836,6 +2839,12 @@ public sealed class LocalStatusServer : BackgroundService
                 body.dark button.mini.danger { background: #7f1d1d; color: #fecaca; }
                 body.dark .okbox { background: #14532d; color: #bbf7d0; }
                 body.dark .warnbox { background: #78350f; color: #fde68a; }
+                body.dark .pill { background: #334155; color: #e2e8f0; }
+                body.dark .syncstep { background: #334155; color: #94a3b8; }
+                body.dark .syncstep.active { background: #1e3a8a; color: #bfdbfe; }
+                body.dark .syncstep.done { background: #14532d; color: #bbf7d0; }
+                body.dark .syncstep.warn { background: #78350f; color: #fde68a; }
+                body.dark .drainbar { background: #334155; }
                 body.dark .ok { color: #4ade80; }
                 body.dark .warn { color: #fbbf24; }
                 """;
