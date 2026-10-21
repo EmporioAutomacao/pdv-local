@@ -20,10 +20,11 @@ internal static class AutoUpdateRunner
 
     public static int Run()
     {
+        string? payloadRoot = null;
         try
         {
             Log("Auto-update: extraindo pacote embutido...");
-            var payloadRoot = EmbeddedPayload.ExtractIfPresent();
+            payloadRoot = EmbeddedPayload.ExtractIfPresent();
             if (payloadRoot is null)
             {
                 Log("ERRO: este .exe nao tem payload embutido (build de desenvolvimento?).");
@@ -31,9 +32,9 @@ internal static class AutoUpdateRunner
             }
 
             var installRoot = ResolveInstallRoot();
-            var installed = ReadVersionFile(Path.Combine(installRoot, "Sync", "Agent", "VERSION"));
-            var package = ReadVersionFile(Path.Combine(payloadRoot, "payload", "Sync", "Agent", "VERSION"));
-            Log($"Instalado: {installed ?? "?"}  ->  Pacote: {package ?? "?"}  (InstallRoot: {installRoot})");
+            var installed = InstallVersionSnapshot.Read(Path.Combine(installRoot, "Sync", "Agent"));
+            var package = InstallVersionSnapshot.Read(Path.Combine(payloadRoot, "payload", "Sync", "Agent"));
+            Log($"Instalado: {installed.Describe()}  ->  Pacote: {package.Describe()}  (InstallRoot: {installRoot})");
 
             if (!ExistingInstallationDetected())
             {
@@ -41,15 +42,12 @@ internal static class AutoUpdateRunner
                 return 4;
             }
 
-            if (string.Equals(installed, package, StringComparison.OrdinalIgnoreCase))
+            // Sem wizard nao ha quem confirme um reparo: o --auto so pula o mesmo build.
+            if (InstallVersionComparer.Compare(installed, package) == InstallComparison.SameBuild)
             {
-                Log("Ja esta na versao deste pacote. Nada a fazer.");
+                Log("Este mesmo build ja esta instalado. Nada a fazer.");
                 return 0;
             }
-
-            var zipPath = Path.Combine(Path.GetTempPath(), $"araras-autoupdate-{Guid.NewGuid():N}.zip");
-            Log("Re-empacotando payload...");
-            ZipFile.CreateFromDirectory(payloadRoot, zipPath, CompressionLevel.Fastest, includeBaseDirectory: false);
 
             var scriptPath = Path.Combine(payloadRoot, "payload", "Sync", "Agent", "self-update.ps1");
             if (!File.Exists(scriptPath))
@@ -58,11 +56,16 @@ internal static class AutoUpdateRunner
                 return 5;
             }
 
+            var zipPath = Path.Combine(Path.GetTempPath(), $"araras-autoupdate-{Guid.NewGuid():N}.zip");
+            Log("Re-empacotando payload...");
+            ZipFile.CreateFromDirectory(payloadRoot, zipPath, CompressionLevel.Fastest, includeBaseDirectory: false);
+
             var args = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath)
                 + " -ZipPath " + Quote(zipPath)
-                + " -Version " + Quote(package ?? "unknown")
+                + " -Version " + Quote(package.VersionFile ?? "unknown")
                 + " -InstallRoot " + Quote(installRoot)
-                + " -ServiceName " + Quote(ServiceName);
+                + " -ServiceName " + Quote(ServiceName)
+                + " -StopService";
 
             var psi = new ProcessStartInfo
             {
@@ -90,6 +93,10 @@ internal static class AutoUpdateRunner
         {
             Log("ERRO no auto-update: " + ex);
             return 1;
+        }
+        finally
+        {
+            EmbeddedPayload.TryDelete(payloadRoot);
         }
     }
 
@@ -151,18 +158,6 @@ internal static class AutoUpdateRunner
         }
 
         return DefaultInstallRoot;
-    }
-
-    private static string? ReadVersionFile(string path)
-    {
-        try
-        {
-            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "`\"") + "\"";

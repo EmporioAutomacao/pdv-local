@@ -20,11 +20,24 @@ $pgVectorArtifact = Join-Path $repoRoot "artifacts\postgresql-17\pgvector"
 $dotNetArtifact = Join-Path $repoRoot "artifacts\dotnet"
 $vcRuntimeArtifact = Join-Path $repoRoot "artifacts\vc-runtime"
 
+# $ErrorActionPreference nao para em exit code de comando nativo: sem isto um
+# publish que falhava empacotava os binarios velhos de artifacts\ com o VERSION novo.
+function Assert-LastExitCode {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step falhou (exit code $LASTEXITCODE)."
+    }
+}
+
 if (-not $SkipPublish) {
     & dotnet publish (Join-Path $repoRoot "src\sync-agent\SyncAgent.csproj") -c Release -r win-x64 --self-contained false -o $agentArtifact
+    Assert-LastExitCode "dotnet publish SyncAgent"
     & dotnet publish (Join-Path $repoRoot "src\sync-agent-tray\SyncAgent.Tray.csproj") -c Release -r win-x64 --self-contained false -o $trayArtifact
+    Assert-LastExitCode "dotnet publish SyncAgent.Tray"
     & dotnet publish (Join-Path $repoRoot "src\pdv-app\PdvLocal.App.csproj") -c Release -r win-x64 --self-contained false -o $pdvAppArtifact
+    Assert-LastExitCode "dotnet publish PdvLocal.App"
     & dotnet publish (Join-Path $repoRoot "src\sync-agent-installer\SyncAgent.Installer.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $installerArtifact
+    Assert-LastExitCode "dotnet publish SyncAgent.Installer"
 }
 
 & (Join-Path $PSScriptRoot "assemble-sync-agent-payload.ps1") `

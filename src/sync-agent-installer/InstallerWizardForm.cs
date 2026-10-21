@@ -45,7 +45,12 @@ public sealed class InstallerWizardForm : Form
     private readonly TextBox _logBox = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     private readonly CheckBox _openSetup = new() { Text = "Abrir tela de ativacao ao concluir", Checked = true };
     private readonly CheckBox _runCleanValidation = new() { Text = "Executar validacao de instalacao ao concluir", Checked = true };
-    private readonly TextBox _evidenceOutput = new() { Text = @".\artifacts\sync-agent-clean-install-evidence.json" };
+    // Caminho absoluto: relancado via UAC ("runas") o processo comeca em
+    // C:\Windows\System32, e o antigo ".\artifacts\..." gravava a evidencia la.
+    private static readonly string DefaultEvidenceOutput = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "AraraSuite.com.br", "logs", "sync-agent-clean-install-evidence.json");
+    private readonly TextBox _evidenceOutput = new() { Text = DefaultEvidenceOutput };
     private readonly Label _postgresStatus = new() { AutoSize = true, ForeColor = Color.DimGray };
 
     private int _step;
@@ -481,7 +486,7 @@ public sealed class InstallerWizardForm : Form
             }
 
             var confirm = MessageBox.Show(
-                "Esta acao conecta no banco Arpa como postgres sem senha e cria/altera o usuario read-only informado. Se as views sync_export.produtos e sync_export.clientes existirem, ela concede apenas SELECT nelas. Continuar?",
+                "Esta acao conecta no banco Arpa como postgres sem senha e cria/altera o usuario read-only informado, concedendo apenas SELECT nas views do schema sync_export. Continuar?",
                 "Criar usuario Arpa",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning);
@@ -684,24 +689,16 @@ GRANT CONNECT ON DATABASE {{databaseIdentifier}} TO {{runtimeUserIdentifier}};
 REVOKE CREATE ON SCHEMA public FROM {{runtimeUserIdentifier}};
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {{runtimeUserIdentifier}};
 
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'sync_export') THEN
-        GRANT USAGE ON SCHEMA sync_export TO {{runtimeUserIdentifier}};
-        REVOKE CREATE ON SCHEMA sync_export FROM {{runtimeUserIdentifier}};
-    END IF;
-
-    IF to_regclass('sync_export.produtos') IS NOT NULL THEN
-        GRANT SELECT ON sync_export.produtos TO {{runtimeUserIdentifier}};
-        REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON sync_export.produtos FROM {{runtimeUserIdentifier}};
-    END IF;
-
-    IF to_regclass('sync_export.clientes') IS NOT NULL THEN
-        GRANT SELECT ON sync_export.clientes TO {{runtimeUserIdentifier}};
-        REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON sync_export.clientes FROM {{runtimeUserIdentifier}};
-    END IF;
-END
-$$;
+-- Todas as views sync_export (estoque, vendas, financeiro, compras, cobranca,
+-- plano_historico, nao so produtos/clientes) - mesmos grants do ArpaDdlRunner
+-- do dashboard. So produtos/clientes deixava o coletor com "permission denied"
+-- nas demais entidades.
+CREATE SCHEMA IF NOT EXISTS sync_export;
+GRANT USAGE ON SCHEMA sync_export TO {{runtimeUserIdentifier}};
+REVOKE CREATE ON SCHEMA sync_export FROM {{runtimeUserIdentifier}};
+GRANT SELECT ON ALL TABLES IN SCHEMA sync_export TO {{runtimeUserIdentifier}};
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA sync_export FROM {{runtimeUserIdentifier}};
+ALTER DEFAULT PRIVILEGES IN SCHEMA sync_export GRANT SELECT ON TABLES TO {{runtimeUserIdentifier}};
 """;
     }
 
@@ -791,11 +788,26 @@ $$;
 
         EnsureDefaultPostgresPortIsFree();
 
-        var script = ResolveInstallScript();
-        var vcRuntimeInstallScript = ResolveVcRuntimeInstallScript();
-        var dotNetRuntimeInstallScript = ResolveDotNetRuntimeInstallScript();
-        var postgresInstallScript = _installPostgres.Checked ? ResolvePostgresInstallScript() : "";
-        var installScript = BuildInstallScript(script, vcRuntimeInstallScript, dotNetRuntimeInstallScript, postgresInstallScript);
+        // Sem o try, um script ausente no pacote estourava dentro do handler
+        // async do botao: o instalador fechava (ou travava com os botoes
+        // desabilitados) sem dizer o que faltou.
+        string installScript;
+        try
+        {
+            var script = ResolveInstallScript();
+            var vcRuntimeInstallScript = ResolveVcRuntimeInstallScript();
+            var dotNetRuntimeInstallScript = ResolveDotNetRuntimeInstallScript();
+            var postgresInstallScript = _installPostgres.Checked ? ResolvePostgresInstallScript() : "";
+            installScript = BuildInstallScript(script, vcRuntimeInstallScript, dotNetRuntimeInstallScript, postgresInstallScript);
+        }
+        catch (Exception ex)
+        {
+            _nextButton.Enabled = true;
+            _backButton.Enabled = true;
+            AppendLog($"Pacote de instalacao incompleto: {ex.Message}");
+            MessageBox.Show(ex.Message, "Instalacao", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -833,7 +845,16 @@ $$;
         if (_runCleanValidation.Checked)
         {
             AppendLog("Iniciando validacao de instalacao...");
-            var validationExitCode = await RunPowerShellScriptAsync(BuildValidationScript(ResolveValidationScript()));
+            int validationExitCode;
+            try
+            {
+                validationExitCode = await RunPowerShellScriptAsync(BuildValidationScript(ResolveValidationScript()));
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Validacao nao executada: {ex.Message}");
+                validationExitCode = 1;
+            }
             if (validationExitCode != 0)
             {
                 _nextButton.Enabled = true;
@@ -1078,7 +1099,7 @@ $$;
             ? Path.Combine(_postgresInstallRoot.Text, "bin", "psql.exe")
             : _psqlPath.Text;
         var evidenceOutput = string.IsNullOrWhiteSpace(_evidenceOutput.Text)
-            ? @".\artifacts\sync-agent-clean-install-evidence.json"
+            ? DefaultEvidenceOutput
             : _evidenceOutput.Text;
 
         var args = new List<string>

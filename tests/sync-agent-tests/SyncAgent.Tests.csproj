@@ -24,4 +24,9 @@
     <ProjectReference Include="..\..\src\sync-agent\SyncAgent.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- O instalador e WinExe/WinForms (net8.0-windows): so a logica pura de comparacao entra aqui. -->
+    <Compile Include="..\..\src\sync-agent-installer\InstallVersionComparer.cs" Link="Installer\InstallVersionComparer.cs" />
+  </ItemGroup>
+
 </Project>

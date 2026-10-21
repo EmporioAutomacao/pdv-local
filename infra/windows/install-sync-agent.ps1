@@ -448,6 +448,20 @@ $syncAgentArtifactDir = $layout.AgentArtifact
 $trayArtifactDir = $layout.TrayArtifact
 $pdvAppArtifactDir = $layout.PdvAppArtifact
 
+# O instalador grafico nao passa -AgentVersion: sem isto toda instalacao nova
+# gravava VERSION/AgentVersion = "1.0.0" (o default acima) por cima do VERSION
+# correto que veio no payload, e o agente se apresentava ao ERP/atualizador
+# como 1.0.0 ate o primeiro self-update.
+if (-not $PSBoundParameters.ContainsKey('AgentVersion')) {
+    $payloadVersionFile = Join-Path $syncAgentArtifactDir "VERSION"
+    if (Test-Path -LiteralPath $payloadVersionFile) {
+        $payloadVersion = (Get-Content -LiteralPath $payloadVersionFile -Raw).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($payloadVersion)) {
+            $AgentVersion = $payloadVersion
+        }
+    }
+}
+
 if ($ValidateOnly) {
     if (-not (Test-Path -LiteralPath (Join-Path $syncAgentArtifactDir "SyncAgent.exe"))) {
         throw "Payload Sync Agent invalido ou incompleto: $syncAgentArtifactDir"

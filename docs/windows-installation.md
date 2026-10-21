@@ -777,4 +777,39 @@ porta explicitamente via `-Port`/`-PostgresPort` sem deteccao automatica -
 uso tipico e homologacao/CI, onde o operador ja escolhe a porta certa por
 parametro.
 
+## Atualizar / Reinstalar pelo instalador (.exe)
+
+Com o servico `AraraSuiteSync` ja instalado, o `.exe` abre a tela "Atualizar"
+em vez do assistente. A comparacao entre o instalado e o pacote usa o commit
+gravado no ProductVersion do `SyncAgent.exe` (`1.6.47+<commit>`), nao so o
+arquivo `VERSION`: o `VERSION` ja ficou dizendo uma versao com os binarios de
+outra, e o numero do ProductVersion atrasa quando o csproj nao e bumpado junto
+da tag. Sem commit em algum dos lados (build antigo/dev), cai no `VERSION`.
+Ver `src\sync-agent-installer\InstallVersionComparer.cs`.
+
+- Build diferente: botao "Atualizar".
+- Mesmo build: botao "Reinstalar" (com confirmacao) para reparar a instalacao;
+  antes o botao ficava desabilitado com "ja esta na versao mais recente deste
+  pacote".
+- `--auto` (bandeja/GPO): so pula quando e o mesmo build, nunca reinstala.
+
+As duas telas rodam o `self-update.ps1` do proprio pacote com `-StopService`
+(para o servico na hora, em vez de esperar 60s ele parar sozinho, que so
+acontece quando o SyncAgent dispara a atualizacao). O script sai com codigo 1
+quando a atualizacao termina em rollback, entao o instalador nao mostra mais
+"finalizado" com a versao antiga de volta. O backup em `Backups\<versao>` e
+limpo antes de ser refeito.
+
+Outros pontos do instalador:
+
+- Instalacao nova grava `VERSION`/`AgentVersion` a partir do `VERSION` do
+  payload quando `-AgentVersion` nao e informado (antes ficava `1.0.0`).
+- "Criar usuario"/"Preparar views" concedem `SELECT` em todas as views de
+  `sync_export` (estoque, vendas, financeiro etc.), como o dashboard.
+- Evidencia da validacao pos-instalacao:
+  `C:\ProgramData\AraraSuite.com.br\logs\sync-agent-clean-install-evidence.json`.
+- A extracao temporaria em `%TEMP%\PdvLocalInstaller` e apagada ao fechar.
+- Os scripts de build param se algum `dotnet publish` falhar (antes empacotavam
+  os binarios antigos de `artifacts\` com o `VERSION` novo).
+
 

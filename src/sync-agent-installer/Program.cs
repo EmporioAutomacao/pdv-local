@@ -51,14 +51,21 @@ internal static class Program
             payloadRoot = progress.PayloadRoot;
         }
 
-        if (payloadRoot is not null && ExistingInstallationDetected())
+        try
         {
-            Application.Run(new UpdateWizardForm(payloadRoot));
+            if (payloadRoot is not null && ExistingInstallationDetected())
+            {
+                Application.Run(new UpdateWizardForm(payloadRoot));
+                return 0;
+            }
+
+            Application.Run(new InstallerWizardForm(payloadRoot));
             return 0;
         }
-
-        Application.Run(new InstallerWizardForm(payloadRoot));
-        return 0;
+        finally
+        {
+            EmbeddedPayload.TryDelete(payloadRoot);
+        }
     }
 
     private static bool IsElevated()

@@ -20,10 +20,23 @@ $outputDir = Join-Path $repoRoot "artifacts\sync-agent-single-file"
 $embeddedPayloadDir = Join-Path $repoRoot "src\sync-agent-installer\EmbeddedPayload"
 $embeddedPayloadZip = Join-Path $embeddedPayloadDir "payload.zip"
 
+# $ErrorActionPreference nao para em exit code de comando nativo: um publish que
+# falhava seguia em frente e empacotava os binarios VELHOS de artifacts\ com o
+# VERSION novo - exatamente o descasamento VERSION x binarios visto em campo.
+function Assert-LastExitCode {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step falhou (exit code $LASTEXITCODE)."
+    }
+}
+
 if (-not $SkipPublish) {
     & dotnet publish (Join-Path $repoRoot "src\sync-agent\SyncAgent.csproj") -c Release -r win-x64 --self-contained false -o $agentArtifact
+    Assert-LastExitCode "dotnet publish SyncAgent"
     & dotnet publish (Join-Path $repoRoot "src\sync-agent-tray\SyncAgent.Tray.csproj") -c Release -r win-x64 --self-contained false -o $trayArtifact
+    Assert-LastExitCode "dotnet publish SyncAgent.Tray"
     & dotnet publish (Join-Path $repoRoot "src\pdv-app\PdvLocal.App.csproj") -c Release -r win-x64 --self-contained false -o $pdvAppArtifact
+    Assert-LastExitCode "dotnet publish PdvLocal.App"
 }
 
 # Monta o payload completo (SyncAgent, Tray, PDV App, PostgreSQL, pgvector, .NET runtime,
@@ -53,6 +66,7 @@ try {
         -p:PublishSingleFile=true `
         -p:EnableCompressionInSingleFile=true `
         -o $installerPublishRoot
+    Assert-LastExitCode "dotnet publish SyncAgent.Installer"
 }
 finally {
     Remove-Item -LiteralPath $embeddedPayloadDir -Recurse -Force -ErrorAction SilentlyContinue

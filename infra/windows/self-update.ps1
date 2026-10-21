@@ -12,12 +12,17 @@
     Raiz da instalacao (default: C:\Program Files\AraraSuite.com.br).
 .PARAMETER ServiceName
     Nome do servico Windows do SyncAgent (default: AraraSuiteSync).
+.PARAMETER StopService
+    Para o servico logo no inicio. Usado pelo instalador (Atualizar/Reinstalar
+    e --auto): ali ninguem para o servico antes, e sem isto o passo 2 so
+    esperava 60s ate forcar a parada. O SyncAgent nao passa (ele para a si mesmo).
 #>
 param(
     [Parameter(Mandatory)] [string] $ZipPath,
     [Parameter(Mandatory)] [string] $Version,
     [string] $InstallRoot  = 'C:\Program Files\AraraSuite.com.br',
-    [string] $ServiceName  = 'AraraSuiteSync'
+    [string] $ServiceName  = 'AraraSuiteSync',
+    [switch] $StopService
 )
 
 $ErrorActionPreference = 'Stop'
@@ -256,6 +261,9 @@ Write-Log "Pacote: $ZipPath"
 
 # --- 2. Aguardar servico parar (o SyncAgent para a si mesmo apos lancar este script) ---
 Write-ProgressStatus -StepNumber 2 -StepName 'waiting_service_stop' -Message "Aguardando servico '$ServiceName' parar..."
+if ($StopService) {
+    Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
+}
 $waited = 0
 while ($waited -lt 60) {
     $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
@@ -289,6 +297,12 @@ if (Test-Path $versionFile) { $oldVersion = (Get-Content $versionFile -Raw).Trim
 $backupRoot = Join-Path $InstallRoot 'Backups'
 $backupDir  = Join-Path $backupRoot $oldVersion
 $script:backupDir = $backupDir
+# Reinstalar a mesma versao (ou um VERSION que nao mudou entre builds) cai no
+# mesmo diretorio: sem limpar, o backup misturava arquivos de builds diferentes
+# e um rollback restaurava DLLs que nao pertencem a nenhum dos dois.
+if (Test-Path -LiteralPath $backupDir) {
+    Remove-Item -LiteralPath $backupDir -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
 Write-ProgressStatus -StepNumber 5 -StepName 'backing_up' -Message "Fazendo backup da versao '$oldVersion' em $backupDir..."
@@ -349,9 +363,11 @@ function Start-ServiceWithRetry {
     return $false
 }
 
+$completed = $false
 if ($success) {
     Write-ProgressStatus -StepNumber 9 -StepName 'starting_service' -Message "Iniciando servico '$ServiceName'..."
     if (Start-ServiceWithRetry $ServiceName 60) {
+        $completed = $true
         Write-ProgressStatus -StepNumber 10 -StepName 'completed' -Message "Auto-update concluido com sucesso. Versao instalada: $Version." -Status 'completed'
         Start-TrayIfNotRunning
     } else {
@@ -374,3 +390,10 @@ if ($success) {
 # --- 10. Limpeza ---
 Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+
+# Rollback tambem e falha: sem isto o script saia com 0 e o instalador
+# (Atualizar/Reinstalar/--auto) mostrava "finalizado" com a versao antiga de volta.
+if (-not $completed) {
+    exit 1
+}
+exit 0

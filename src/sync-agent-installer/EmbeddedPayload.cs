@@ -26,4 +26,26 @@ internal static class EmbeddedPayload
 
         return extractRoot;
     }
+
+    /// <summary>
+    /// Apaga a extracao feita por <see cref="ExtractIfPresent"/>: sem isto cada
+    /// execucao do instalador deixava o payload inteiro (PostgreSQL, runtimes,
+    /// binarios) em %TEMP%\PdvLocalInstaller.
+    /// </summary>
+    public static void TryDelete(string? extractRoot)
+    {
+        if (string.IsNullOrWhiteSpace(extractRoot))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(extractRoot, recursive: true);
+        }
+        catch
+        {
+            // Melhor esforco: arquivo ainda em uso (antivirus) nao derruba o instalador.
+        }
+    }
 }

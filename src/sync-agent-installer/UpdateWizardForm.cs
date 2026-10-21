@@ -22,8 +22,9 @@ internal sealed class UpdateWizardForm : Form
 
     private readonly string _payloadRoot;
     private readonly string _installRoot;
-    private readonly string? _installedVersion;
-    private readonly string? _packageVersion;
+    private readonly InstallVersionSnapshot _installed;
+    private readonly InstallVersionSnapshot _package;
+    private readonly InstallComparison _comparison;
 
     private readonly Label _summaryLabel;
     private readonly Label _phaseLabel;
@@ -37,8 +38,9 @@ internal sealed class UpdateWizardForm : Form
     {
         _payloadRoot = payloadRoot;
         _installRoot = ResolveInstallRoot();
-        _installedVersion = ReadVersionFile(Path.Combine(_installRoot, "Sync", "Agent", "VERSION"));
-        _packageVersion = ReadVersionFile(Path.Combine(_payloadRoot, "payload", "Sync", "Agent", "VERSION"));
+        _installed = InstallVersionSnapshot.Read(Path.Combine(_installRoot, "Sync", "Agent"));
+        _package = InstallVersionSnapshot.Read(Path.Combine(_payloadRoot, "payload", "Sync", "Agent"));
+        _comparison = InstallVersionComparer.Compare(_installed, _package);
 
         Text = "AraraSuite - Atualizar";
         Width = 620;
@@ -50,7 +52,7 @@ internal sealed class UpdateWizardForm : Form
         _summaryLabel = new Label
         {
             Dock = DockStyle.Top,
-            Height = 64,
+            Height = 84,
             Padding = new Padding(16, 12, 16, 0),
             Text = BuildSummaryText()
         };
@@ -87,15 +89,16 @@ internal sealed class UpdateWizardForm : Form
         };
         _closeButton = new Button { Text = "Fechar", Width = 100 };
         _closeButton.Click += (_, _) => Close();
-        _updateButton = new Button { Text = "Atualizar", Width = 120 };
+        // Mesmo build instalado: o botao vira "Reinstalar" (reparo de arquivos
+        // corrompidos/apagados ou VERSION fora de sincronia) em vez de sumir.
+        _updateButton = new Button
+        {
+            Text = _comparison == InstallComparison.SameBuild ? "Reinstalar" : "Atualizar",
+            Width = 120
+        };
         _updateButton.Click += async (_, _) => await RunUpdateAsync();
         buttonPanel.Controls.Add(_closeButton);
         buttonPanel.Controls.Add(_updateButton);
-
-        if (!VersionsDiffer())
-        {
-            _updateButton.Enabled = false;
-        }
 
         Controls.Add(_logBox);
         Controls.Add(buttonPanel);
@@ -117,20 +120,13 @@ internal sealed class UpdateWizardForm : Form
         base.Dispose(disposing);
     }
 
-    private bool VersionsDiffer()
-    {
-        return !string.Equals(_installedVersion, _packageVersion, StringComparison.OrdinalIgnoreCase);
-    }
-
     private string BuildSummaryText()
     {
-        var installed = _installedVersion ?? "desconhecida";
-        var package = _packageVersion ?? "desconhecida";
-        var note = VersionsDiffer()
-            ? ""
-            : " (ja esta na versao mais recente deste pacote)";
+        var note = _comparison == InstallComparison.SameBuild
+            ? "\r\nEste mesmo build ja esta instalado. Use \"Reinstalar\" para reparar a instalacao."
+            : "";
         return $"Instalacao existente detectada em {_installRoot}.\r\n" +
-               $"Versao instalada: {installed}   →   Versao deste pacote: {package}{note}";
+               $"Versao instalada: {_installed.Describe()}   →   Versao deste pacote: {_package.Describe()}{note}";
     }
 
     private async Task RunUpdateAsync()
@@ -143,6 +139,20 @@ internal sealed class UpdateWizardForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
+        }
+
+        if (_comparison == InstallComparison.SameBuild)
+        {
+            var confirm = MessageBox.Show(
+                $"A versao {_package.Describe()} ja esta instalada. Reinstalar mesmo assim?\r\n\r\n" +
+                "O servico sera parado, os arquivos substituidos e as configuracoes mantidas.",
+                "Reinstalar",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
         }
 
         _updateButton.Enabled = false;
@@ -175,9 +185,10 @@ internal sealed class UpdateWizardForm : Form
 
         var args = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath) +
                    " -ZipPath " + Quote(zipPath) +
-                   " -Version " + Quote(_packageVersion ?? "unknown") +
+                   " -Version " + Quote(_package.VersionFile ?? "unknown") +
                    " -InstallRoot " + Quote(_installRoot) +
-                   " -ServiceName " + Quote(ServiceName);
+                   " -ServiceName " + Quote(ServiceName) +
+                   " -StopService";
 
         var startInfo = new ProcessStartInfo
         {
@@ -286,18 +297,6 @@ internal sealed class UpdateWizardForm : Form
         }
 
         return DefaultInstallRoot;
-    }
-
-    private static string? ReadVersionFile(string path)
-    {
-        try
-        {
-            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "`\"") + "\"";
