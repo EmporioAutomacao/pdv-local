@@ -18,6 +18,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _pendingUpdateMenuItem;
     private readonly ToolStripMenuItem _updateAppItem;
     private readonly ToolStripMenuItem _licenseItem;
+    private readonly ToolStripMenuItem _arpaBlockedItem;
+    private DateTimeOffset _arpaBlockedNotifiedAtUtc = DateTimeOffset.MinValue;
+    private string? _arpaBlockedNotifiedKey;
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private AgentStatusResponse? _lastStatus;
 
@@ -38,6 +41,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         var syncNowItem = new ToolStripMenuItem("Sincronizar agora", null, async (_, _) => await SyncNowAsync());
         _updateAppItem = new ToolStripMenuItem("Atualizar App", null, (_, _) => OpenUpdateProgress());
         _pendingUpdateMenuItem = new ToolStripMenuItem("Atualizacao pendente...", null, (_, _) => OpenPendingUpdateConfirmation())
+        {
+            Visible = false,
+            Font = new Font(Control.DefaultFont, FontStyle.Bold),
+        };
+        _arpaBlockedItem = new ToolStripMenuItem("Acao necessaria: tabela de preco...", null, (_, _) => OpenUrl("http://127.0.0.1:47891/config/arpa"))
         {
             Visible = false,
             Font = new Font(Control.DefaultFont, FontStyle.Bold),
@@ -68,6 +76,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             syncNowItem,
             _updateAppItem,
             _pendingUpdateMenuItem,
+            _arpaBlockedItem,
             refreshItem,
             new ToolStripSeparator(),
             exitItem
@@ -115,6 +124,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _updateAppItem.Text = UpdateAvailableDialog.BuildTitle(_lastStatus.AgentVersion);
             CheckPendingUpdateConfirmation(_lastStatus);
             ApplyLicenseState(_lastStatus);
+            ApplyArpaBlockedConnections(_lastStatus);
 
             if (showBalloon)
             {
@@ -415,13 +425,49 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void OpenDashboard()
+    /// <summary>
+    /// Conexao Arpa pausada pelo agente (ex.: o ERP tem mais de uma tabela de preco
+    /// e a conexao nao informa qual usar). Diferente da licenca, que avisa uma vez
+    /// por estado, aqui o aviso se repete a cada <see cref="ArpaBlockedRenotifyInterval"/>
+    /// enquanto a pendencia existir - a sincronizacao fica parada ate alguem corrigir.
+    /// </summary>
+    private void ApplyArpaBlockedConnections(AgentStatusResponse status)
+    {
+        var blocked = status.ArpaBlockedConnections ?? [];
+        _arpaBlockedItem.Visible = blocked.Count > 0;
+        if (blocked.Count == 0)
+        {
+            _arpaBlockedNotifiedKey = null;
+            return;
+        }
+
+        _arpaBlockedItem.Text = blocked.Count == 1
+            ? $"Acao necessaria: conexao \"{blocked[0].ConnectionName}\" pausada..."
+            : $"Acao necessaria: {blocked.Count} conexoes Arpa pausadas...";
+
+        var key = string.Join("|", blocked.Select(b => b.ConnectionId + ":" + b.Reason));
+        var now = DateTimeOffset.UtcNow;
+        if (key == _arpaBlockedNotifiedKey && now - _arpaBlockedNotifiedAtUtc < ArpaBlockedRenotifyInterval)
+        {
+            return;
+        }
+
+        _arpaBlockedNotifiedKey = key;
+        _arpaBlockedNotifiedAtUtc = now;
+        _notifyIcon.ShowBalloonTip(10000, "AraraSuite Sync - sincronizacao pausada", blocked[0].Reason, ToolTipIcon.Warning);
+    }
+
+    private static readonly TimeSpan ArpaBlockedRenotifyInterval = TimeSpan.FromMinutes(30);
+
+    private void OpenDashboard() => OpenUrl("http://127.0.0.1:47891/");
+
+    private void OpenUrl(string url)
     {
         try
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "http://127.0.0.1:47891/",
+                FileName = url,
                 UseShellExecute = true
             });
         }

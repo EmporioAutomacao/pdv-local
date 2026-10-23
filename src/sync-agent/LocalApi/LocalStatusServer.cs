@@ -73,6 +73,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly SelfUpdater _selfUpdater;
     private readonly UpdateProgressState _updateProgress;
     private readonly PendingUpdateConfirmationGate _pendingUpdateGate;
+    private readonly ArpaConnectionBlocks _arpaConnectionBlocks;
 
     // Pre-preenchimento da tela /setup entre tentativas. A URL do ERP nao e segredo
     // e tambem e persistida em disco; o codigo de ativacao fica apenas aqui em
@@ -101,7 +102,8 @@ public sealed class LocalStatusServer : BackgroundService
         ArpaSyncRunLog arpaSyncRunLog,
         SelfUpdater selfUpdater,
         UpdateProgressState updateProgress,
-        PendingUpdateConfirmationGate pendingUpdateGate)
+        PendingUpdateConfirmationGate pendingUpdateGate,
+        ArpaConnectionBlocks arpaConnectionBlocks)
     {
         _logger = logger;
         _options = options;
@@ -123,6 +125,7 @@ public sealed class LocalStatusServer : BackgroundService
         _selfUpdater = selfUpdater;
         _updateProgress = updateProgress;
         _pendingUpdateGate = pendingUpdateGate;
+        _arpaConnectionBlocks = arpaConnectionBlocks;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -495,6 +498,8 @@ public sealed class LocalStatusServer : BackgroundService
                 + "(Configuracoes > Manutencao do banco local).");
         }
 
+        warnings.AddRange(_arpaConnectionBlocks.Snapshot.Select(b => b.Reason));
+
         return warnings;
     }
 
@@ -524,6 +529,12 @@ public sealed class LocalStatusServer : BackgroundService
                     },
                 timestamp_utc = DateTimeOffset.UtcNow,
                 config_warnings = configWarnings,
+                arpa_blocked_connections = _arpaConnectionBlocks.Snapshot.Select(b => new
+                {
+                    connection_id = b.ConnectionId,
+                    connection_name = b.ConnectionName,
+                    reason = b.Reason,
+                }),
                 provisioning_enabled = effectiveOptions.IsProvisioningEnabled,
                 provisioned = effectiveOptions.IsProvisioned,
                 needs_reactivation = effectiveOptions.NeedsReactivation,
@@ -1614,10 +1625,15 @@ public sealed class LocalStatusServer : BackgroundService
 
         var msg = flashMessage ?? ReadQueryParam(queryString, "msg");
 
+        var blocks = _arpaConnectionBlocks.Snapshot;
+        var blockedIds = blocks.Select(b => b.ConnectionId).ToHashSet(StringComparer.Ordinal);
+        var blocksHtml = string.Concat(blocks.Select(b =>
+            $"""<div class="message warnbox">{Html(b.Reason)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Escolher agora</button></div>"""));
+
         var rows = new StringBuilder();
         if (connections.Count == 0)
         {
-            rows.Append("<tr><td colspan=\"6\" class=\"muted\">Nenhuma conexao. Use o formulario abaixo para adicionar.</td></tr>");
+            rows.Append("<tr><td colspan=\"7\" class=\"muted\">Nenhuma conexao. Use o formulario abaixo para adicionar.</td></tr>");
         }
 
         foreach (var c in connections)
@@ -1639,6 +1655,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <td>{{Html(c.Nome)}}{{(c.Enabled ? "" : " <span class=\"muted\">(inativa)</span>")}}</td>
                   <td>{{Html($"{c.Host}:{c.Port}/{c.Database}")}}</td>
                   <td>{{Html(string.IsNullOrWhiteSpace(c.LojaCodigo) ? "-" : c.LojaCodigo)}}</td>
+                  <td>{{(blockedIds.Contains(c.Id) ? "<span class=\"warn\">Informar!</span>" : Html(string.IsNullOrWhiteSpace(c.TabelaPreco) ? "Automatica" : c.TabelaPreco))}}</td>
                   <td>{{Html(toggles)}}</td>
                   <td>{{Html(c.Username)}}</td>
                   <td style="white-space:nowrap">
@@ -1675,6 +1692,7 @@ public sealed class LocalStatusServer : BackgroundService
                     database = c.Database,
                     username = c.Username,
                     lojaCodigo = c.LojaCodigo,
+                    tabelaPreco = c.TabelaPreco,
                     empresaCnpj = c.EmpresaCnpj,
                     empresaNome = c.EmpresaNome,
                     controlaEstoque = c.ControlaEstoque,
@@ -1767,6 +1785,7 @@ public sealed class LocalStatusServer : BackgroundService
                 <p class="muted">Cada conexao aponta para um banco Arpa Control e e mapeada a uma Loja/Estoque do ERP. As conexoes ficam salvas nesta maquina (cifradas por DPAPI).</p>
                 {{LocalNavHtml(ConfigPath)}}
                 {{msgHtml}}
+                {{blocksHtml}}
 
                 <section class="panel togglebar">
                   <div>
@@ -1795,7 +1814,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Conexoes</h2>
                   <div style="overflow-x: auto">
                     <table>
-                      <tr><th>Nome</th><th>Banco</th><th>Loja</th><th>Sincroniza</th><th>Usuario</th><th></th></tr>
+                      <tr><th>Nome</th><th>Banco</th><th>Loja</th><th>Tabela de preco</th><th>Sincroniza</th><th>Usuario</th><th></th></tr>
                       {{rows}}
                     </table>
                   </div>
@@ -1823,12 +1842,18 @@ public sealed class LocalStatusServer : BackgroundService
                       <div>
                         <label for="f_loja_select">Loja/Estoque (nome no ERP)</label>
                         <select id="f_loja_select" onchange="onLojaSelectChange()"></select>
-                        <input type="text" id="f_loja_custom" placeholder="Nome da Loja/Estoque no ERP" style="display:none; margin-top:6px" oninput="onLojaCustomInput()">
                         <input type="hidden" id="f_loja" name="loja_codigo">
                         <input type="hidden" id="f_empresa_cnpj" name="empresa_cnpj">
                         <input type="hidden" id="f_empresa_nome" name="empresa_nome">
                         <div id="loja_warning" class="muted" style="margin-top:4px; font-size:12px"></div>
                       </div>
+                    </div>
+                    <div class="row2" id="tabela_row" style="display:none">
+                      <div>
+                        <label for="f_tabela">Tabela de preco (ERP)</label>
+                        <select id="f_tabela" name="tabela_preco"></select>
+                      </div>
+                      <div id="tabela_hint" class="muted" style="font-size:12px; align-self:end; padding-bottom:10px"></div>
                     </div>
                     <div class="row3">
                       <div><label for="f_host">Host</label><input type="text" id="f_host" name="host" required placeholder="127.0.0.1"></div>
@@ -1883,6 +1908,7 @@ public sealed class LocalStatusServer : BackgroundService
                 var CONNS = {{connectionsJson}};
                 var LOJAS_EM_USO = {{lojasEmUsoJson}};
                 var LOJAS = [];
+                var TABELAS = null;
 
                 function toggleEnabled(){
                   setStatus('Atualizando...', true);
@@ -1909,8 +1935,7 @@ public sealed class LocalStatusServer : BackgroundService
                 // ERP (GET /config/arpa/lojas), nunca digitada a mao. Se o ERP nao
                 // estiver acessivel agora ou a Loja nao aparecer mais na lista, usa o
                 // que ja estava salvo na conexao (fallback*) em vez de apagar - so fica
-                // vazio de verdade quando nao ha nem match nem valor previo (ex.: Loja
-                // "Outro (digitar manualmente)", que nunca teve Empresa conhecida).
+                // vazio de verdade quando nao ha nem match nem valor previo.
                 function syncEmpresaFieldsFromLoja(nome, fallbackCnpj, fallbackNome){
                   var match = LOJAS.find(function(l){ return l.nome === nome; });
                   document.getElementById('f_empresa_cnpj').value = match ? (match.empresa_cnpj || '') : (fallbackCnpj || '');
@@ -1937,25 +1962,18 @@ public sealed class LocalStatusServer : BackgroundService
                     }
                     sel.appendChild(opt);
                   });
-                  var custom = document.createElement('option');
-                  custom.value = '__custom__';
-                  custom.textContent = 'Outro (digitar manualmente)';
-                  sel.appendChild(custom);
-
-                  var customInput = document.getElementById('f_loja_custom');
-                  if(selectedNome && LOJAS.some(function(l){ return l.nome === selectedNome; })){
-                    sel.value = selectedNome;
-                    customInput.style.display = 'none';
-                    customInput.value = '';
-                  } else if(selectedNome){
-                    sel.value = '__custom__';
-                    customInput.style.display = 'block';
-                    customInput.value = selectedNome;
-                  } else {
-                    sel.value = '';
-                    customInput.style.display = 'none';
-                    customInput.value = '';
+                  // Sem opcao de digitar a mao: a conexao sempre aponta para um estoque
+                  // que ja existe no ERP. Um valor salvo que nao aparece na lista (ERP
+                  // offline agora, ou estoque renomeado/apagado) continua visivel para a
+                  // edicao dos outros campos - o salvar recusa se o ERP disser que ele
+                  // nao existe.
+                  if(selectedNome && !LOJAS.some(function(l){ return l.nome === selectedNome; })){
+                    var saved = document.createElement('option');
+                    saved.value = selectedNome;
+                    saved.textContent = selectedNome + (LOJAS.length ? ' (nao encontrada no ERP - escolha outra)' : '');
+                    sel.appendChild(saved);
                   }
+                  sel.value = selectedNome || '';
                   document.getElementById('f_loja').value = selectedNome || '';
                   syncEmpresaFieldsFromLoja(selectedNome || '', fallbackEmpresaCnpj, fallbackEmpresaNome);
                   checkLojaDuplicada();
@@ -1963,26 +1981,10 @@ public sealed class LocalStatusServer : BackgroundService
 
                 function onLojaSelectChange(){
                   var sel = document.getElementById('f_loja_select');
-                  var custom = document.getElementById('f_loja_custom');
-                  if(sel.value === '__custom__'){
-                    custom.style.display = 'block';
-                    custom.value = '';
-                    custom.focus();
-                    document.getElementById('f_loja').value = '';
-                    syncEmpresaFieldsFromLoja('');
-                  } else {
-                    custom.style.display = 'none';
-                    custom.value = '';
-                    document.getElementById('f_loja').value = sel.value;
-                    syncEmpresaFieldsFromLoja(sel.value);
-                    var nomeField = document.getElementById('f_nome');
-                    if(sel.value && !nomeField.value){ nomeField.value = sel.value; }
-                  }
-                  checkLojaDuplicada();
-                }
-
-                function onLojaCustomInput(){
-                  document.getElementById('f_loja').value = document.getElementById('f_loja_custom').value;
+                  document.getElementById('f_loja').value = sel.value;
+                  syncEmpresaFieldsFromLoja(sel.value);
+                  var nomeField = document.getElementById('f_nome');
+                  if(sel.value && !nomeField.value){ nomeField.value = sel.value; }
                   checkLojaDuplicada();
                 }
 
@@ -1996,11 +1998,52 @@ public sealed class LocalStatusServer : BackgroundService
                   warn.style.color = conflito ? '#b45309' : '#64748b';
                 }
 
-                function loadLojas(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome){
+                function loadLojas(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome, selectedTabela){
                   fetch('/config/arpa/lojas')
                     .then(function(r){ return r.json(); })
-                    .then(function(j){ LOJAS = (j.ok && j.lojas) ? j.lojas : []; populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome); })
-                    .catch(function(){ LOJAS = []; populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome); });
+                    .then(function(j){
+                      LOJAS = (j.ok && j.lojas) ? j.lojas : [];
+                      TABELAS = (j.ok && j.tabelas_preco) ? j.tabelas_preco : null;
+                      populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome);
+                      populateTabelaSelect(selectedTabela || '');
+                    })
+                    .catch(function(){ LOJAS = []; TABELAS = null; populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome); populateTabelaSelect(selectedTabela || ''); });
+                }
+
+                // Tabela de preco do ERP que recebe custo/preco desta conexao. Com uma
+                // so tabela no ERP ela e usada automaticamente; com mais de uma a
+                // escolha e obrigatoria (o coletor pausa a conexao ate isso).
+                // TABELAS null = ERP antigo/offline: so mostra o valor ja salvo.
+                function tabelaObrigatoria(){ return !!TABELAS && TABELAS.length > 1; }
+                function populateTabelaSelect(selected){
+                  var row = document.getElementById('tabela_row');
+                  var sel = document.getElementById('f_tabela');
+                  var hint = document.getElementById('tabela_hint');
+                  sel.innerHTML = '';
+                  function add(value, text){ var o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); }
+                  if(!TABELAS){
+                    row.style.display = selected ? '' : 'none';
+                    if(selected){ add(selected, selected); }
+                    hint.textContent = selected ? 'Nao foi possivel consultar as tabelas do ERP agora.' : '';
+                    sel.value = selected;
+                    return;
+                  }
+                  row.style.display = '';
+                  if(tabelaObrigatoria()){
+                    add('', 'Selecione a tabela de preco...');
+                    hint.textContent = 'Obrigatorio: o ERP tem ' + TABELAS.length + ' tabelas de preco. Sem escolher, esta conexao nao sincroniza.';
+                    hint.style.color = '#b45309';
+                  } else {
+                    add('', TABELAS.length ? ('Automatica (' + TABELAS[0].nome + ')') : 'Automatica');
+                    hint.textContent = TABELAS.length ? 'O ERP tem uma unica tabela de preco; ela e usada automaticamente.' : 'O ERP nao tem tabela de preco cadastrada; o preco do Arpa nao sera gravado.';
+                    hint.style.color = '';
+                  }
+                  TABELAS.forEach(function(t){ add(t.nome, t.empresa_nome ? (t.nome + ' — ' + t.empresa_nome) : t.nome); });
+                  if(selected && !TABELAS.some(function(t){ return t.nome.toLowerCase() === selected.toLowerCase(); })){
+                    add(selected, selected + ' (nao existe mais no ERP)');
+                  }
+                  var match = TABELAS.find(function(t){ return t.nome.toLowerCase() === (selected || '').toLowerCase(); });
+                  sel.value = match ? match.nome : (selected || '');
                 }
 
                 var SYNCLOG_TIMER = null;
@@ -2248,7 +2291,7 @@ public sealed class LocalStatusServer : BackgroundService
                   var c = CONNS[id]; if(!c) return;
                   document.getElementById('f_id').value = c.id;
                   document.getElementById('f_nome').value = c.nome || '';
-                  loadLojas(c.lojaCodigo || '', c.empresaCnpj || '', c.empresaNome || '');
+                  loadLojas(c.lojaCodigo || '', c.empresaCnpj || '', c.empresaNome || '', c.tabelaPreco || '');
                   document.getElementById('f_host').value = c.host || '';
                   document.getElementById('f_port').value = c.port || 5432;
                   document.getElementById('f_db').value = c.database || '';
@@ -2271,6 +2314,16 @@ public sealed class LocalStatusServer : BackgroundService
                   window.scrollTo(0, document.getElementById('formtitle').offsetTop - 20);
                 }
                 function save(){
+                  if(!document.getElementById('f_loja').value){
+                    setStatus('Escolha o estoque (Loja) do ERP desta conexao.', false);
+                    document.getElementById('f_loja_select').focus();
+                    return;
+                  }
+                  if(tabelaObrigatoria() && document.getElementById('f_produtos').checked && !document.getElementById('f_tabela').value){
+                    setStatus('Escolha a tabela de preco: o ERP tem mais de uma e esta conexao sincroniza produtos.', false);
+                    document.getElementById('f_tabela').focus();
+                    return;
+                  }
                   setStatus('Salvando...', true);
                   fetch('/config/arpa/save', { method:'POST', body: fd() })
                     .then(function(r){ return r.json(); })
@@ -2323,6 +2376,8 @@ public sealed class LocalStatusServer : BackgroundService
             {
                 ok = true,
                 lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome, empresa_cnpj = l.EmpresaCnpj ?? string.Empty, em_uso_por = l.EmUsoPor is null ? null : new { conexao_nome = l.EmUsoPor.ConexaoNome, installation_label = l.EmUsoPor.InstallationLabel } }),
+                // null = ERP anterior ao contrato 2.17.0: a tela esconde o campo.
+                tabelas_preco = result.TabelasPreco?.Select(t => new { id = t.Id, nome = t.Nome, empresa_nome = t.EmpresaNome ?? string.Empty }),
             },
             cancellationToken);
     }
@@ -2398,11 +2453,44 @@ public sealed class LocalStatusServer : BackgroundService
                     }
                 }
 
+                // ERP offline = so valem os checks locais (em_uso_por e tabela de preco
+                // sao conferidos de novo pelo ERP/coletor quando ele voltar).
+                ArpaLojaListFetchResult lojasResult;
+                try
+                {
+                    lojasResult = await _arpaLojaListClient.FetchAsync(cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    lojasResult = ArpaLojaListFetchResult.Failed(ex.GetType().Name);
+                }
+
+                var lojaError = ArpaLojaRule.ValidateForSave(
+                    lojaCodigo,
+                    existing?.LojaCodigo,
+                    lojasResult.Succeeded ? lojasResult.Lojas : null);
+                if (lojaError is not null)
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = lojaError }, cancellationToken);
+                    return;
+                }
+
+                var tabelaPreco = V("tabela_preco");
+                var tabelaBlock = ArpaTabelaPrecoRule.BlockReason(V("nome"), B("sync_produtos"), tabelaPreco, lojasResult.TabelasPreco);
+                if (tabelaBlock is not null)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.BadRequest,
+                        new { ok = false, message = "Escolha a tabela de preco: " + tabelaBlock },
+                        cancellationToken);
+                    return;
+                }
+
                 // Mesma regra, mas entre SyncAgents diferentes: o ERP informa em `em_uso_por`
-                // se outra instalacao ja usa esta Loja. ERP offline = so vale o check local.
+                // se outra instalacao ja usa esta Loja.
                 if (!string.IsNullOrWhiteSpace(lojaCodigo))
                 {
-                    var lojasResult = await _arpaLojaListClient.FetchAsync(cancellationToken);
                     var emUso = lojasResult.Lojas?.FirstOrDefault(l =>
                         l.EmUsoPor is not null
                         && string.Equals(l.Nome.Trim(), lojaCodigo.Trim(), StringComparison.OrdinalIgnoreCase))?.EmUsoPor;
@@ -2428,6 +2516,7 @@ public sealed class LocalStatusServer : BackgroundService
                     // senha em branco no form de edicao mantem a atual
                     Password = string.IsNullOrEmpty(V("password")) && existing is not null ? existing.Password : V("password"),
                     LojaCodigo = lojaCodigo,
+                    TabelaPreco = tabelaPreco,
                     EmpresaCnpj = V("empresa_cnpj"),
                     EmpresaNome = V("empresa_nome"),
                     ControlaEstoque = B("controla_estoque"),

@@ -26,19 +26,22 @@ public sealed class ArpaResyncProcessor
     private readonly EffectiveSyncAgentConfigurationProvider _agentConfigProvider;
     private readonly LocalSyncStore _localStore;
     private readonly ArpaPayloadNormalizerRegistry _normalizers;
+    private readonly ArpaConnectionBlocks _connectionBlocks;
 
     public ArpaResyncProcessor(
         ILogger<ArpaResyncProcessor> logger,
         EffectiveArpaCollectorConfigurationProvider connectionsProvider,
         EffectiveSyncAgentConfigurationProvider agentConfigProvider,
         LocalSyncStore localStore,
-        ArpaPayloadNormalizerRegistry normalizers)
+        ArpaPayloadNormalizerRegistry normalizers,
+        ArpaConnectionBlocks connectionBlocks)
     {
         _logger = logger;
         _connectionsProvider = connectionsProvider;
         _agentConfigProvider = agentConfigProvider;
         _localStore = localStore;
         _normalizers = normalizers;
+        _connectionBlocks = connectionBlocks;
     }
 
     private static string ViewName(string entityType) => entityType switch
@@ -63,7 +66,18 @@ public sealed class ArpaResyncProcessor
             return Array.Empty<ResyncResult>();
         }
 
-        var connections = await _connectionsProvider.GetCurrentAsync(cancellationToken);
+        // Conexao pausada pelo coletor neste ciclo (ex.: tabela de preco nao
+        // informada) tambem nao atende re-sync: seria o mesmo dado que o ERP rejeita.
+        var blocks = _connectionBlocks.Snapshot;
+        var blockedIds = blocks.Select(b => b.ConnectionId).ToHashSet(StringComparer.Ordinal);
+        var allConnections = await _connectionsProvider.GetCurrentAsync(cancellationToken);
+        var connections = allConnections.Where(c => !blockedIds.Contains(c.Id)).ToList();
+        if (connections.Count == 0 && blocks.Count > 0)
+        {
+            var reason = Truncate(blocks[0].Reason, 240);
+            return items.Select(i => new ResyncResult(i.Id, "failed", reason)).ToList();
+        }
+
         var instanceId = _agentConfigProvider.GetCurrent().InstanceId;
         var results = new List<ResyncResult>(items.Count);
 

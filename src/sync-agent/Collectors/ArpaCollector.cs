@@ -20,6 +20,12 @@ public sealed class ArpaCollector
     private readonly LocalSyncStore _localStore;
     private readonly ArpaPayloadNormalizerRegistry _normalizers;
     private readonly ArpaSyncRunLog _runLog;
+    private readonly ArpaLojaListClient _lojaListClient;
+    private readonly ArpaConnectionBlocks _connectionBlocks;
+
+    // A lista de tabelas de preco muda raramente; 5 min evita uma chamada ao ERP
+    // por ciclo e ainda libera a conexao logo depois de o operador escolher.
+    private static readonly TimeSpan TabelasPrecoMaxAge = TimeSpan.FromMinutes(5);
 
     public ArpaCollector(
         ILogger<ArpaCollector> logger,
@@ -27,7 +33,9 @@ public sealed class ArpaCollector
         EffectiveArpaCollectorConfigurationProvider effectiveCollectorConfigProvider,
         LocalSyncStore localStore,
         ArpaPayloadNormalizerRegistry normalizers,
-        ArpaSyncRunLog runLog)
+        ArpaSyncRunLog runLog,
+        ArpaLojaListClient lojaListClient,
+        ArpaConnectionBlocks connectionBlocks)
     {
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
@@ -35,6 +43,33 @@ public sealed class ArpaCollector
         _localStore = localStore;
         _normalizers = normalizers;
         _runLog = runLog;
+        _lojaListClient = lojaListClient;
+        _connectionBlocks = connectionBlocks;
+    }
+
+    /// <summary>
+    /// Motivo para nao coletar a conexao agora (registrado em
+    /// <see cref="ArpaConnectionBlocks"/> para /status, dashboard e bandeja), ou
+    /// null para seguir. Usado tambem pelo re-sync sob demanda.
+    /// </summary>
+    internal async Task<string?> EvaluateBlockAsync(EffectiveArpaCollectorConnection connection, CancellationToken cancellationToken)
+    {
+        var coletaProdutos = connection.Entities.Any(e => e.EntityType == "produto");
+        var tabelas = coletaProdutos
+            ? await _lojaListClient.GetTabelasPrecoAsync(TabelasPrecoMaxAge, cancellationToken)
+            : null;
+        var reason = ArpaTabelaPrecoRule.BlockReason(connection.Nome, coletaProdutos, connection.TabelaPreco, tabelas);
+
+        if (reason is null)
+        {
+            _connectionBlocks.Clear(connection.Id);
+        }
+        else
+        {
+            _connectionBlocks.Set(connection.Id, connection.Nome, reason);
+        }
+
+        return reason;
     }
 
     private static string EntityLabel(string entityType) => entityType switch
@@ -65,6 +100,7 @@ public sealed class ArpaCollector
         IReadOnlySet<string>? entityTypeFilter = null)
     {
         var connections = await _effectiveCollectorConfigProvider.GetCurrentAsync(cancellationToken);
+        _connectionBlocks.RetainOnly(connections.Select(c => c.Id));
         if (connections.Count == 0)
         {
             _runLog.Add("info", "Coletor Arpa desativado ou sem conexoes - nada a coletar.");
@@ -78,6 +114,16 @@ public sealed class ArpaCollector
 
         foreach (var connection in connections)
         {
+            // Sem watermark tocado: quando o operador corrigir, a conexao retoma
+            // exatamente de onde parou, sem perder nada lido do Arpa.
+            var blockReason = await EvaluateBlockAsync(connection, cancellationToken);
+            if (blockReason is not null)
+            {
+                _runLog.Add("warn", $"Conexao \"{connection.Nome}\": PAUSADA - {blockReason}");
+                _logger.LogWarning("Arpa collector: conexao '{Nome}' pausada. {Reason}", connection.Nome, blockReason);
+                continue;
+            }
+
             _runLog.Add("info", $"Conexao \"{connection.Nome}\": lendo do Arpa...");
 
             NpgsqlDataSource dataSource;

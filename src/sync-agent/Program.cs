@@ -89,6 +89,7 @@ builder.Services.AddSingleton<ProvisioningStore>();
 builder.Services.AddSingleton<EffectiveSyncAgentConfigurationProvider>();
 builder.Services.AddSingleton<ErpActivationClient>();
 builder.Services.AddSingleton<ArpaLojaListClient>();
+builder.Services.AddSingleton<ArpaConnectionBlocks>();
 builder.Services.AddSingleton<EffectiveArpaCollectorConfigurationProvider>();
 builder.Services.AddSingleton<ArpaCollector>();
 builder.Services.AddSingleton<ArpaResyncProcessor>();

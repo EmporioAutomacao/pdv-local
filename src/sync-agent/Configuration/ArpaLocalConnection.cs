@@ -40,8 +40,8 @@ public sealed record ArpaLocalConnection
     /// nao consegue resolver a Empresa a partir do payload e cai no fallback de
     /// "empresa unica ativa", que pode deixar a Loja/Estoque sem empresa
     /// vinculada quando esse fallback roda depois da resolucao de estoque.
-    /// Vazio para conexoes com Loja "Outro (digitar manualmente)", que nao tem
-    /// Empresa conhecida do ERP.
+    /// Vazio so em conexoes antigas, de quando o estoque ainda podia ser digitado
+    /// a mao (hoje sempre vem de um estoque existente, ver <see cref="Provisioning.ArpaLojaRule"/>).
     /// </summary>
     public string EmpresaCnpj { get; init; } = string.Empty;
 
@@ -50,6 +50,14 @@ public sealed record ArpaLocalConnection
     /// Vai como <c>empresa_nome</c> no payload junto com <see cref="EmpresaCnpj"/>.
     /// </summary>
     public string EmpresaNome { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Nome da tabela de preco do ERP que recebe custo/preco dos produtos desta
+    /// conexao (vai como <c>tabela_preco</c> no heartbeat, contrato Sync 2.17.0).
+    /// Vazio = o ERP usa a sua unica tabela; com mais de uma no ERP e obrigatorio
+    /// e a conexao nao coleta ate ser informado (<see cref="Provisioning.ArpaTabelaPrecoRule"/>).
+    /// </summary>
+    public string TabelaPreco { get; init; } = string.Empty;
 
     public bool ControlaEstoque { get; init; }
 

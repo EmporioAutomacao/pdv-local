@@ -180,15 +180,51 @@ texto livre e um typo criava uma Loja nova sem querer no ERP.
 - O valor escolhido (o **nome** da Loja) vai como `loja_codigo` nos eventos de
   estoque/venda; o ERP resolve a Loja por esse nome
   (`sync_api.domain_processor`).
-- Se o ERP estiver **fora do ar / instalacao nao ativada**, o dropdown cai
-  para a opcao **"Outro (digitar manualmente)"** e um campo de texto - a tela
-  nao trava.
+- **O estoque sempre e um ja existente no ERP** (1.6.49+). A opcao "Outro
+  (digitar manualmente)" foi removida: salvar exige escolher um estoque da
+  lista, e o agente recusa com **HTTP 400** um nome que o ERP nao tem. Um nome
+  digitado que nao batia com o cadastro deixava a conexao sem estoque/empresa
+  no ERP, e estoque e preco vindos do Arpa eram descartados.
+- Com o ERP **fora do ar**, so da para salvar mantendo o estoque que a conexao
+  ja tinha (para editar os outros campos); trocar de estoque espera o ERP
+  voltar. Um estoque salvo que sumiu do ERP aparece como "nao encontrada no
+  ERP - escolha outra".
 - **Uma Loja/Estoque so pode estar em UMA conexao.** Salvar uma conexao
   apontando para uma Loja que ja esta em outra e recusado com **HTTP 409**:
   `A Loja/Estoque 'X' ja esta vinculada a conexao 'Y'`. Comparacao por nome,
   sem diferenciar maiusculas. Motivo: se duas conexoes escrevem estoque/venda
   na mesma Loja, o ERP nao sabe qual e a fonte. Um aviso ja aparece no
   formulario antes de salvar.
+
+## 5.1 Tabela de preco (1.6.49+, contrato `../sync` 2.17.0)
+
+O campo *Tabela de preco (ERP)* define em qual tabela de preco do ERP caem o
+custo e o preco de venda dos produtos desta conexao. A lista vem do mesmo
+`GET .../lojas` (`tabelas_preco[]`) e o nome escolhido vai no heartbeat como
+`tabela_preco`.
+
+| Tabelas no ERP | Campo | Comportamento |
+| --- | --- | --- |
+| Nenhuma | "Automatica" | Produtos sincronizam; preco/custo nao sao gravados (log no ERP). |
+| Uma (a "Geral" de todo tenant novo) | "Automatica (Geral)" | Usada automaticamente, nada a escolher. |
+| Mais de uma | **Obrigatorio** | Sem escolher, salvar e recusado e a conexao fica **pausada**. |
+
+Conexao pausada (mais de uma tabela e nenhuma escolhida, ou a escolhida foi
+apagada no ERP):
+
+- o coletor **nao le nada** desta conexao (nem clientes/estoque/vendas) e o
+  re-sync pedido pelo ERP falha com o mesmo motivo; o watermark nao anda, entao
+  apos a correcao a conexao retoma de onde parou, sem perder dados;
+- o motivo aparece no topo do dashboard e desta tela (botao **Escolher agora**),
+  em `config_warnings`/`arpa_blocked_connections` de `/status` e na coluna
+  "Tabela de preco" como **Informar!**;
+- a bandeja mostra o item **Acao necessaria** e repete o aviso a cada 30 min
+  enquanto a pendencia existir.
+
+Conexao sem o toggle *Produtos* nunca e pausada por isso (nao ha preco a
+gravar). Com o ERP fora do ar, o agente usa a ultima lista obtida (cache de
+5 min); se nunca obteve a lista, nao pausa - o ERP rejeita os produtos com
+preco do lado dele, com o mesmo motivo.
 
 ## 6. Preparar banco Arpa (requer credencial DBA)
 

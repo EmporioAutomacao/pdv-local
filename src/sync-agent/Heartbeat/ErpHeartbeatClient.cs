@@ -76,7 +76,8 @@ public sealed class ErpHeartbeatClient
                     c.Nome, c.Host, c.Port, c.Database, c.Username, c.LojaCodigo,
                     c.ControlaEstoque, c.SyncProdutos, c.SyncClientes, c.SyncEstoque,
                     c.SyncVendas, c.SyncFinanceiro, c.SyncCompra, c.SyncCobranca, c.SyncPlanoHistorico,
-                    c.Enabled)).ToList());
+                    c.Enabled,
+                    string.IsNullOrWhiteSpace(c.TabelaPreco) ? null : c.TabelaPreco.Trim())).ToList());
 
         var escapedInstanceId = Uri.EscapeDataString(syncOptions.InstanceId);
         using var httpRequest = new HttpRequestMessage(
@@ -216,7 +217,8 @@ public sealed record HeartbeatArpaConnection(
     [property: JsonPropertyName("sync_compra")] bool SyncCompra,
     [property: JsonPropertyName("sync_cobranca")] bool SyncCobranca,
     [property: JsonPropertyName("sync_plano_historico")] bool SyncPlanoHistorico,
-    [property: JsonPropertyName("enabled")] bool Enabled);
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("tabela_preco")] string? TabelaPreco = null);
 
 public sealed record HeartbeatResponse(
     [property: JsonPropertyName("status")] string Status,

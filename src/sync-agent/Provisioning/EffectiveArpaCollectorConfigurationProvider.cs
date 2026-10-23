@@ -113,7 +113,8 @@ public sealed class EffectiveArpaCollectorConfigurationProvider
             connection.LojaCodigo,
             connection.EmpresaCnpj,
             connection.EmpresaNome,
-            entities);
+            entities,
+            connection.TabelaPreco);
     }
 
     private void MigrateLegacyStaticConnectionIfNeeded(ArpaCollectorOptions options)
@@ -181,4 +182,5 @@ public sealed record EffectiveArpaCollectorConnection(
     string LojaCodigo,
     string EmpresaCnpj,
     string EmpresaNome,
-    IReadOnlyList<ArpaEntityCollectorOptions> Entities);
+    IReadOnlyList<ArpaEntityCollectorOptions> Entities,
+    string TabelaPreco = "");
