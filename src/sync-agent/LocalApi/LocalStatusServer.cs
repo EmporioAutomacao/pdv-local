@@ -2007,12 +2007,17 @@ public sealed class LocalStatusServer : BackgroundService
                   var lojas = lojasDaEmpresa();
                   var temEmpresa = !!document.getElementById('f_empresa_select').value;
                   addOption(sel, '', !LOJAS.length ? '(nao foi possivel consultar o ERP agora)' : (temEmpresa ? 'Selecione a Loja/Estoque...' : 'Escolha a empresa primeiro'));
+                  var currentId = document.getElementById('f_id').value;
+                  function usoLocal(l){ return LOJAS_EM_USO.find(function(c){ return c.id !== currentId && norm(c.lojaCodigo) === norm(l.nome); }); }
                   lojas.forEach(function(l){
-                    // Estoque ja vinculado a conexao de outro SyncAgent: visivel, sem selecao.
-                    // A propria Loja da conexao em edicao nunca vem com em_uso_por (o ERP exclui
-                    // as conexoes da mesma instalacao).
-                    var texto = l.em_uso_por ? (l.nome + ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')') : l.nome;
-                    addOption(sel, l.nome, texto, !!l.em_uso_por);
+                    // Estoque ja vinculado: a conexao de outro SyncAgent (em_uso_por, do ERP) ou a
+                    // outra conexao desta maquina (o ERP nao marca essas). Visivel, sem selecao, e
+                    // nunca escolhido sozinho - senao o formulario de conexao nova ja abria com o
+                    // estoque da conexao existente e o aviso "Ja vinculada".
+                    var local = usoLocal(l);
+                    var texto = l.em_uso_por ? (l.nome + ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')')
+                      : local ? (l.nome + ' (ja usado pela conexao "' + local.nome + '" - use Editar nela)') : l.nome;
+                    addOption(sel, l.nome, texto, !!l.em_uso_por || !!local);
                   });
                   // Valor salvo que nao aparece na lista (ERP offline agora, ou estoque
                   // renomeado/apagado) continua visivel para editar os outros campos - o
@@ -2020,7 +2025,7 @@ public sealed class LocalStatusServer : BackgroundService
                   if(selectedNome && !lojas.some(function(l){ return l.nome === selectedNome; })){
                     addOption(sel, selectedNome, selectedNome + (LOJAS.length ? ' (nao encontrada nesta empresa - escolha outra)' : ''));
                   }
-                  var livres = lojas.filter(function(l){ return !l.em_uso_por; });
+                  var livres = lojas.filter(function(l){ return !l.em_uso_por && !usoLocal(l); });
                   var valor = selectedNome || (livres.length === 1 ? livres[0].nome : '');
                   sel.value = valor;
                   document.getElementById('f_loja').value = valor;
