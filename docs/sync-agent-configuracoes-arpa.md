@@ -170,7 +170,24 @@ Endpoint: `POST /config/arpa/full-resync` (`id`, `since_preset=all|3m|1d|custom`
 Botoes do formulario: **Salvar**, **Testar conexao** (valida credencial +
 presenca das views `sync_export`), **Limpar**.
 
-## 5. Loja/Estoque - dropdown do ERP (1.6.2+)
+## 5. Empresa, Loja/Estoque e Tabela de preco - dropdowns do ERP
+
+A partir da **1.6.50** o formulario segue a ordem **Empresa -> Estoque ->
+Tabela de preco**, tudo vindo do ERP (`GET .../lojas`):
+
+| Campo | Lista | Selecao automatica |
+| --- | --- | --- |
+| Empresa | Empresas donas de algum estoque no ERP | Se o ERP tem uma so empresa |
+| Loja/Estoque | Estoques da empresa escolhida (os em uso por outro SyncAgent aparecem desabilitados) | Se a empresa tem um so estoque livre |
+| Tabela de preco | Tabelas da empresa escolhida; se ela nao tem nenhuma, as sem empresa no ERP; se nem isso, todas | Se sobra uma so tabela |
+
+Trocar a empresa limpa estoque e tabela e refaz a selecao automatica. Conexao
+antiga sem empresa salva abre com a empresa do estoque dela. A empresa gravada
+na conexao (`empresa_cnpj`/`empresa_nome` dos eventos) e sempre a dona do
+estoque no ERP, mesmo que o POST venha direto da API. As tabelas de preco so
+trazem a razao social da empresa, entao o filtro delas compara o nome.
+
+### Loja/Estoque (1.6.2+)
 
 O campo *Loja/Estoque (nome no ERP)* e um **dropdown** com as Lojas/Estoque
 realmente cadastradas no ERP do cliente, buscadas em

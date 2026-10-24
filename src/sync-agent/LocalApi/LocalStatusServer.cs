@@ -1840,20 +1840,24 @@ public sealed class LocalStatusServer : BackgroundService
                     <div class="row2">
                       <div><label for="f_nome">Nome</label><input type="text" id="f_nome" name="nome" required placeholder="Ex.: Loja Centro"></div>
                       <div>
-                        <label for="f_loja_select">Loja/Estoque (nome no ERP)</label>
-                        <select id="f_loja_select" onchange="onLojaSelectChange()"></select>
-                        <input type="hidden" id="f_loja" name="loja_codigo">
+                        <label for="f_empresa_select">Empresa (ERP)</label>
+                        <select id="f_empresa_select" onchange="onEmpresaChange()"></select>
                         <input type="hidden" id="f_empresa_cnpj" name="empresa_cnpj">
                         <input type="hidden" id="f_empresa_nome" name="empresa_nome">
-                        <div id="loja_warning" class="muted" style="margin-top:4px; font-size:12px"></div>
                       </div>
                     </div>
-                    <div class="row2" id="tabela_row" style="display:none">
+                    <div class="row2">
                       <div>
+                        <label for="f_loja_select">Loja/Estoque (ERP)</label>
+                        <select id="f_loja_select" onchange="onLojaSelectChange()"></select>
+                        <input type="hidden" id="f_loja" name="loja_codigo">
+                        <div id="loja_warning" class="muted" style="margin-top:4px; font-size:12px"></div>
+                      </div>
+                      <div id="tabela_row" style="display:none">
                         <label for="f_tabela">Tabela de preco (ERP)</label>
                         <select id="f_tabela" name="tabela_preco"></select>
+                        <div id="tabela_hint" class="muted" style="margin-top:4px; font-size:12px"></div>
                       </div>
-                      <div id="tabela_hint" class="muted" style="font-size:12px; align-self:end; padding-bottom:10px"></div>
                     </div>
                     <div class="row3">
                       <div><label for="f_host">Host</label><input type="text" id="f_host" name="host" required placeholder="127.0.0.1"></div>
@@ -1931,58 +1935,103 @@ public sealed class LocalStatusServer : BackgroundService
                     .catch(function(e){ status.textContent = 'Falha: ' + e; });
                 }
 
-                // Empresa (cnpj/nome) e derivada da Loja escolhida no dropdown - vem do
-                // ERP (GET /config/arpa/lojas), nunca digitada a mao. Se o ERP nao
-                // estiver acessivel agora ou a Loja nao aparecer mais na lista, usa o
-                // que ja estava salvo na conexao (fallback*) em vez de apagar - so fica
-                // vazio de verdade quando nao ha nem match nem valor previo.
-                function syncEmpresaFieldsFromLoja(nome, fallbackCnpj, fallbackNome){
-                  var match = LOJAS.find(function(l){ return l.nome === nome; });
-                  document.getElementById('f_empresa_cnpj').value = match ? (match.empresa_cnpj || '') : (fallbackCnpj || '');
-                  document.getElementById('f_empresa_nome').value = match ? (match.empresa_nome || '') : (fallbackNome || '');
+                // Empresa -> Estoque -> Tabela de preco, todos vindos do ERP
+                // (GET /config/arpa/lojas), nunca digitados. A empresa filtra os
+                // estoques e as tabelas (tabela sem empresa no ERP vale para todas);
+                // quando sobra uma unica opcao ela ja vem selecionada. A empresa e
+                // identificada pelo CNPJ dos estoques; as tabelas so trazem a razao
+                // social, entao o filtro delas compara o nome.
+                function norm(s){ return (s || '').trim().toLowerCase(); }
+                function empresaKey(cnpj, nome){ var d = (cnpj || '').replace(/\D/g, ''); return d ? ('cnpj:' + d) : ('nome:' + norm(nome)); }
+                function addOption(sel, value, text, disabled){ var o = document.createElement('option'); o.value = value; o.textContent = text; if(disabled){ o.disabled = true; } sel.appendChild(o); }
+
+                var EMPRESAS = [];
+                function buildEmpresas(){
+                  var seen = {};
+                  EMPRESAS = [];
+                  LOJAS.forEach(function(l){
+                    var key = empresaKey(l.empresa_cnpj, l.empresa_nome);
+                    if(seen[key]) return;
+                    seen[key] = true;
+                    EMPRESAS.push({ key: key, cnpj: l.empresa_cnpj || '', nome: l.empresa_nome || '(sem empresa)' });
+                  });
+                  EMPRESAS.sort(function(a, b){ return a.nome.localeCompare(b.nome); });
+                }
+                function empresaAtual(){ var k = document.getElementById('f_empresa_select').value; return EMPRESAS.find(function(e){ return e.key === k; }) || null; }
+                function setEmpresaFields(cnpj, nome){
+                  document.getElementById('f_empresa_cnpj').value = cnpj || '';
+                  document.getElementById('f_empresa_nome').value = nome || '';
                 }
 
-                function populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome){
+                function populateEmpresaSelect(savedCnpj, savedNome, selectedLoja, selectedTabela){
+                  buildEmpresas();
+                  var sel = document.getElementById('f_empresa_select');
+                  sel.innerHTML = '';
+                  addOption(sel, '', LOJAS.length ? 'Selecione a empresa...' : '(nao foi possivel consultar o ERP agora)');
+                  EMPRESAS.forEach(function(e){ addOption(sel, e.key, e.cnpj ? (e.nome + ' — ' + e.cnpj) : e.nome); });
+
+                  // Empresa da conexao em edicao: a salva; conexao antiga sem empresa salva
+                  // usa a do estoque dela; nova com uma unica empresa no ERP ja vem escolhida.
+                  var key = (savedCnpj || savedNome) ? empresaKey(savedCnpj, savedNome) : '';
+                  if(!key && selectedLoja){
+                    var lojaSalva = LOJAS.find(function(l){ return norm(l.nome) === norm(selectedLoja); });
+                    if(lojaSalva){ key = empresaKey(lojaSalva.empresa_cnpj, lojaSalva.empresa_nome); }
+                  }
+                  if(!key && EMPRESAS.length === 1){ key = EMPRESAS[0].key; }
+                  if(key && !EMPRESAS.some(function(e){ return e.key === key; }) && (savedCnpj || savedNome)){
+                    addOption(sel, key, (savedNome || savedCnpj) + (LOJAS.length ? ' (nao encontrada no ERP)' : ''));
+                  }
+                  sel.value = key;
+                  var e = empresaAtual();
+                  setEmpresaFields(e ? e.cnpj : savedCnpj, e ? e.nome : savedNome);
+                  populateLojaSelect(selectedLoja || '');
+                  populateTabelaSelect(selectedTabela || '');
+                }
+
+                function onEmpresaChange(){
+                  var e = empresaAtual();
+                  setEmpresaFields(e ? e.cnpj : '', e ? e.nome : '');
+                  populateLojaSelect('');
+                  populateTabelaSelect('');
+                }
+
+                function lojasDaEmpresa(){
+                  var key = document.getElementById('f_empresa_select').value;
+                  if(!key) return [];
+                  return LOJAS.filter(function(l){ return empresaKey(l.empresa_cnpj, l.empresa_nome) === key; });
+                }
+
+                function populateLojaSelect(selectedNome){
                   var sel = document.getElementById('f_loja_select');
                   sel.innerHTML = '';
-                  var placeholder = document.createElement('option');
-                  placeholder.value = '';
-                  placeholder.textContent = LOJAS.length ? 'Selecione a Loja/Estoque...' : '(nao foi possivel consultar o ERP agora)';
-                  sel.appendChild(placeholder);
-                  LOJAS.forEach(function(l){
-                    var opt = document.createElement('option');
-                    opt.value = l.nome;
-                    opt.textContent = l.empresa_nome ? (l.nome + ' — ' + l.empresa_nome) : l.nome;
-                    // Estoque ja vinculado a conexao de outro SyncAgent: ofuscado, sem selecao.
+                  var lojas = lojasDaEmpresa();
+                  var temEmpresa = !!document.getElementById('f_empresa_select').value;
+                  addOption(sel, '', !LOJAS.length ? '(nao foi possivel consultar o ERP agora)' : (temEmpresa ? 'Selecione a Loja/Estoque...' : 'Escolha a empresa primeiro'));
+                  lojas.forEach(function(l){
+                    // Estoque ja vinculado a conexao de outro SyncAgent: visivel, sem selecao.
                     // A propria Loja da conexao em edicao nunca vem com em_uso_por (o ERP exclui
                     // as conexoes da mesma instalacao).
-                    if(l.em_uso_por){
-                      opt.disabled = true;
-                      opt.textContent += ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')';
-                    }
-                    sel.appendChild(opt);
+                    var texto = l.em_uso_por ? (l.nome + ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')') : l.nome;
+                    addOption(sel, l.nome, texto, !!l.em_uso_por);
                   });
-                  // Sem opcao de digitar a mao: a conexao sempre aponta para um estoque
-                  // que ja existe no ERP. Um valor salvo que nao aparece na lista (ERP
-                  // offline agora, ou estoque renomeado/apagado) continua visivel para a
-                  // edicao dos outros campos - o salvar recusa se o ERP disser que ele
-                  // nao existe.
-                  if(selectedNome && !LOJAS.some(function(l){ return l.nome === selectedNome; })){
-                    var saved = document.createElement('option');
-                    saved.value = selectedNome;
-                    saved.textContent = selectedNome + (LOJAS.length ? ' (nao encontrada no ERP - escolha outra)' : '');
-                    sel.appendChild(saved);
+                  // Valor salvo que nao aparece na lista (ERP offline agora, ou estoque
+                  // renomeado/apagado) continua visivel para editar os outros campos - o
+                  // salvar recusa se o ERP disser que ele nao existe.
+                  if(selectedNome && !lojas.some(function(l){ return l.nome === selectedNome; })){
+                    addOption(sel, selectedNome, selectedNome + (LOJAS.length ? ' (nao encontrada nesta empresa - escolha outra)' : ''));
                   }
-                  sel.value = selectedNome || '';
-                  document.getElementById('f_loja').value = selectedNome || '';
-                  syncEmpresaFieldsFromLoja(selectedNome || '', fallbackEmpresaCnpj, fallbackEmpresaNome);
+                  var livres = lojas.filter(function(l){ return !l.em_uso_por; });
+                  var valor = selectedNome || (livres.length === 1 ? livres[0].nome : '');
+                  sel.value = valor;
+                  document.getElementById('f_loja').value = valor;
+                  var nomeField = document.getElementById('f_nome');
+                  if(valor && !nomeField.value){ nomeField.value = valor; }
                   checkLojaDuplicada();
                 }
 
                 function onLojaSelectChange(){
                   var sel = document.getElementById('f_loja_select');
                   document.getElementById('f_loja').value = sel.value;
-                  syncEmpresaFieldsFromLoja(sel.value);
                   var nomeField = document.getElementById('f_nome');
                   if(sel.value && !nomeField.value){ nomeField.value = sel.value; }
                   checkLojaDuplicada();
@@ -2004,46 +2053,59 @@ public sealed class LocalStatusServer : BackgroundService
                     .then(function(j){
                       LOJAS = (j.ok && j.lojas) ? j.lojas : [];
                       TABELAS = (j.ok && j.tabelas_preco) ? j.tabelas_preco : null;
-                      populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome);
-                      populateTabelaSelect(selectedTabela || '');
+                      populateEmpresaSelect(fallbackEmpresaCnpj, fallbackEmpresaNome, selectedNome, selectedTabela);
                     })
-                    .catch(function(){ LOJAS = []; TABELAS = null; populateLojaSelect(selectedNome, fallbackEmpresaCnpj, fallbackEmpresaNome); populateTabelaSelect(selectedTabela || ''); });
+                    .catch(function(){ LOJAS = []; TABELAS = null; populateEmpresaSelect(fallbackEmpresaCnpj, fallbackEmpresaNome, selectedNome, selectedTabela); });
                 }
 
-                // Tabela de preco do ERP que recebe custo/preco desta conexao. Com uma
-                // so tabela no ERP ela e usada automaticamente; com mais de uma a
-                // escolha e obrigatoria (o coletor pausa a conexao ate isso).
+                // Tabela de preco do ERP que recebe custo/preco desta conexao: so as da
+                // empresa escolhida (no ERP toda tabela tem empresa). Uma unica opcao ja
+                // vem selecionada; com mais de uma no ERP a escolha e obrigatoria (o
+                // coletor pausa a conexao ate isso).
                 // TABELAS null = ERP antigo/offline: so mostra o valor ja salvo.
                 function tabelaObrigatoria(){ return !!TABELAS && TABELAS.length > 1; }
+                function tabelasDaEmpresa(){
+                  var e = empresaAtual();
+                  if(!TABELAS || !e) return [];
+                  return TABELAS.filter(function(t){ return norm(t.empresa_nome) === norm(e.nome); });
+                }
                 function populateTabelaSelect(selected){
                   var row = document.getElementById('tabela_row');
                   var sel = document.getElementById('f_tabela');
                   var hint = document.getElementById('tabela_hint');
                   sel.innerHTML = '';
-                  function add(value, text){ var o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); }
                   if(!TABELAS){
                     row.style.display = selected ? '' : 'none';
-                    if(selected){ add(selected, selected); }
+                    if(selected){ addOption(sel, selected, selected); }
                     hint.textContent = selected ? 'Nao foi possivel consultar as tabelas do ERP agora.' : '';
                     sel.value = selected;
                     return;
                   }
                   row.style.display = '';
-                  if(tabelaObrigatoria()){
-                    add('', 'Selecione a tabela de preco...');
-                    hint.textContent = 'Obrigatorio: o ERP tem ' + TABELAS.length + ' tabelas de preco. Sem escolher, esta conexao nao sincroniza.';
+                  var tabelas = tabelasDaEmpresa();
+                  hint.style.color = '';
+                  if(!empresaAtual() && LOJAS.length){
+                    addOption(sel, '', 'Escolha a empresa primeiro');
+                    hint.textContent = '';
+                  } else if(!tabelas.length){
+                    addOption(sel, '', 'Nenhuma tabela desta empresa');
+                    hint.textContent = 'Esta empresa nao tem tabela de preco no ERP. Cadastre uma, ou informe a empresa na tabela existente (Produtos > Tabelas de Preco); sem isso o preco do Arpa nao e gravado.';
                     hint.style.color = '#b45309';
+                  } else if(tabelas.length === 1){
+                    hint.textContent = 'Unica tabela de preco disponivel; selecionada automaticamente.';
                   } else {
-                    add('', TABELAS.length ? ('Automatica (' + TABELAS[0].nome + ')') : 'Automatica');
-                    hint.textContent = TABELAS.length ? 'O ERP tem uma unica tabela de preco; ela e usada automaticamente.' : 'O ERP nao tem tabela de preco cadastrada; o preco do Arpa nao sera gravado.';
-                    hint.style.color = '';
+                    addOption(sel, '', 'Selecione a tabela de preco...');
+                    hint.textContent = 'Obrigatorio: ha ' + tabelas.length + ' tabelas de preco para esta empresa. Sem escolher, esta conexao nao sincroniza.';
+                    hint.style.color = '#b45309';
                   }
-                  TABELAS.forEach(function(t){ add(t.nome, t.empresa_nome ? (t.nome + ' — ' + t.empresa_nome) : t.nome); });
-                  if(selected && !TABELAS.some(function(t){ return t.nome.toLowerCase() === selected.toLowerCase(); })){
-                    add(selected, selected + ' (nao existe mais no ERP)');
+                  tabelas.forEach(function(t){ addOption(sel, t.nome, t.nome); });
+                  if(selected && !TABELAS.some(function(t){ return norm(t.nome) === norm(selected); })){
+                    addOption(sel, selected, selected + ' (nao existe mais no ERP)');
                   }
-                  var match = TABELAS.find(function(t){ return t.nome.toLowerCase() === (selected || '').toLowerCase(); });
-                  sel.value = match ? match.nome : (selected || '');
+                  var match = tabelas.find(function(t){ return norm(t.nome) === norm(selected); })
+                    || TABELAS.find(function(t){ return norm(t.nome) === norm(selected); });
+                  if(match && tabelas.indexOf(match) < 0){ addOption(sel, match.nome, match.nome + ' (de outra empresa)'); }
+                  sel.value = match ? match.nome : (selected || (tabelas.length === 1 ? tabelas[0].nome : ''));
                 }
 
                 var SYNCLOG_TIMER = null;
@@ -2314,6 +2376,11 @@ public sealed class LocalStatusServer : BackgroundService
                   window.scrollTo(0, document.getElementById('formtitle').offsetTop - 20);
                 }
                 function save(){
+                  if(LOJAS.length && !document.getElementById('f_empresa_select').value){
+                    setStatus('Escolha a empresa do ERP desta conexao.', false);
+                    document.getElementById('f_empresa_select').focus();
+                    return;
+                  }
                   if(!document.getElementById('f_loja').value){
                     setStatus('Escolha o estoque (Loja) do ERP desta conexao.', false);
                     document.getElementById('f_loja_select').focus();
@@ -2475,6 +2542,10 @@ public sealed class LocalStatusServer : BackgroundService
                     return;
                 }
 
+                var lojaDoErp = lojasResult.Succeeded
+                    ? lojasResult.Lojas?.FirstOrDefault(l => string.Equals(l.Nome.Trim(), lojaCodigo.Trim(), StringComparison.OrdinalIgnoreCase))
+                    : null;
+
                 var tabelaPreco = V("tabela_preco");
                 var tabelaBlock = ArpaTabelaPrecoRule.BlockReason(V("nome"), B("sync_produtos"), tabelaPreco, lojasResult.TabelasPreco);
                 if (tabelaBlock is not null)
@@ -2517,8 +2588,10 @@ public sealed class LocalStatusServer : BackgroundService
                     Password = string.IsNullOrEmpty(V("password")) && existing is not null ? existing.Password : V("password"),
                     LojaCodigo = lojaCodigo,
                     TabelaPreco = tabelaPreco,
-                    EmpresaCnpj = V("empresa_cnpj"),
-                    EmpresaNome = V("empresa_nome"),
+                    // A empresa gravada e sempre a dona do estoque no ERP (a tela filtra os
+                    // estoques pela empresa escolhida, mas um POST direto poderia divergir).
+                    EmpresaCnpj = lojaDoErp is null ? V("empresa_cnpj") : lojaDoErp.EmpresaCnpj ?? string.Empty,
+                    EmpresaNome = lojaDoErp is null ? V("empresa_nome") : lojaDoErp.EmpresaNome,
                     ControlaEstoque = B("controla_estoque"),
                     SyncProdutos = B("sync_produtos"),
                     SyncClientes = B("sync_clientes"),
