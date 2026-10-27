@@ -137,6 +137,25 @@ do PDV) e o resultado final. Se ja houver uma sincronizacao em andamento, o
 painel espera ela comecar. O botao **Fechar** aparece ao concluir.
 Endpoint: `GET /config/arpa/sync-log` (JSON: `run_id`, `running`, `lines`).
 
+Acima do log ficam as **etapas** do ciclo (Leitura Arpa -> Envio ao ERP ->
+[Re-sync sob demanda] -> Snapshots do ERP -> Conclusao) e uma **barra de
+progresso** (1.6.14+ so apos o ciclo; a partir de **1.6.52** tambem durante
+ele), alimentada por `pending_outbox_events`/`dead_letter_events` de
+`GET /status`:
+
+| Momento | Barra | Texto |
+|---|---|---|
+| Leitura Arpa | Animada (total ainda desconhecido) | `Lendo do Arpa... N evento(s) na fila de envio ao ERP.` |
+| Envio ao ERP em diante | Percentual: base = maior pendente visto no ciclo | `Enviando ao ERP: X de Y evento(s) confirmado(s) (P%).` |
+| Ciclo concluido, ainda ha pendentes | Continua do mesmo percentual (nao volta a 0%) e segue sondando `/status` a cada 5s por ate ~15 min | `N evento(s) ainda pendente(s)... proximos ciclos automaticos.` |
+| Tudo confirmado | 100% (fica visivel se acompanhou o ciclo) | `Todos os eventos foram confirmados pelo ERP.` |
+
+Barra laranja = ha eventos em dead-letter (ver `docs/sync-agent-runbook-incidentes.md`).
+Como o dispatcher manda um lote por ciclo (tamanho em "Envio ao ERP", secao 2),
+um ciclo "concluido" com milhares de eventos ainda pendentes e normal - a barra
+mostra a fila drenando nos ciclos seguintes. Recarregar a pagina no meio de um
+ciclo restaura log, etapas e barra.
+
 **Sincronizar tudo** (1.6.9+) **zera os marcadores (watermarks)** desta conexao
 e dispara um ciclo — a coleta re-le e re-envia o cadastro ao ERP (produtos,
 clientes, estoque, vendas, financeiro, compras, cobranca, plano_historico - as

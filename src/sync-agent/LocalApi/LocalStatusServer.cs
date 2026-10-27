@@ -1777,6 +1777,8 @@ public sealed class LocalStatusServer : BackgroundService
                 .drainbar { height: 10px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
                 .drainbarfill { height: 100%; width: 0%; background: #2563eb; transition: width .4s ease; }
                 .drainbarfill.warn { background: #d97706; }
+                .drainbarfill.indeterminate { width: 30% !important; transition: none; animation: drainslide 1.2s ease-in-out infinite; }
+                @keyframes drainslide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
               </style>
             </head>
             <body>
@@ -2120,6 +2122,8 @@ public sealed class LocalStatusServer : BackgroundService
                 var SYNCDRAIN_TIMER = null;
                 var SYNCDRAIN_BASELINE = 0;
                 var SYNCDRAIN_TICKS = 0;
+                var SYNCRUN_MAXPENDING = 0;
+                var SYNCRUN_STATUS_INFLIGHT = false;
 
                 // Fases de um ciclo, na ordem em que aparecem no log (ver Worker.cs).
                 // "Re-sync sob demanda" so aparece quando o ERP pediu re-sync no
@@ -2155,25 +2159,29 @@ public sealed class LocalStatusServer : BackgroundService
                     else if(st === 'done'){ cls += (p.key === lastKey && running) ? ' active' : ' done'; }
                     return '<span class="' + cls + '"><span class="dot"></span>' + p.label + '</span>';
                   }).join('');
+                  return lastKey;
                 }
 
+                // Devolve a fase corrente (key de SYNC_PHASES) para a barra de
+                // progresso do ciclo em andamento.
                 function renderSyncLog(j){
                   var el = document.getElementById('synclog');
-                  renderSteps(j.lines, j.running);
-                  if(!j.lines || !j.lines.length){ el.textContent = SYNCLOG_STARTED ? '(sem linhas)' : 'Aguardando o agente iniciar a sincronizacao...'; return; }
+                  var phase = renderSteps(j.lines, j.running);
+                  if(!j.lines || !j.lines.length){ el.textContent = SYNCLOG_STARTED ? '(sem linhas)' : 'Aguardando o agente iniciar a sincronizacao...'; return phase; }
                   el.innerHTML = j.lines.map(function(l){
                     var txt = l.at + '  ' + l.message;
                     var esc = txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
                     return l.level === 'warn' ? '<span class="warn">' + esc + '</span>' : esc;
                   }).join('\n');
                   el.scrollTop = el.scrollHeight;
+                  return phase;
                 }
 
                 function stopDrainPoll(){
                   if(SYNCDRAIN_TIMER){ clearInterval(SYNCDRAIN_TIMER); SYNCDRAIN_TIMER = null; }
                 }
 
-                function renderDrain(pending, deadLetter){
+                function renderDrain(pending, deadLetter, running){
                   var box = document.getElementById('syncdrain');
                   var fill = document.getElementById('syncdrainfill');
                   var text = document.getElementById('syncdraintext');
@@ -2181,7 +2189,11 @@ public sealed class LocalStatusServer : BackgroundService
                   var pct = SYNCDRAIN_BASELINE > 0 ? Math.max(0, Math.min(100, 100 - (pending / SYNCDRAIN_BASELINE * 100))) : 100;
                   fill.style.width = pct.toFixed(0) + '%';
                   fill.className = 'drainbarfill' + (deadLetter > 0 ? ' warn' : '');
-                  if(pending <= 0){
+                  if(running && pending > 0){
+                    text.textContent = 'Enviando ao ERP: ' + (SYNCDRAIN_BASELINE - pending) + ' de ' + SYNCDRAIN_BASELINE
+                      + ' evento(s) confirmado(s) (' + pct.toFixed(0) + '%)'
+                      + (deadLetter > 0 ? ' - ' + deadLetter + ' em dead-letter' : '') + '.';
+                  } else if(pending <= 0){
                     text.textContent = deadLetter > 0
                       ? deadLetter + ' evento(s) foram para dead-letter - veja Logs.'
                       : 'Todos os eventos foram confirmados pelo ERP.';
@@ -2200,10 +2212,13 @@ public sealed class LocalStatusServer : BackgroundService
                 function startDrainPoll(initialPending, initialDeadLetter){
                   stopDrainPoll();
                   if(!initialPending || initialPending <= 0){
-                    document.getElementById('syncdrain').hidden = true;
+                    // Se a barra ja acompanhou o ciclo, fecha em 100% em vez de sumir.
+                    if(SYNCRUN_MAXPENDING > 0){ renderDrain(0, initialDeadLetter || 0); }
+                    else { document.getElementById('syncdrain').hidden = true; }
                     return;
                   }
-                  SYNCDRAIN_BASELINE = initialPending;
+                  // Mantem a base do ciclo para a barra nao voltar a 0% ao terminar.
+                  SYNCDRAIN_BASELINE = Math.max(initialPending, SYNCRUN_MAXPENDING);
                   SYNCDRAIN_TICKS = 0;
                   renderDrain(initialPending, initialDeadLetter || 0);
                   SYNCDRAIN_TIMER = setInterval(function(){
@@ -2219,10 +2234,36 @@ public sealed class LocalStatusServer : BackgroundService
                   }, 5000);
                 }
 
+                // Barra durante o ciclo: na leitura do Arpa o total ainda e
+                // desconhecido (barra animada + tamanho da fila); a partir do envio
+                // ao ERP, o maior "pendente" visto no ciclo vira a base do percentual.
+                function renderRunProgress(phase){
+                  if(SYNCRUN_STATUS_INFLIGHT) return;
+                  SYNCRUN_STATUS_INFLIGHT = true;
+                  fetch('/status').then(function(r){ return r.json(); }).then(function(s){
+                    var pending = s.pending_outbox_events || 0;
+                    if(pending > SYNCRUN_MAXPENDING){ SYNCRUN_MAXPENDING = pending; }
+                    if(!phase || phase === 'read'){
+                      var fill = document.getElementById('syncdrainfill');
+                      document.getElementById('syncdrain').hidden = false;
+                      fill.className = 'drainbarfill indeterminate';
+                      document.getElementById('syncdraintext').textContent =
+                        'Lendo do Arpa... ' + pending + ' evento(s) na fila de envio ao ERP.';
+                    } else {
+                      SYNCDRAIN_BASELINE = SYNCRUN_MAXPENDING;
+                      renderDrain(pending, s.dead_letter_events || 0, true);
+                    }
+                  }).catch(function(){ /* proxima poll tenta de novo */ })
+                    .then(function(){ SYNCRUN_STATUS_INFLIGHT = false; });
+                }
+
                 function pollSyncLog(){
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
                     if(j.run_id > SYNCLOG_BASELINE){ SYNCLOG_STARTED = true; }
-                    if(SYNCLOG_STARTED){ renderSyncLog(j); }
+                    if(SYNCLOG_STARTED){
+                      var phase = renderSyncLog(j);
+                      if(j.running){ renderRunProgress(phase); }
+                    }
                     else {
                       SYNCLOG_WAITS++;
                       document.getElementById('synclog').textContent =
@@ -2250,9 +2291,11 @@ public sealed class LocalStatusServer : BackgroundService
                     if(!j.lines || !j.lines.length){ return; }
                     SYNCLOG_BASELINE = j.run_id;
                     SYNCLOG_STARTED = true;
+                    SYNCRUN_MAXPENDING = 0;
                     document.getElementById('synclogpanel').hidden = false;
-                    renderSyncLog(j);
+                    var phase = renderSyncLog(j);
                     if(j.running){
+                      renderRunProgress(phase);
                       document.getElementById('synclogclose').hidden = true;
                       if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); }
                       SYNCLOG_TIMER = setInterval(pollSyncLog, 1000);
@@ -2285,7 +2328,7 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('syncsteps').innerHTML = '';
                   document.getElementById('syncdrain').hidden = true;
                   stopDrainPoll();
-                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0;
+                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0; SYNCRUN_MAXPENDING = 0;
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
                     SYNCLOG_BASELINE = j.run_id;
@@ -2324,7 +2367,7 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('syncsteps').innerHTML = '';
                   document.getElementById('syncdrain').hidden = true;
                   stopDrainPoll();
-                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0;
+                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0; SYNCRUN_MAXPENDING = 0;
                   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
                     SYNCLOG_BASELINE = j.run_id;
