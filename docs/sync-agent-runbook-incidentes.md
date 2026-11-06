@@ -266,6 +266,40 @@ Passos antes de usar "Sincronizar tudo" numa instalacao com fila presa:
    funciona" sem checar o motivo do dead-letter entre uma tentativa e
    outra - cada clique sem diagnostico so aumenta o volume preso.
 
+## Incidente: venda/compra de uma loja sobrescrita pela de outra loja
+
+Sintoma: uma venda do Arpa some do ERP ou aparece com itens/estoque de outra
+loja depois que a outra loja sincroniza. Acontece quando duas lojas tem bancos
+Arpa proprios e repetem o mesmo codigo de venda/compra.
+
+Causa: ERP anterior a 0.0.151 identificava a venda/compra do Arpa so pelo
+codigo externo. Desde a 0.0.151 (contrato `../sync` 2.17.3) a chave e codigo
+externo + Estoque da conexao, e o agente nao precisa mudar: o `loja_codigo` da
+conexao ja vai em todo evento de venda/compra. Regra completa:
+`erp/docs/infra/sync-agent-arpa.md`, secao "Identidade de venda e compra".
+
+Correcao dos dados (depois de o ERP estar na 0.0.151 ou mais nova):
+
+1. Conferir que cada conexao tem a sua Loja/Estoque certa no dashboard
+   (Configuracoes > Arpa). Sem isso o reenvio grava no estoque errado.
+2. Resolver antes os dead-letters de venda (secao "Incidente: dead-letter"):
+   produto nao encontrado ou empresa/estoque nao resolvidos fazem o reenvio
+   falhar de novo.
+3. No dashboard do agente da loja que perdeu as vendas: *Sincronizar tudo*
+   marcando so **venda, compra e financeiro**, com data personalizada um pouco
+   anterior a primeira venda afetada (nao usar "Tudo"). Ver tambem o incidente
+   anterior: cada clique gera um lote novo.
+4. Opcional: repetir na outra loja para garantir que as vendas dela estao
+   integras.
+5. Validar no ERP uma venda que colidiu: dois registros com o mesmo codigo
+   externo, um por estoque, cada um com os seus itens.
+6. Venda que tem devolucao no ERP falha no reenvio (os itens devolvidos sao
+   protegidos). Tratar uma a uma.
+
+O reenvio nao duplica vendas da mesma loja (o ERP atualiza pelo codigo +
+estoque) e nao movimenta estoque, mas sobrescreve edicoes feitas no ERP nas
+vendas reenviadas.
+
 ## Incidente: reconciliacao divergente
 
 Sinais:
