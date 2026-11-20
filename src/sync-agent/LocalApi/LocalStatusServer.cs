@@ -65,6 +65,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ErpDispatcherSettingsStore _erpDispatcherSettingsStore;
     private readonly ArpaLojaListClient _arpaLojaListClient;
     private readonly ArpaDdlRunner _arpaDdlRunner;
+    private static readonly SemaphoreSlim PrepareViewsLock = new(1, 1);
     private readonly SyncAgent.Heartbeat.ErpCompatibility _erpCompatibility;
     private readonly LocalDbMaintenanceRunner _localDbMaintenanceRunner;
     private readonly LocalSyncStore _localStore;
@@ -589,7 +590,7 @@ public sealed class LocalStatusServer : BackgroundService
         var activationClass = effectiveOptions.IsProvisioned && !effectiveOptions.NeedsReactivation ? "ok" : "warn";
         var rejectedSalesHtml = BuildRejectedSalesHtml(rejectedSales);
         var configWarnings = await BuildConfigWarningsAsync(cancellationToken);
-        var configWarningsHtml = BuildConfigWarningsHtml(configWarnings);
+        var configWarningsHtml = BuildConfigWarningsHtml(configWarnings, DependencyReasonToConnection());
 
         var html = $$"""
             <!doctype html>
@@ -1648,9 +1649,9 @@ public sealed class LocalStatusServer : BackgroundService
         var depWarns = depWarnings.ToDictionary(b => b.ConnectionId, b => b.Reason, StringComparer.Ordinal);
         var blocksHtml = string.Concat(blocks.Select(b =>
             b.Kinds.HasFlag(ArpaBlockKind.Dependencias)
-                ? $"""<div class="message warnbox">&#9888; PAUSADA - {Html(b.Reason)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Resolver agora</button></div>"""
+                ? $"""<div class="message warnbox">&#9888; PAUSADA - {ArpaDependencyHtml.LinkPrepararViews(Html(b.Reason), b.ConnectionId)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Resolver agora</button></div>"""
                 : $"""<div class="message warnbox">{Html(b.Reason)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Escolher agora</button></div>"""))
-            + string.Concat(depWarnings.Select(b => $"""<div class="message infobox">{Html(b.Reason)}</div>"""));
+            + string.Concat(depWarnings.Select(b => $"""<div class="message infobox">{ArpaDependencyHtml.LinkPrepararViews(Html(b.Reason), b.ConnectionId)}</div>"""));
         var depsMap = new Dictionary<string, object>(StringComparer.Ordinal);
         foreach (var kv in depWarns)
         {
@@ -1802,6 +1803,11 @@ public sealed class LocalStatusServer : BackgroundService
                 .depbadge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
                 .depbadge.pausa { background: #fef3c7; color: #92400e; }
                 .depbadge.aviso { background: #e2e8f0; color: #475569; }
+                button:disabled { opacity: .7; cursor: not-allowed; }
+                button.busy { cursor: progress; }
+                .spinner { display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -2px; border: 2px solid rgba(255, 255, 255, .45); border-top-color: #ffffff; border-radius: 50%; animation: btnspin .8s linear infinite; }
+                @keyframes btnspin { to { transform: rotate(360deg); } }
+                @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
                 select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; }
                 #synclog { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; margin: 10px 0 0; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
                 #synclog .warn { color: #fbbf24; }
@@ -1927,7 +1933,7 @@ public sealed class LocalStatusServer : BackgroundService
 
                     <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap">
                       <button type="button" onclick="save()">Salvar</button>
-                      <button type="button" class="secondary" onclick="act('test')">Testar conexao</button>
+                      <button type="button" class="secondary" data-act onclick="act('test', this)">Testar conexao</button>
                       <button type="button" class="secondary" onclick="resetForm()">Limpar</button>
                     </div>
 
@@ -1940,14 +1946,14 @@ public sealed class LocalStatusServer : BackgroundService
                         <div><label for="f_dbapass">Senha DBA <span class="muted">(em branco = sem senha)</span></label><input type="password" id="f_dbapass" name="dba_password" autocomplete="off" placeholder="(em branco se trust/peer)"></div>
                       </div>
                       <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap">
-                        <button type="button" class="secondary" onclick="act('prepare-views')">Preparar views sync_export</button>
+                        <button type="button" class="secondary" data-act onclick="act('prepare-views', this)">Preparar views sync_export</button>
                       </div>
                       <label class="muted" style="display:block; margin-top:6px"><input type="checkbox" id="f_force_views" name="force_views"> Forcar mesmo com o ERP desatualizado (nao recomendado: o ERP antigo grava os codigos do Arpa como cadastro novo)</label>
                       <div class="row2" style="margin-top:12px">
                         <div><label for="f_newrole">Novo usuario read-only</label><input type="text" id="f_newrole" name="new_role" autocomplete="off" placeholder="ararasuite_sync_ro"></div>
                         <div><label for="f_newrolepass">Senha do novo usuario</label><input type="password" id="f_newrolepass" name="new_role_password" autocomplete="off"></div>
                       </div>
-                      <div style="margin-top:10px"><button type="button" class="secondary" onclick="act('create-user')">Criar usuario read-only</button></div>
+                      <div style="margin-top:10px"><button type="button" class="secondary" data-act onclick="act('create-user', this)">Criar usuario read-only</button></div>
                     </details>
                   </form>
                   <div id="status"></div>
@@ -2499,12 +2505,33 @@ public sealed class LocalStatusServer : BackgroundService
                     .then(function(j){ if(j.ok){ location.href = '/config/arpa?msg=' + encodeURIComponent(j.message || 'Conexao salva.'); } else { setStatus(j.message || 'Falha ao salvar.', false); } })
                     .catch(function(e){ setStatus(String(e), false); });
                 }
-                function act(a){
-                  setStatus('Executando ' + a + '...', true);
+                // Uma acao por vez: o botao clicado fica inativo com spinner e os outros
+                // botoes de acao (Testar, Preparar views, Criar usuario) travados ate a
+                // resposta - evita clique duplo no meio do Preparar views. O servidor
+                // tambem recusa um segundo Preparar views simultaneo.
+                var ACT_LABELS = { 'prepare-views': 'Preparando views...', 'test': 'Testando...', 'create-user': 'Criando usuario...' };
+                var actRunning = false;
+                function act(a, btn){
+                  if(actRunning) return;
+                  actRunning = true;
+                  var botoes = document.querySelectorAll('button[data-act]');
+                  Array.prototype.forEach.call(botoes, function(b){ b.disabled = true; });
+                  var original = btn ? btn.innerHTML : null;
+                  if(btn){
+                    btn.classList.add('busy');
+                    btn.setAttribute('aria-busy', 'true');
+                    btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + (ACT_LABELS[a] || 'Executando...');
+                  }
+                  setStatus(a === 'prepare-views' ? 'Preparando as views no banco Arpa... aguarde, pode levar alguns minutos.' : 'Executando ' + a + '...', true);
                   fetch('/config/arpa/' + a, { method:'POST', body: fd() })
                     .then(function(r){ return r.json(); })
                     .then(function(j){ setStatus(j.message || (j.ok ? 'OK.' : 'Falha.'), !!j.ok); })
-                    .catch(function(e){ setStatus(String(e), false); });
+                    .catch(function(e){ setStatus(String(e), false); })
+                    .then(function(){
+                      actRunning = false;
+                      Array.prototype.forEach.call(botoes, function(b){ b.disabled = false; });
+                      if(btn){ btn.classList.remove('busy'); btn.removeAttribute('aria-busy'); btn.innerHTML = original; }
+                    });
                 }
                 function postAct(a, id){
                   var b = new URLSearchParams(); b.set('id', id);
@@ -2515,6 +2542,21 @@ public sealed class LocalStatusServer : BackgroundService
                 }
                 loadLojas();
                 initSyncLogPanel();
+                // Link "Preparar views" dos avisos (topo, esta pagina, bandeja):
+                // /config/arpa?preparar=<id>#dbadetails abre a conexao no bloco DBA.
+                (function(){
+                  var m = /[?&]preparar=([^&#]+)/.exec(location.search);
+                  if(!m) return;
+                  var id = decodeURIComponent(m[1]);
+                  if(!CONNS[id]) return;
+                  editConn(id);
+                  var det = document.getElementById('dbadetails');
+                  det.open = true;
+                  setTimeout(function(){
+                    det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    var u = document.getElementById('f_dbauser'); if(u) u.focus({ preventScroll: true });
+                  }, 250);
+                })();
               </script>
             </body>
             </html>
@@ -2795,51 +2837,70 @@ public sealed class LocalStatusServer : BackgroundService
 
             case "prepare-views":
             {
-                // Senha DBA vazia e permitida (Arpa com trust/peer para o
-                // postgres, comum em instalacoes locais).
-                if (string.IsNullOrWhiteSpace(V("dba_user")))
-                {
-                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe o usuario DBA." }, cancellationToken);
-                    return;
-                }
-
-                // Passa o usuario runtime da conexao (campo Usuario) para o
-                // PrepareViews ja conceder leitura das views a ele.
-                var runtimeUser = V("username");
-                if (string.IsNullOrWhiteSpace(runtimeUser) && !string.IsNullOrWhiteSpace(V("id")))
-                {
-                    runtimeUser = _arpaConnectionsStore.Get(V("id"))?.Username;
-                }
-
-                // Protecao agente novo + ERP antigo (contrato 2.19.0): as views novas
-                // mandam o codigo do Arpa em especie/condicao/conta. O ERP antigo
-                // grava isso como cadastro novo pelo nome ("17", "26"...) e suja
-                // Especies/Condicoes. So aplica quando o ERP declara aceitar o
-                // catalogo; "forcar" existe para quem sabe o que esta fazendo.
-                if (!await _erpCompatibility.SupportsArpaVinculosAsync(cancellationToken) && !B("force_views"))
+                // Um Preparar views por vez (clique duplo, outra aba): o script recria
+                // as views e da GRANT - duas execucoes simultaneas disputam os mesmos objetos.
+                if (!await PrepareViewsLock.WaitAsync(0, cancellationToken))
                 {
                     await WriteJsonAsync(context.Response, HttpStatusCode.OK, new
                     {
                         ok = false,
-                        message = "Views NAO aplicadas: o ERP ainda nao foi atualizado para a versao com os vinculos da "
-                            + "Conexao Arpa (contrato Sync 2.19.0). As views novas mandam o codigo do Arpa em especie, "
-                            + "condicao e conta; o ERP antigo criaria cadastros com esses codigos como nome (\"17\", \"26\"...). "
-                            + "Atualize o ERP primeiro e aguarde um ciclo de heartbeat. Para aplicar mesmo assim, marque "
-                            + "\"Forcar mesmo com o ERP desatualizado\".",
+                        message = "Ja existe um \"Preparar views\" em execucao. Aguarde ele terminar.",
                     }, cancellationToken);
                     return;
                 }
 
-                var result = await _arpaDdlRunner.PrepareViewsAsync(
-                    V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"), runtimeUser, cancellationToken);
-                if (result.Ok)
+                try
                 {
-                    // Reavalia as dependencias ja: o ciclo que comeca agora tira a pausa "Preparar views".
-                    _manualSyncSignal.TrySignal();
-                }
+                    // Senha DBA vazia e permitida (Arpa com trust/peer para o
+                    // postgres, comum em instalacoes locais).
+                    if (string.IsNullOrWhiteSpace(V("dba_user")))
+                    {
+                        await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Informe o usuario DBA." }, cancellationToken);
+                        return;
+                    }
 
-                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
-                return;
+                    // Passa o usuario runtime da conexao (campo Usuario) para o
+                    // PrepareViews ja conceder leitura das views a ele.
+                    var runtimeUser = V("username");
+                    if (string.IsNullOrWhiteSpace(runtimeUser) && !string.IsNullOrWhiteSpace(V("id")))
+                    {
+                        runtimeUser = _arpaConnectionsStore.Get(V("id"))?.Username;
+                    }
+
+                    // Protecao agente novo + ERP antigo (contrato 2.19.0): as views novas
+                    // mandam o codigo do Arpa em especie/condicao/conta. O ERP antigo
+                    // grava isso como cadastro novo pelo nome ("17", "26"...) e suja
+                    // Especies/Condicoes. So aplica quando o ERP declara aceitar o
+                    // catalogo; "forcar" existe para quem sabe o que esta fazendo.
+                    if (!await _erpCompatibility.SupportsArpaVinculosAsync(cancellationToken) && !B("force_views"))
+                    {
+                        await WriteJsonAsync(context.Response, HttpStatusCode.OK, new
+                        {
+                            ok = false,
+                            message = "Views NAO aplicadas: o ERP ainda nao foi atualizado para a versao com os vinculos da "
+                                + "Conexao Arpa (contrato Sync 2.19.0). As views novas mandam o codigo do Arpa em especie, "
+                                + "condicao e conta; o ERP antigo criaria cadastros com esses codigos como nome (\"17\", \"26\"...). "
+                                + "Atualize o ERP primeiro e aguarde um ciclo de heartbeat. Para aplicar mesmo assim, marque "
+                                + "\"Forcar mesmo com o ERP desatualizado\".",
+                        }, cancellationToken);
+                        return;
+                    }
+
+                    var result = await _arpaDdlRunner.PrepareViewsAsync(
+                        V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"), runtimeUser, cancellationToken);
+                    if (result.Ok)
+                    {
+                        // Reavalia as dependencias ja: o ciclo que comeca agora tira a pausa "Preparar views".
+                        _manualSyncSignal.TrySignal();
+                    }
+
+                    await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
+                    return;
+                }
+                finally
+                {
+                    PrepareViewsLock.Release();
+                }
             }
 
             case "full-resync":
@@ -3359,7 +3420,22 @@ public sealed class LocalStatusServer : BackgroundService
         return $"""{Html(before)}<a href="{Html(path)}">{Html(path)}</a>{Html(after)}""";
     }
 
-    private static string BuildConfigWarningsHtml(IReadOnlyList<string> warnings)
+    /// <summary>Motivo (texto do aviso) -> conexao, para os avisos de dependencia virarem link.</summary>
+    private IReadOnlyDictionary<string, string> DependencyReasonToConnection()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var b in _arpaConnectionBlocks.WarningsSnapshot.Concat(
+            _arpaConnectionBlocks.Snapshot.Where(b => b.Kinds.HasFlag(ArpaBlockKind.Dependencias))))
+        {
+            map[b.Reason] = b.ConnectionId;
+        }
+
+        return map;
+    }
+
+    private static string BuildConfigWarningsHtml(
+        IReadOnlyList<string> warnings,
+        IReadOnlyDictionary<string, string>? dependencyReasonToConnection = null)
     {
         if (warnings.Count == 0)
         {
@@ -3369,7 +3445,14 @@ public sealed class LocalStatusServer : BackgroundService
         var items = new StringBuilder();
         foreach (var warning in warnings)
         {
-            items.AppendLine($"<li>{LinkifyLocalDbPath(warning)}</li>");
+            var html = LinkifyLocalDbPath(warning);
+            if (dependencyReasonToConnection is not null
+                && dependencyReasonToConnection.TryGetValue(warning, out var connectionId))
+            {
+                html = ArpaDependencyHtml.LinkPrepararViews(html, connectionId);
+            }
+
+            items.AppendLine($"<li>{html}</li>");
         }
 
         return $$"""

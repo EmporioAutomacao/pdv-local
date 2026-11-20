@@ -582,7 +582,8 @@ e so aviso.
 Passos:
 
 1. Se o aviso pedir, atualize o ERP primeiro.
-2. Em `http://127.0.0.1:47891/config/arpa`, clique em **Editar** na conexao. O
+2. Clique no link **"Preparar views"** do aviso (dashboard ou balao da bandeja),
+   ou em `http://127.0.0.1:47891/config/arpa` clique em **Editar** na conexao. O
    bloco "Preparar banco Arpa" abre com o motivo.
 3. Informe o usuario DBA (senha em branco se trust/peer) e clique em **Preparar
    views sync_export**. **Nao** marque "Forcar".

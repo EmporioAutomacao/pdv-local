@@ -316,6 +316,19 @@ Onde aparece:
   motivo e "Preparar views";
 - log do ciclo: "Conexao "X": PAUSADA - ...".
 
+**Link direto:** nos avisos (topo do dashboard, caixas desta pagina, inclusive a
+do ERP antigo) o texto **"Preparar views"** e um link para
+`/config/arpa?preparar=<id da conexao>#dbadetails`. Ao abrir, a pagina entra na
+edicao da conexao, abre o bloco "Preparar banco Arpa", rola ate ele e poe o cursor
+no Usuario DBA. Na bandeja, o item "Acao necessaria" e o **clique no balao** de
+"sincronizacao pausada" abrem o mesmo endereco.
+
+**Botao ocupado:** ao clicar em "Preparar views sync_export" (ou "Testar conexao" /
+"Criar usuario read-only"), o botao fica inativo com um indicador girando
+("Preparando views..."). Os outros botoes de acao tambem ficam travados ate a
+resposta. O servidor recusa um segundo "Preparar views" simultaneo, por exemplo
+vindo de outra aba, com "Ja existe um Preparar views em execucao".
+
 Heartbeat, envio ao ERP do que ja esta na fila e PDV **nao** param. Depois de um
 "Preparar views" bem-sucedido o agente comeca um ciclo novo na hora, e a pausa
 sai.

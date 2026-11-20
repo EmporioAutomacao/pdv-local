@@ -21,6 +21,12 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _arpaBlockedItem;
     private DateTimeOffset _arpaBlockedNotifiedAtUtc = DateTimeOffset.MinValue;
     private string? _arpaBlockedNotifiedKey;
+    // Destino do item "Acao necessaria" e do clique no balao de conexao pausada: com
+    // "Preparar views" pendente, abre a conexao direto no bloco "Preparar banco Arpa".
+    private string _arpaBlockedUrl = ArpaConfigUrl;
+    private string? _balloonClickUrl;
+    private DateTimeOffset _balloonClickUrlSetAtUtc = DateTimeOffset.MinValue;
+    private const string ArpaConfigUrl = "http://127.0.0.1:47891/config/arpa";
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private AgentStatusResponse? _lastStatus;
 
@@ -45,7 +51,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             Visible = false,
             Font = new Font(Control.DefaultFont, FontStyle.Bold),
         };
-        _arpaBlockedItem = new ToolStripMenuItem("Acao necessaria: tabela de preco...", null, (_, _) => OpenUrl("http://127.0.0.1:47891/config/arpa"))
+        _arpaBlockedItem = new ToolStripMenuItem("Acao necessaria: tabela de preco...", null, (_, _) => OpenUrl(_arpaBlockedUrl))
         {
             Visible = false,
             Font = new Font(Control.DefaultFont, FontStyle.Bold),
@@ -59,6 +65,19 @@ public sealed class TrayApplicationContext : ApplicationContext
             Text = "AraraSuite Sync",
             Visible = true,
             ContextMenuStrip = new ContextMenuStrip()
+        };
+
+        // So o balao de conexao pausada tem destino; os demais (status, erros) nao
+        // fazem nada ao clicar, como antes. Janela curta evita abrir a URL de um
+        // balao antigo ao clicar num balao posterior.
+        _notifyIcon.BalloonTipClicked += (_, _) =>
+        {
+            if (_balloonClickUrl is not null && DateTimeOffset.UtcNow - _balloonClickUrlSetAtUtc < TimeSpan.FromSeconds(20))
+            {
+                OpenUrl(_balloonClickUrl);
+            }
+
+            _balloonClickUrl = null;
         };
 
         _notifyIcon.ContextMenuStrip.Items.AddRange(
@@ -445,6 +464,12 @@ public sealed class TrayApplicationContext : ApplicationContext
             ? $"Acao necessaria: conexao \"{blocked[0].ConnectionName}\" pausada..."
             : $"Acao necessaria: {blocked.Count} conexoes Arpa pausadas...";
 
+        // Conexao que pede "Preparar views" vai direto ao bloco DBA dela.
+        var prepararViews = blocked.FirstOrDefault(b => b.Reason.Contains("Preparar views", StringComparison.Ordinal));
+        _arpaBlockedUrl = prepararViews is null
+            ? ArpaConfigUrl
+            : $"{ArpaConfigUrl}?preparar={Uri.EscapeDataString(prepararViews.ConnectionId)}#dbadetails";
+
         var key = string.Join("|", blocked.Select(b => b.ConnectionId + ":" + b.Reason));
         var now = DateTimeOffset.UtcNow;
         if (key == _arpaBlockedNotifiedKey && now - _arpaBlockedNotifiedAtUtc < ArpaBlockedRenotifyInterval)
@@ -454,7 +479,14 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _arpaBlockedNotifiedKey = key;
         _arpaBlockedNotifiedAtUtc = now;
-        _notifyIcon.ShowBalloonTip(10000, "AraraSuite Sync - sincronizacao pausada", blocked[0].Reason, ToolTipIcon.Warning);
+        _balloonClickUrl = _arpaBlockedUrl;
+        _balloonClickUrlSetAtUtc = now;
+        var balloonReason = (prepararViews ?? blocked[0]).Reason;
+        _notifyIcon.ShowBalloonTip(
+            10000,
+            "AraraSuite Sync - sincronizacao pausada",
+            prepararViews is null ? balloonReason : balloonReason + " (clique para abrir)",
+            ToolTipIcon.Warning);
     }
 
     private static readonly TimeSpan ArpaBlockedRenotifyInterval = TimeSpan.FromMinutes(30);

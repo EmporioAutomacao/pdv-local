@@ -41,6 +41,37 @@ public sealed class ArpaDependencyHtmlTests
     }
 
     [Fact]
+    public void Texto_Preparar_views_vira_link_para_o_bloco_DBA_da_conexao()
+    {
+        var html = ArpaDependencyHtml.LinkPrepararViews("precisa de &quot;Preparar views&quot;: desatualizadas", "e869c02b");
+        Assert.Contains("<a href=\"/config/arpa?preparar=e869c02b#dbadetails\"", html);
+        Assert.Contains(">Preparar views</a>", html);
+        Assert.StartsWith("precisa de &quot;", html);
+        Assert.EndsWith("&quot;: desatualizadas", html);
+    }
+
+    [Fact]
+    public void So_a_primeira_ocorrencia_vira_link()
+    {
+        var html = ArpaDependencyHtml.LinkPrepararViews("Preparar views ... use Preparar views", "a");
+        Assert.Equal(1, html.Split("<a ").Length - 1);
+    }
+
+    [Fact]
+    public void Motivo_sem_Preparar_views_fica_igual()
+    {
+        Assert.Equal("Corrigir outbox", ArpaDependencyHtml.LinkPrepararViews("Corrigir outbox", "a"));
+    }
+
+    [Fact]
+    public void Id_da_conexao_e_escapado_no_link()
+    {
+        Assert.Equal("/config/arpa?preparar=a%20b%26c#dbadetails", ArpaDependencyHtml.PrepararViewsPath("a b&c"));
+        var html = ArpaDependencyHtml.LinkPrepararViews("Preparar views", "x\"><script>");
+        Assert.DoesNotContain("<script>", html);
+    }
+
+    [Fact]
     public void Motivo_e_escapado_no_title()
     {
         var html = ArpaDependencyHtml.Badge("a",

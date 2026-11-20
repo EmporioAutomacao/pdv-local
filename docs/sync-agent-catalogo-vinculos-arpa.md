@@ -88,7 +88,7 @@ hoje (consultado só com leitura em 2026-11-20).
 ## Implantação
 
 1. ERP 0.0.164 publicado e clientes atualizados.
-2. SyncAgent **1.6.54** ou mais novo, a primeira versão com a pausa por views desatualizadas.
+2. SyncAgent **1.6.54** ou mais novo, a primeira versão com a pausa por views desatualizadas. A 1.6.55 acrescenta o link "Preparar views" nos avisos e o botão ocupado.
    A 1.6.53 (`+dcb8a04`) tem o catálogo e a proteção contra ERP antigo, mas não tem a pausa.
 3. Em cada instalação: "Preparar views", com credencial DBA, e depois "Corrigir
    outbox_events_entity_type_check" (Manutenção do banco local).

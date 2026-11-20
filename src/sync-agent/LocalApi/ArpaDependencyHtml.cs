@@ -13,6 +13,30 @@ public static class ArpaDependencyHtml
     public static bool PrecisaPrepararViews(string reason) =>
         reason.Contains("Preparar views", StringComparison.Ordinal);
 
+    /// <summary>Caminho que abre a conexao em Configuracoes &gt; Arpa com o bloco "Preparar banco Arpa" aberto.</summary>
+    public static string PrepararViewsPath(string connectionId) =>
+        $"/config/arpa?preparar={Uri.EscapeDataString(connectionId)}#dbadetails";
+
+    /// <summary>
+    /// Recebe o motivo JA escapado em HTML e transforma a primeira ocorrencia do texto
+    /// "Preparar views" num link para o bloco DBA da conexao. Sem a ocorrencia,
+    /// devolve o texto como veio.
+    /// </summary>
+    public static string LinkPrepararViews(string encodedReason, string connectionId)
+    {
+        const string texto = "Preparar views";
+        var i = encodedReason.IndexOf(texto, StringComparison.Ordinal);
+        if (i < 0)
+        {
+            return encodedReason;
+        }
+
+        var href = WebUtility.HtmlEncode(PrepararViewsPath(connectionId));
+        return encodedReason[..i]
+            + $"<a href=\"{href}\" title=\"Abrir Preparar banco Arpa desta conexao\">{texto}</a>"
+            + encodedReason[(i + texto.Length)..];
+    }
+
     /// <summary>Selo ao lado do nome da conexao na lista de Configuracoes &gt; Arpa.</summary>
     public static string Badge(
         string connectionId,
