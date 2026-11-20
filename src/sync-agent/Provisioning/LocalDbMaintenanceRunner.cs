@@ -172,12 +172,7 @@ public sealed class LocalDbMaintenanceRunner
         }
     }
 
-    private static string Describe(Exception ex) => ex switch
-    {
-        PostgresException pg => $"{pg.SqlState}: {pg.MessageText}",
-        NpgsqlException { InnerException: { } inner } => inner.Message,
-        _ => ex.Message,
-    };
+    private static string Describe(Exception ex) => PostgresErrorText.Describe(ex);
 }
 
 public sealed record LocalDbMaintenanceResult(bool Ok, string Message);

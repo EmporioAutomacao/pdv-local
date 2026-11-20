@@ -29,16 +29,16 @@ public static class AgentVersion
 
     /// <summary>
     /// True se <paramref name="candidate"/> for igual ou anterior a
-    /// <paramref name="current"/>. Se qualquer um dos dois nao for parseavel
-    /// (ex.: "0.1.0-dev", instalacao recem-criada em dev, ou instalacao sem
-    /// versao conhecida), retorna false — sem referencia confiavel para
-    /// comparar, nao ha o que bloquear.
+    /// <paramref name="current"/>. Falha fechada: se qualquer um dos dois nao
+    /// for parseavel (ex.: "0.1.0-dev", instalacao recem-criada em dev, ou
+    /// instalacao sem versao conhecida), retorna true — sem referencia
+    /// confiavel para comparar, nada e tratado como atualizacao.
     /// </summary>
     public static bool IsDowngradeOrSame(string? current, string? candidate)
     {
         if (!TryParse(current, out var currentVersion) || !TryParse(candidate, out var candidateVersion))
         {
-            return false;
+            return true;
         }
 
         return candidateVersion! <= currentVersion!;

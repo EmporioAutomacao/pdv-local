@@ -259,6 +259,34 @@ trap {
 Write-ProgressStatus -StepNumber 1 -StepName 'starting' -Message "Iniciando auto-update para versao $Version."
 Write-Log "Pacote: $ZipPath"
 
+# Trava anti-downgrade: a instalada e o maior numero entre o VERSION e o SyncAgent.exe, porque
+# qualquer um dos dois pode atrasar. Sem como comparar, recusa. O throw cai no trap acima, que
+# religa o servico; nada foi tocado ainda, entao nao ha o que restaurar.
+function ConvertTo-VersionOrNull {
+    param([string]$Raw)
+    $parsed = $null
+    $number = (("$Raw" -split '\+')[0]).Trim().TrimStart('v', 'V')
+    if ([version]::TryParse($number, [ref]$parsed)) { return $parsed }
+    return $null
+}
+$targetNumber = ConvertTo-VersionOrNull $Version
+$installedNumbers = @()
+$installedVersionFile = Join-Path $InstallRoot 'Sync\Agent\VERSION'
+if (Test-Path -LiteralPath $installedVersionFile) {
+    $installedNumbers += ConvertTo-VersionOrNull (Get-Content -LiteralPath $installedVersionFile -Raw)
+}
+$installedExe = Join-Path $InstallRoot 'Sync\Agent\SyncAgent.exe'
+if (Test-Path -LiteralPath $installedExe) {
+    $installedNumbers += ConvertTo-VersionOrNull (Get-Item -LiteralPath $installedExe).VersionInfo.ProductVersion
+}
+$installedNumber = $installedNumbers | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
+if (-not $targetNumber -or -not $installedNumber) {
+    throw "Downgrade recusado: nao foi possivel comparar a versao instalada ('$installedNumber') com a '$Version'."
+}
+if ($targetNumber -lt $installedNumber) {
+    throw "Downgrade recusado: versao instalada $installedNumber, pacote $Version."
+}
+
 # --- 2. Aguardar servico parar (o SyncAgent para a si mesmo apos lancar este script) ---
 Write-ProgressStatus -StepNumber 2 -StepName 'waiting_service_stop' -Message "Aguardando servico '$ServiceName' parar..."
 if ($StopService) {

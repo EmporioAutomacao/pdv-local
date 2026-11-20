@@ -22,6 +22,7 @@ public sealed class ArpaCollector
     private readonly ArpaSyncRunLog _runLog;
     private readonly ArpaLojaListClient _lojaListClient;
     private readonly ArpaConnectionBlocks _connectionBlocks;
+    private readonly SyncAgent.Heartbeat.ErpCompatibility _erpCompatibility;
 
     // A lista de tabelas de preco muda raramente; 5 min evita uma chamada ao ERP
     // por ciclo e ainda libera a conexao logo depois de o operador escolher.
@@ -35,8 +36,10 @@ public sealed class ArpaCollector
         ArpaPayloadNormalizerRegistry normalizers,
         ArpaSyncRunLog runLog,
         ArpaLojaListClient lojaListClient,
-        ArpaConnectionBlocks connectionBlocks)
+        ArpaConnectionBlocks connectionBlocks,
+        SyncAgent.Heartbeat.ErpCompatibility erpCompatibility)
     {
+        _erpCompatibility = erpCompatibility;
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
         _effectiveCollectorConfigProvider = effectiveCollectorConfigProvider;
@@ -79,13 +82,14 @@ public sealed class ArpaCollector
         "estoque" => "Estoque",
         "venda" => "Vendas",
         "financeiro" => "Financeiro",
+        "catalogo" => "Cadastros (especies/condicoes/contas)",
         _ => entityType,
     };
 
     private static string Summarize(Exception ex) => ex switch
     {
         NpgsqlException { InnerException: { } inner } => inner.Message,
-        Npgsql.PostgresException pg => $"{pg.SqlState}: {pg.MessageText}",
+        Npgsql.PostgresException pg => PostgresErrorText.Describe(pg),
         _ => ex.Message,
     };
 
@@ -149,6 +153,15 @@ public sealed class ArpaCollector
                     if (entityTypeFilter is not null && !entityTypeFilter.Contains(entity.EntityType))
                     {
                         _runLog.Add("info", $"  {EntityLabel(entity.EntityType)}: pulado (fora da selecao desta sincronizacao manual).");
+                        continue;
+                    }
+
+                    // Agente novo + ERP antigo: tipo novo so e coletado quando o ERP
+                    // declara que aceita (heartbeat accepted_entity_types, contrato
+                    // 2.19.0) - senao o ERP rejeitaria e viraria dead letter.
+                    if (!await _erpCompatibility.AcceptsAsync(entity.EntityType, cancellationToken))
+                    {
+                        _runLog.Add("info", $"  {EntityLabel(entity.EntityType)}: aguardando o ERP ser atualizado (contrato Sync 2.19.0) - nao coletado.");
                         continue;
                     }
 
@@ -227,7 +240,10 @@ public sealed class ArpaCollector
 
             // Estoque, venda e compra sao por Loja: injeta o loja_codigo da
             // conexao (nome da Loja no ERP) quando a view sync_export nao o traz.
-            if ((entity.EntityType == "estoque" || entity.EntityType == "venda" || entity.EntityType == "compra")
+            // O catalogo tambem leva o loja_codigo: o ERP usa para achar a Conexao
+            // Arpa certa quando o agente tem mais de uma conexao.
+            if ((entity.EntityType == "estoque" || entity.EntityType == "venda" || entity.EntityType == "compra"
+                    || entity.EntityType == "catalogo")
                 && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
                 && payload["loja_codigo"] is null)
             {

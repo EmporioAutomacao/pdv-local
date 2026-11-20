@@ -25,6 +25,7 @@ public sealed class ErpHeartbeatClient
     private readonly LocalSyncStore _localStore;
     private readonly ArpaConnectionsStore _arpaConnectionsStore;
     private readonly ErpCredentialProvider _credentialProvider;
+    private readonly ErpCompatibility _erpCompatibility;
 
     public ErpHeartbeatClient(
         ILogger<ErpHeartbeatClient> logger,
@@ -33,8 +34,10 @@ public sealed class ErpHeartbeatClient
         IHttpClientFactory httpClientFactory,
         LocalSyncStore localStore,
         ArpaConnectionsStore arpaConnectionsStore,
-        ErpCredentialProvider credentialProvider)
+        ErpCredentialProvider credentialProvider,
+        ErpCompatibility erpCompatibility)
     {
+        _erpCompatibility = erpCompatibility;
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
         _heartbeatOptions = heartbeatOptions;
@@ -150,6 +153,9 @@ public sealed class ErpHeartbeatClient
                 heartbeatResponse.NextPollSeconds,
                 heartbeatResponse.PendingUpdate?.Version);
 
+            // Contrato 2.19.0: guarda o que o ERP aceita (ERP antigo nao manda -> null).
+            await _erpCompatibility.RecordHeartbeatAsync(heartbeatResponse.AcceptedEntityTypes, cancellationToken);
+
             return new HeartbeatSummary(
                 true, true, heartbeatResponse.NextPollSeconds, null,
                 heartbeatResponse.PendingUpdate, heartbeatResponse.PendingResyncs,
@@ -225,7 +231,8 @@ public sealed record HeartbeatResponse(
     [property: JsonPropertyName("next_poll_seconds")] int? NextPollSeconds,
     [property: JsonPropertyName("pending_update")] PendingUpdateCommand? PendingUpdate = null,
     [property: JsonPropertyName("pending_resyncs")] IReadOnlyList<PendingResyncCommand>? PendingResyncs = null,
-    [property: JsonPropertyName("license")] HeartbeatLicense? License = null);
+    [property: JsonPropertyName("license")] HeartbeatLicense? License = null,
+    [property: JsonPropertyName("accepted_entity_types")] IReadOnlyList<string>? AcceptedEntityTypes = null);
 
 public sealed record HeartbeatLicense(
     [property: JsonPropertyName("status")] string Status,

@@ -328,7 +328,13 @@ DECLARE
     fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
 
     v_t text; v_ord text; v_date text; v_cust text; v_status text; v_cancel text;
-    v_disc text; v_especie text; v_vend text;
+    v_disc text; v_especie text; v_vend text; v_cond text;
+    -- vinculos da Conexao Arpa no ERP (condicao, especie e conta bancaria da baixa).
+    -- Estrutura real do Arpa (Anapolis): cabecalho_ordem_servico.condicao_pgto -> vencimentos,
+    -- especie da baixa em especie_parcela / apagar_especie, conta da baixa em
+    -- lctbancarios (receber: parcela; pagar: origem=4 + item_origem) ou caixa (receber).
+    t_venc text; t_esp text; t_esp_parc text; t_esp_pag text; t_lct text; t_cxa text; t_cta text;
+    esp_expr text; conta_expr text; conta_nome_expr text;
     it_t text; it_ord text; it_prod text; it_qty text; it_unit text; it_disc text;
     cl_t text; cl_code text; cl_name text; cl_doc text;
     fo_t text; fo_code text; fo_name text;
@@ -399,6 +405,9 @@ BEGIN
                 v_disc    := sync_export._pick(v_t, ARRAY['desconto','desconto_total','valor_desconto','vlr_desconto']);
                 v_especie := sync_export._pick(v_t, ARRAY['especie','forma_pagamento','cod_especie']);
                 v_vend    := sync_export._pick(v_t, ARRAY['vendedor','cod_vendedor','id_vendedor']);
+                v_cond    := sync_export._pick(v_t, ARRAY['condicao_pgto','condicao_pagamento','cond_pagamento','cod_condicao']);
+                t_venc    := sync_export._first_table(ARRAY['vencimentos']);
+                t_esp     := sync_export._first_table(ARRAY['especies']);
 
                 cl_t := sync_export._first_table(ARRAY['clientes','cliente']);
                 cli_join := ''; cli_nome_expr := 'NULL'; cli_doc_expr := 'NULL';
@@ -438,6 +447,15 @@ BEGIN
                 IF v_vend    IS NOT NULL THEN pairs := pairs || format(', ''vendedor_codigo'', v.%I::text', v_vend); END IF;
                 IF v_disc    IS NOT NULL THEN pairs := pairs || format(', ''desconto_total'', v.%I', v_disc); END IF;
                 IF v_especie IS NOT NULL THEN pairs := pairs || format(', ''especie_pagamento'', v.%I::text', v_especie); END IF;
+                IF v_especie IS NOT NULL AND t_esp IS NOT NULL THEN
+                    pairs := pairs || format(', ''especie_descricao'', (SELECT es.descricao::text FROM public.%I es WHERE CAST(es.codigo AS TEXT) = CAST(v.%I AS TEXT))', t_esp, v_especie);
+                END IF;
+                IF v_cond IS NOT NULL THEN
+                    pairs := pairs || format(', ''condicao_pagamento'', v.%I::text', v_cond);
+                    IF t_venc IS NOT NULL THEN
+                        pairs := pairs || format(', ''condicao_descricao'', (SELECT vc.descricao::text FROM public.%I vc WHERE CAST(vc.codigo AS TEXT) = CAST(v.%I AS TEXT))', t_venc, v_cond);
+                    END IF;
+                END IF;
                 pairs := pairs || format(', ''cliente_documento'', %s, ''cliente_nome'', %s', cli_doc_expr, cli_nome_expr);
                 pairs := pairs || format(', ''itens'', %s', itens_expr);
 
@@ -600,6 +618,37 @@ BEGIN
                     pairs := pairs || format(', ''status'', %s', q_status_synth);
                 END IF;
                 IF r_doc    IS NOT NULL THEN pairs := pairs || format(', ''documento'', r.%I::text', r_doc); END IF;
+                t_esp      := sync_export._first_table(ARRAY['especies']);
+                t_esp_parc := sync_export._first_table(ARRAY['especie_parcela']);
+                t_lct      := sync_export._first_table(ARRAY['lctbancarios']);
+                t_cxa      := sync_export._first_table(ARRAY['caixa']);
+                t_cta      := sync_export._first_table(ARRAY['ctabancarias']);
+                -- especie da baixa (a de maior valor quando a baixa usou mais de uma)
+                IF r_forma IS NULL AND t_esp_parc IS NOT NULL THEN
+                    esp_expr := format('(SELECT ep.especie FROM public.%I ep WHERE CAST(ep.parcela AS TEXT) = CAST(r.%I AS TEXT) ORDER BY ep.valor DESC NULLS LAST, ep.codigo LIMIT 1)', t_esp_parc, r_code);
+                    pairs := pairs || format(', ''especie_pagamento'', %s::text', esp_expr);
+                    IF t_esp IS NOT NULL THEN
+                        pairs := pairs || format(', ''especie_descricao'', (SELECT es.descricao::text FROM public.%I es WHERE es.codigo = %s)', t_esp, esp_expr);
+                    END IF;
+                END IF;
+                -- conta da baixa: lancamento bancario da parcela; sem ele, baixa no caixa do Arpa
+                conta_expr := NULL; conta_nome_expr := NULL;
+                IF t_lct IS NOT NULL THEN
+                    conta_expr := format('(SELECT l.ctabancaria::text FROM public.%I l WHERE CAST(l.parcela AS TEXT) = CAST(r.%I AS TEXT) ORDER BY l.codigo DESC LIMIT 1)', t_lct, r_code);
+                    IF t_cta IS NOT NULL THEN
+                        conta_nome_expr := format('(SELECT ct.nome::text FROM public.%I ct WHERE ct.conta::text = %s)', t_cta, conta_expr);
+                    END IF;
+                END IF;
+                IF t_cxa IS NOT NULL AND sync_export._pick(t_cxa, ARRAY['parcela']) IS NOT NULL THEN
+                    conta_expr := format('COALESCE(%s, CASE WHEN EXISTS (SELECT 1 FROM public.%I cx WHERE CAST(cx.parcela AS TEXT) = CAST(r.%I AS TEXT)) THEN ''CAIXA'' END)',
+                        COALESCE(conta_expr, 'NULL'), t_cxa, r_code);
+                    conta_nome_expr := format('COALESCE(%s, CASE WHEN %s = ''CAIXA'' THEN ''Caixa do Arpa'' END)',
+                        COALESCE(conta_nome_expr, 'NULL'), conta_expr);
+                END IF;
+                IF conta_expr IS NOT NULL THEN
+                    pairs := pairs || format(', ''conta_bancaria'', %s', conta_expr);
+                    IF conta_nome_expr IS NOT NULL THEN pairs := pairs || format(', ''conta_bancaria_nome'', %s', conta_nome_expr); END IF;
+                END IF;
 
                 occ_expr := format('COALESCE(%s, %s, %s',
                     CASE WHEN r_datapg IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_datapg) ELSE 'NULL' END,
@@ -707,6 +756,25 @@ BEGIN
                 pairs := pairs || format(', ''data_pagamento'', COALESCE(%s, %s)',
                     CASE WHEN p_datapg2 IS NOT NULL THEN format('p.%I', p_datapg2) ELSE 'NULL' END, q_datapg_expr);
                 IF p_emissao2 IS NOT NULL THEN pairs := pairs || format(', ''emissao'', p.%I', p_emissao2); END IF;
+                t_esp     := sync_export._first_table(ARRAY['especies']);
+                t_esp_pag := sync_export._first_table(ARRAY['apagar_especie']);
+                t_lct     := sync_export._first_table(ARRAY['lctbancarios']);
+                t_cta     := sync_export._first_table(ARRAY['ctabancarias']);
+                IF t_esp_pag IS NOT NULL THEN
+                    esp_expr := format('(SELECT ae.especie FROM public.%I ae WHERE CAST(ae.parcela AS TEXT) = CAST(p.%I AS TEXT) ORDER BY ae.valor DESC NULLS LAST, ae.codigo LIMIT 1)', t_esp_pag, p_code2);
+                    pairs := pairs || format(', ''especie_pagamento'', %s::text', esp_expr);
+                    IF t_esp IS NOT NULL THEN
+                        pairs := pairs || format(', ''especie_descricao'', (SELECT es.descricao::text FROM public.%I es WHERE es.codigo = %s)', t_esp, esp_expr);
+                    END IF;
+                END IF;
+                -- conta da baixa a pagar: lancamento bancario origem=4 (item_origem = titulo)
+                IF t_lct IS NOT NULL AND sync_export._pick(t_lct, ARRAY['item_origem']) IS NOT NULL THEN
+                    conta_expr := format('(SELECT l.ctabancaria::text FROM public.%I l WHERE l.origem = 4 AND CAST(l.item_origem AS TEXT) = CAST(p.%I AS TEXT) ORDER BY l.codigo DESC LIMIT 1)', t_lct, p_code2);
+                    pairs := pairs || format(', ''conta_bancaria'', %s', conta_expr);
+                    IF t_cta IS NOT NULL THEN
+                        pairs := pairs || format(', ''conta_bancaria_nome'', (SELECT ct.nome::text FROM public.%I ct WHERE ct.conta::text = %s)', t_cta, conta_expr);
+                    END IF;
+                END IF;
                 IF p_status2  IS NOT NULL THEN
                     pairs := pairs || format(', ''status'', p.%I::text', p_status2);
                 ELSIF q_status_synth IS NOT NULL THEN
@@ -1149,3 +1217,84 @@ BEGIN
   END;
 END;
 $compras$;
+
+-- ---------------------------------------------------------------------------
+-- catalogos (contrato Sync 2.19.0, entity_type=catalogo): cadastro de especies,
+-- condicoes de pagamento (vencimentos) e contas bancarias do Arpa. O ERP usa como
+-- lista de escolha dos vinculos da Conexao Arpa (Especie/Conta/Condicao).
+-- entity_key = '<tipo>:<codigo>'; payload {tipo, codigo, descricao, ativo}.
+-- occurred_at_utc = inicio do dia: o cadastro inteiro e reenviado 1x por dia (item
+-- novo ou renomeado no Arpa chega em ate 1 dia) sem reenviar a cada ciclo.
+-- A conta 'CAIXA' (pseudo) representa a baixa feita no caixa do Arpa (tabela
+-- caixa), mesmo valor que sync_export.financeiro manda em conta_bancaria.
+-- Estrutura levantada no Arpa de Anapolis (somente leitura, 2026-11-20).
+-- ---------------------------------------------------------------------------
+DO $catalogos$
+DECLARE
+    occ    text := 'date_trunc(''day'', now())';
+    partes text[] := ARRAY[]::text[];
+    t text; c_cod text; c_desc text; c_ativo text;
+BEGIN
+  BEGIN
+    t := sync_export._first_table(ARRAY['especies']);
+    IF t IS NOT NULL THEN
+        c_cod  := sync_export._pick(t, ARRAY['codigo','id']);
+        c_desc := sync_export._pick(t, ARRAY['descricao','nome']);
+        IF c_cod IS NOT NULL THEN
+            partes := partes || format(
+                'SELECT (''especie:'' || x.%1$I)::text AS entity_key, %2$s AS occurred_at_utc, '
+                || 'jsonb_build_object(''tipo'', ''especie'', ''codigo'', x.%1$I::text, ''descricao'', %3$s, ''ativo'', true)::text AS payload_json, '
+                || '(''arpa-catalogo-especie-'' || x.%1$I)::text AS trace_id FROM public.%4$I x WHERE x.%1$I IS NOT NULL',
+                c_cod, occ, CASE WHEN c_desc IS NOT NULL THEN format('x.%I::text', c_desc) ELSE 'NULL' END, t);
+        END IF;
+    END IF;
+
+    t := sync_export._first_table(ARRAY['vencimentos']);
+    IF t IS NOT NULL THEN
+        c_cod   := sync_export._pick(t, ARRAY['codigo','id']);
+        c_desc  := sync_export._pick(t, ARRAY['descricao','nome']);
+        c_ativo := sync_export._pick(t, ARRAY['ativo']);
+        IF c_cod IS NOT NULL THEN
+            partes := partes || format(
+                'SELECT (''condicao:'' || x.%1$I)::text, %2$s, '
+                || 'jsonb_build_object(''tipo'', ''condicao'', ''codigo'', x.%1$I::text, ''descricao'', %3$s, ''ativo'', %4$s)::text, '
+                || '(''arpa-catalogo-condicao-'' || x.%1$I)::text FROM public.%5$I x WHERE x.%1$I IS NOT NULL',
+                c_cod, occ, CASE WHEN c_desc IS NOT NULL THEN format('x.%I::text', c_desc) ELSE 'NULL' END,
+                CASE WHEN c_ativo IS NOT NULL THEN format('COALESCE(x.%I, true)', c_ativo) ELSE 'true' END, t);
+        END IF;
+    END IF;
+
+    t := sync_export._first_table(ARRAY['ctabancarias']);
+    IF t IS NOT NULL THEN
+        c_cod   := sync_export._pick(t, ARRAY['conta']);
+        c_desc  := sync_export._pick(t, ARRAY['nome','descricao']);
+        c_ativo := sync_export._pick(t, ARRAY['ativo']);
+        IF c_cod IS NOT NULL THEN
+            partes := partes || format(
+                'SELECT (''conta:'' || x.%1$I)::text, %2$s, '
+                || 'jsonb_build_object(''tipo'', ''conta'', ''codigo'', x.%1$I::text, ''descricao'', %3$s, ''ativo'', %4$s)::text, '
+                || '(''arpa-catalogo-conta-'' || x.%1$I)::text FROM public.%5$I x WHERE x.%1$I IS NOT NULL',
+                c_cod, occ, CASE WHEN c_desc IS NOT NULL THEN format('x.%I::text', c_desc) ELSE 'NULL' END,
+                CASE WHEN c_ativo IS NOT NULL THEN format('COALESCE(x.%I, true)', c_ativo) ELSE 'true' END, t);
+        END IF;
+    END IF;
+
+    IF sync_export._first_table(ARRAY['caixa']) IS NOT NULL
+       AND sync_export._pick('caixa', ARRAY['parcela']) IS NOT NULL THEN
+        partes := partes || format(
+            'SELECT ''conta:CAIXA''::text, %s, '
+            || 'jsonb_build_object(''tipo'', ''conta'', ''codigo'', ''CAIXA'', ''descricao'', ''Caixa do Arpa'', ''ativo'', true)::text, '
+            || '''arpa-catalogo-conta-CAIXA''::text', occ);
+    END IF;
+
+    IF array_length(partes, 1) IS NULL THEN
+        RAISE NOTICE 'sync_export.catalogos pulada (nenhuma tabela de especies/vencimentos/ctabancarias).';
+    ELSE
+        EXECUTE 'CREATE OR REPLACE VIEW sync_export.catalogos AS ' || array_to_string(partes, ' UNION ALL ');
+        RAISE NOTICE 'sync_export.catalogos criada (% fonte(s)).', array_length(partes, 1);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export.catalogos pulada (%).', SQLERRM;
+  END;
+END;
+$catalogos$;

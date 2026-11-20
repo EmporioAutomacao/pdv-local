@@ -59,6 +59,50 @@ public class InstallVersionComparerTests
         Assert.Equal(expected, InstallVersionComparer.Compare(installed, package));
     }
 
+    [Theory]
+    [InlineData("1.6.46", "1.6.45")]
+    [InlineData("1.6.100", "1.6.99")]
+    [InlineData("1.6.40", "1.6.45")] // VERSION atrasado: os binarios instalados sao 1.6.46
+    public void OlderPackageIsRefusedEvenWithAnotherCommit(string installedLabel, string packageLabel)
+    {
+        var installed = new InstallVersionSnapshot(installedLabel, $"1.6.46+{CommitB}");
+        var package = new InstallVersionSnapshot(packageLabel, $"{packageLabel}+{CommitA}");
+
+        var expected = InstallVersionComparer.Compare(installed, package);
+
+        Assert.Equal(InstallComparison.Older, expected);
+    }
+
+    [Fact]
+    public void OlderPackageWithoutCommitIsRefused()
+    {
+        var installed = new InstallVersionSnapshot("1.6.46", "1.6.46");
+        var package = new InstallVersionSnapshot("1.6.45", "1.6.45");
+
+        Assert.Equal(InstallComparison.Older, InstallVersionComparer.Compare(installed, package));
+    }
+
+    [Theory]
+    [InlineData(null, null, "1.6.46", "1.6.46")]
+    [InlineData("1.6.46", "1.6.46", "unknown", "0.1.0-dev")]
+    [InlineData("1.6.46", "1.6.46", null, null)]
+    public void UnknownVersionIsRefused(string? installedLabel, string? installedProduct, string? packageLabel, string? packageProduct)
+    {
+        var installed = new InstallVersionSnapshot(installedLabel, installedProduct);
+        var package = new InstallVersionSnapshot(packageLabel, packageProduct);
+
+        Assert.Equal(InstallComparison.Older, InstallVersionComparer.Compare(installed, package));
+    }
+
+    [Fact]
+    public void SameCommitRepairIsAllowedEvenIfNumbersDisagree()
+    {
+        var installed = new InstallVersionSnapshot("1.6.47", $"1.6.47+{CommitA}");
+        var package = new InstallVersionSnapshot("1.6.46", $"1.6.46+{CommitA}");
+
+        Assert.Equal(InstallComparison.SameBuild, InstallVersionComparer.Compare(installed, package));
+    }
+
     [Fact]
     public void DescribeShowsShortCommit()
     {

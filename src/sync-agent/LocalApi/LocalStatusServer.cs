@@ -65,6 +65,7 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ErpDispatcherSettingsStore _erpDispatcherSettingsStore;
     private readonly ArpaLojaListClient _arpaLojaListClient;
     private readonly ArpaDdlRunner _arpaDdlRunner;
+    private readonly SyncAgent.Heartbeat.ErpCompatibility _erpCompatibility;
     private readonly LocalDbMaintenanceRunner _localDbMaintenanceRunner;
     private readonly LocalSyncStore _localStore;
     private readonly ManualSyncSignal _manualSyncSignal;
@@ -95,6 +96,7 @@ public sealed class LocalStatusServer : BackgroundService
         ErpDispatcherSettingsStore erpDispatcherSettingsStore,
         ArpaLojaListClient arpaLojaListClient,
         ArpaDdlRunner arpaDdlRunner,
+        SyncAgent.Heartbeat.ErpCompatibility erpCompatibility,
         LocalDbMaintenanceRunner localDbMaintenanceRunner,
         LocalSyncStore localStore,
         ManualSyncSignal manualSyncSignal,
@@ -117,6 +119,7 @@ public sealed class LocalStatusServer : BackgroundService
         _erpDispatcherSettingsStore = erpDispatcherSettingsStore;
         _arpaLojaListClient = arpaLojaListClient;
         _arpaDdlRunner = arpaDdlRunner;
+        _erpCompatibility = erpCompatibility;
         _localDbMaintenanceRunner = localDbMaintenanceRunner;
         _localStore = localStore;
         _manualSyncSignal = manualSyncSignal;
@@ -1900,6 +1903,7 @@ public sealed class LocalStatusServer : BackgroundService
                       <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap">
                         <button type="button" class="secondary" onclick="act('prepare-views')">Preparar views sync_export</button>
                       </div>
+                      <label class="muted" style="display:block; margin-top:6px"><input type="checkbox" id="f_force_views" name="force_views"> Forcar mesmo com o ERP desatualizado (nao recomendado: o ERP antigo grava os codigos do Arpa como cadastro novo)</label>
                       <div class="row2" style="margin-top:12px">
                         <div><label for="f_newrole">Novo usuario read-only</label><input type="text" id="f_newrole" name="new_role" autocomplete="off" placeholder="ararasuite_sync_ro"></div>
                         <div><label for="f_newrolepass">Senha do novo usuario</label><input type="password" id="f_newrolepass" name="new_role_password" autocomplete="off"></div>
@@ -1946,6 +1950,8 @@ public sealed class LocalStatusServer : BackgroundService
                 function norm(s){ return (s || '').trim().toLowerCase(); }
                 function empresaKey(cnpj, nome){ var d = (cnpj || '').replace(/\D/g, ''); return d ? ('cnpj:' + d) : ('nome:' + norm(nome)); }
                 function addOption(sel, value, text, disabled){ var o = document.createElement('option'); o.value = value; o.textContent = text; if(disabled){ o.disabled = true; } sel.appendChild(o); }
+                // Texto da opcao com o id do ERP na frente ("01 - Emporio"); o value continua o nome.
+                function comId(id, nome){ if(id === null || id === undefined || id === '') return nome; var s = String(id); return (s.length < 2 ? ('0' + s) : s) + ' - ' + nome; }
 
                 var EMPRESAS = [];
                 function buildEmpresas(){
@@ -1955,7 +1961,8 @@ public sealed class LocalStatusServer : BackgroundService
                     var key = empresaKey(l.empresa_cnpj, l.empresa_nome);
                     if(seen[key]) return;
                     seen[key] = true;
-                    EMPRESAS.push({ key: key, cnpj: l.empresa_cnpj || '', nome: l.empresa_nome || '(sem empresa)' });
+                    // id (empresa_id, contrato 2.18.0) so para exibicao; ERP antigo nao manda.
+                    EMPRESAS.push({ key: key, id: l.empresa_id, cnpj: l.empresa_cnpj || '', nome: l.empresa_nome || '(sem empresa)' });
                   });
                   EMPRESAS.sort(function(a, b){ return a.nome.localeCompare(b.nome); });
                 }
@@ -1970,7 +1977,7 @@ public sealed class LocalStatusServer : BackgroundService
                   var sel = document.getElementById('f_empresa_select');
                   sel.innerHTML = '';
                   addOption(sel, '', LOJAS.length ? 'Selecione a empresa...' : '(nao foi possivel consultar o ERP agora)');
-                  EMPRESAS.forEach(function(e){ addOption(sel, e.key, e.cnpj ? (e.nome + ' — ' + e.cnpj) : e.nome); });
+                  EMPRESAS.forEach(function(e){ var rotulo = comId(e.id, e.nome); addOption(sel, e.key, e.cnpj ? (rotulo + ' — ' + e.cnpj) : rotulo); });
 
                   // Empresa da conexao em edicao: a salva; conexao antiga sem empresa salva
                   // usa a do estoque dela; nova com uma unica empresa no ERP ja vem escolhida.
@@ -2017,8 +2024,9 @@ public sealed class LocalStatusServer : BackgroundService
                     // nunca escolhido sozinho - senao o formulario de conexao nova ja abria com o
                     // estoque da conexao existente e o aviso "Ja vinculada".
                     var local = usoLocal(l);
-                    var texto = l.em_uso_por ? (l.nome + ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')')
-                      : local ? (l.nome + ' (ja usado pela conexao "' + local.nome + '" - use Editar nela)') : l.nome;
+                    var rotulo = comId(l.id, l.nome);
+                    var texto = l.em_uso_por ? (rotulo + ' (em uso: ' + l.em_uso_por.conexao_nome + ' @ ' + l.em_uso_por.installation_label + ')')
+                      : local ? (rotulo + ' (ja usado pela conexao "' + local.nome + '" - use Editar nela)') : rotulo;
                     addOption(sel, l.nome, texto, !!l.em_uso_por || !!local);
                   });
                   // Valor salvo que nao aparece na lista (ERP offline agora, ou estoque
@@ -2105,13 +2113,13 @@ public sealed class LocalStatusServer : BackgroundService
                     hint.textContent = 'Obrigatorio: ha ' + tabelas.length + ' tabelas de preco para esta empresa. Sem escolher, esta conexao nao sincroniza.';
                     hint.style.color = '#b45309';
                   }
-                  tabelas.forEach(function(t){ addOption(sel, t.nome, t.nome); });
+                  tabelas.forEach(function(t){ addOption(sel, t.nome, comId(t.id, t.nome)); });
                   if(selected && !TABELAS.some(function(t){ return norm(t.nome) === norm(selected); })){
                     addOption(sel, selected, selected + ' (nao existe mais no ERP)');
                   }
                   var match = tabelas.find(function(t){ return norm(t.nome) === norm(selected); })
                     || TABELAS.find(function(t){ return norm(t.nome) === norm(selected); });
-                  if(match && tabelas.indexOf(match) < 0){ addOption(sel, match.nome, match.nome + ' (de outra empresa)'); }
+                  if(match && tabelas.indexOf(match) < 0){ addOption(sel, match.nome, comId(match.id, match.nome) + ' (de outra empresa)'); }
                   sel.value = match ? match.nome : (selected || (tabelas.length === 1 ? tabelas[0].nome : ''));
                 }
 
@@ -2490,7 +2498,7 @@ public sealed class LocalStatusServer : BackgroundService
             new
             {
                 ok = true,
-                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_nome = l.EmpresaNome, empresa_cnpj = l.EmpresaCnpj ?? string.Empty, em_uso_por = l.EmUsoPor is null ? null : new { conexao_nome = l.EmUsoPor.ConexaoNome, installation_label = l.EmUsoPor.InstallationLabel } }),
+                lojas = result.Lojas!.Select(l => new { id = l.Id, nome = l.Nome, empresa_id = l.EmpresaId, empresa_nome = l.EmpresaNome, empresa_cnpj = l.EmpresaCnpj ?? string.Empty, em_uso_por = l.EmUsoPor is null ? null : new { conexao_nome = l.EmUsoPor.ConexaoNome, installation_label = l.EmUsoPor.InstallationLabel } }),
                 // null = ERP anterior ao contrato 2.17.0: a tela esconde o campo.
                 tabelas_preco = result.TabelasPreco?.Select(t => new { id = t.Id, nome = t.Nome, empresa_nome = t.EmpresaNome ?? string.Empty }),
             },
@@ -2732,7 +2740,9 @@ public sealed class LocalStatusServer : BackgroundService
                     B("sync_produtos"), B("sync_clientes"), B("sync_estoque"), B("sync_vendas"),
                     B("sync_financeiro") || B("sync_vendas"),
                     B("sync_compra"), B("sync_cobranca"), B("sync_plano_historico"),
-                    cancellationToken);
+                    cancellationToken,
+                    needCatalogos: (B("sync_vendas") || B("sync_financeiro"))
+                        && await _erpCompatibility.SupportsArpaVinculosAsync(cancellationToken));
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
                 return;
             }
@@ -2753,6 +2763,25 @@ public sealed class LocalStatusServer : BackgroundService
                 if (string.IsNullOrWhiteSpace(runtimeUser) && !string.IsNullOrWhiteSpace(V("id")))
                 {
                     runtimeUser = _arpaConnectionsStore.Get(V("id"))?.Username;
+                }
+
+                // Protecao agente novo + ERP antigo (contrato 2.19.0): as views novas
+                // mandam o codigo do Arpa em especie/condicao/conta. O ERP antigo
+                // grava isso como cadastro novo pelo nome ("17", "26"...) e suja
+                // Especies/Condicoes. So aplica quando o ERP declara aceitar o
+                // catalogo; "forcar" existe para quem sabe o que esta fazendo.
+                if (!await _erpCompatibility.SupportsArpaVinculosAsync(cancellationToken) && !B("force_views"))
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.OK, new
+                    {
+                        ok = false,
+                        message = "Views NAO aplicadas: o ERP ainda nao foi atualizado para a versao com os vinculos da "
+                            + "Conexao Arpa (contrato Sync 2.19.0). As views novas mandam o codigo do Arpa em especie, "
+                            + "condicao e conta; o ERP antigo criaria cadastros com esses codigos como nome (\"17\", \"26\"...). "
+                            + "Atualize o ERP primeiro e aguarde um ciclo de heartbeat. Para aplicar mesmo assim, marque "
+                            + "\"Forcar mesmo com o ERP desatualizado\".",
+                    }, cancellationToken);
+                    return;
                 }
 
                 var result = await _arpaDdlRunner.PrepareViewsAsync(
@@ -3124,6 +3153,7 @@ public sealed class LocalStatusServer : BackgroundService
         ("compra", "Compras"),
         ("cobranca", "Cobranca"),
         ("plano_historico", "Plano-hist"),
+        ("catalogo", "Cadastros"),
     ];
 
     /// <summary>Grupo de checkboxes de tipo de entidade (produtos, vendas, etc.),

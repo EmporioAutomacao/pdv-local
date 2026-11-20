@@ -84,6 +84,7 @@ builder.Services.AddSingleton<ArpaConnectionsStore>();
 builder.Services.AddSingleton<ArpaCollectorSettingsStore>();
 builder.Services.AddSingleton<ErpDispatcherSettingsStore>();
 builder.Services.AddSingleton<ArpaDdlRunner>();
+builder.Services.AddSingleton<SyncAgent.Heartbeat.ErpCompatibility>();
 builder.Services.AddSingleton<LocalDbMaintenanceRunner>();
 builder.Services.AddSingleton<ProvisioningStore>();
 builder.Services.AddSingleton<EffectiveSyncAgentConfigurationProvider>();

@@ -94,7 +94,8 @@ internal sealed class UpdateWizardForm : Form
         _updateButton = new Button
         {
             Text = _comparison == InstallComparison.SameBuild ? "Reinstalar" : "Atualizar",
-            Width = 120
+            Width = 120,
+            Enabled = _comparison != InstallComparison.Older
         };
         _updateButton.Click += async (_, _) => await RunUpdateAsync();
         buttonPanel.Controls.Add(_closeButton);
@@ -122,9 +123,13 @@ internal sealed class UpdateWizardForm : Form
 
     private string BuildSummaryText()
     {
-        var note = _comparison == InstallComparison.SameBuild
-            ? "\r\nEste mesmo build ja esta instalado. Use \"Reinstalar\" para reparar a instalacao."
-            : "";
+        var note = _comparison switch
+        {
+            InstallComparison.SameBuild => "\r\nEste mesmo build ja esta instalado. Use \"Reinstalar\" para reparar a instalacao.",
+            InstallComparison.Older => "\r\nEste pacote nao pode ser instalado: ele e mais antigo que a versao instalada " +
+                                       "ou a versao nao pode ser conferida. Use um instalador mais novo.",
+            _ => ""
+        };
         return $"Instalacao existente detectada em {_installRoot}.\r\n" +
                $"Versao instalada: {_installed.Describe()}   →   Versao deste pacote: {_package.Describe()}{note}";
     }

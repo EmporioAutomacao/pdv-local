@@ -54,6 +54,7 @@ public sealed class ArpaResyncProcessor
         "compra" => "compras",
         "cobranca" => "cobranca",
         "plano_historico" => "plano_historico",
+        "catalogo" => "catalogos",
         _ => entityType,
     };
 
@@ -262,7 +263,7 @@ public sealed class ArpaResyncProcessor
 
     private static string Summarize(Exception ex) => ex switch
     {
-        Npgsql.PostgresException pg => $"{pg.SqlState}: {pg.MessageText}",
+        Npgsql.PostgresException pg => SyncAgent.Provisioning.PostgresErrorText.Describe(pg),
         NpgsqlException { InnerException: { } inner } => inner.Message,
         _ => ex.Message,
     };

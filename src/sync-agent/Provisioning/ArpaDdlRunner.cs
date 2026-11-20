@@ -13,7 +13,7 @@ public sealed partial class ArpaDdlRunner
 {
     private const string ViewsResourceName = "SyncAgent.Arpa.sync-export-views.sql";
     private static readonly string[] AllViewNames =
-        ["produtos", "clientes", "estoque", "vendas", "financeiro", "compras", "cobranca", "plano_historico"];
+        ["produtos", "clientes", "estoque", "vendas", "financeiro", "compras", "cobranca", "plano_historico", "catalogos"];
 
     private readonly ILogger<ArpaDdlRunner> _logger;
 
@@ -38,7 +38,8 @@ public sealed partial class ArpaDdlRunner
         string host, int port, string database, string username, string password,
         bool needProdutos, bool needClientes, bool needEstoque, bool needVendas, bool needFinanceiro,
         bool needCompras, bool needCobranca, bool needPlanoHistorico,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool needCatalogos = false)
     {
         try
         {
@@ -51,6 +52,7 @@ public sealed partial class ArpaDdlRunner
                 ("produtos", needProdutos), ("clientes", needClientes), ("estoque", needEstoque),
                 ("vendas", needVendas), ("financeiro", needFinanceiro), ("compras", needCompras),
                 ("cobranca", needCobranca), ("plano_historico", needPlanoHistorico),
+                ("catalogos", needCatalogos),
             })
             {
                 if (!needed)
@@ -220,15 +222,13 @@ public sealed partial class ArpaDdlRunner
 
     private static string Describe(Exception ex) => ex switch
     {
-        PostgresException { SqlState: "28P01" } => "Senha incorreta para o usuario informado (ou o servidor exige senha e nenhuma foi informada).",
         // Auth integrada do Windows: senha vazia + o Postgres do Arpa pediu
         // SSPI/GSS no pg_hba -> o Npgsql conectou como a conta da maquina do
         // servico (LocalSystem => "MAQUINA$"), que nao e um role no Postgres.
         PostgresException { SqlState: "28000" } pg when pg.MessageText.Contains('$')
             => "O Postgres do Arpa pediu autenticacao integrada do Windows e rejeitou o servico (que roda como LocalSystem). "
                + "Defina uma senha para esse usuario no Postgres do Arpa, ou ajuste o pg_hba.conf desse acesso para 'trust' ou 'scram-sha-256'.",
-        PostgresException pg => $"{pg.SqlState}: {pg.MessageText}",
-        _ => ex.Message,
+        _ => PostgresErrorText.Describe(ex),
     };
 
     [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")]

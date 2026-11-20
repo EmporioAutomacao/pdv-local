@@ -69,7 +69,10 @@ internal enum InstallComparison
     Different,
 
     /// <summary>Mesmo build ja instalado: so faz sentido reinstalar (reparo).</summary>
-    SameBuild
+    SameBuild,
+
+    /// <summary>Pacote mais antigo que o instalado, ou sem como comparar: recusado, nunca ha downgrade.</summary>
+    Older
 }
 
 internal static class InstallVersionComparer
@@ -81,25 +84,53 @@ internal static class InstallVersionComparer
     /// quando o csproj nao e bumpado junto da tag. O commit embutido no
     /// SyncAgent.exe e a identidade real do build; o VERSION so decide quando
     /// algum dos dois lados nao tem commit (build antigo/dev).
+    ///
+    /// Como os dois numeros podem atrasar, a versao instalada e o maior deles.
+    /// Do pacote vale o VERSION (a tag da release), e o ProductVersion so na
+    /// falta dele. Sem numero de um dos lados nao ha como provar que nao e
+    /// downgrade: o pacote e recusado.
     /// </summary>
     public static InstallComparison Compare(InstallVersionSnapshot installed, InstallVersionSnapshot package)
     {
         var installedCommit = installed.BuildCommit;
         var packageCommit = package.BuildCommit;
-        if (installedCommit is not null && packageCommit is not null)
+        if (installedCommit is not null && packageCommit is not null
+            && string.Equals(installedCommit, packageCommit, StringComparison.OrdinalIgnoreCase))
         {
-            return string.Equals(installedCommit, packageCommit, StringComparison.OrdinalIgnoreCase)
-                ? InstallComparison.SameBuild
-                : InstallComparison.Different;
+            return InstallComparison.SameBuild;
         }
 
-        if (installed.VersionFile is null || package.VersionFile is null)
+        var installedNumber = Max(ParseNumber(installed.VersionFile), ParseNumber(installed.AgentProductVersion));
+        var packageNumber = ParseNumber(package.VersionFile) ?? ParseNumber(package.AgentProductVersion);
+        if (installedNumber is null || packageNumber is null || packageNumber < installedNumber)
+        {
+            return InstallComparison.Older;
+        }
+
+        if (installedCommit is not null && packageCommit is not null)
         {
             return InstallComparison.Different;
         }
 
-        return string.Equals(installed.VersionFile, package.VersionFile, StringComparison.OrdinalIgnoreCase)
-            ? InstallComparison.SameBuild
-            : InstallComparison.Different;
+        return installed.VersionFile is not null
+            && string.Equals(installed.VersionFile, package.VersionFile, StringComparison.OrdinalIgnoreCase)
+                ? InstallComparison.SameBuild
+                : InstallComparison.Different;
+    }
+
+    private static Version? Max(Version? a, Version? b) =>
+        a is null ? b : b is null || a >= b ? a : b;
+
+    /// <summary>"1.6.46" ou "1.6.46+commit" (ProductVersion) viram numero; "unknown" e "0.1.0-dev" nao.</summary>
+    private static Version? ParseNumber(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var plus = raw.IndexOf('+');
+        var number = (plus >= 0 ? raw[..plus] : raw).Trim().TrimStart('v', 'V');
+        return Version.TryParse(number, out var version) ? version : null;
     }
 }

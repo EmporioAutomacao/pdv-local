@@ -13,7 +13,8 @@ public static class SyncContractValues
         "financeiro",
         "compra",
         "cobranca",
-        "plano_historico"
+        "plano_historico",
+        "catalogo"
     ];
 
     public static readonly string[] EventTypes =

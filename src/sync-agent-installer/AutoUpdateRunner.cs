@@ -43,10 +43,17 @@ internal static class AutoUpdateRunner
             }
 
             // Sem wizard nao ha quem confirme um reparo: o --auto so pula o mesmo build.
-            if (InstallVersionComparer.Compare(installed, package) == InstallComparison.SameBuild)
+            var comparison = InstallVersionComparer.Compare(installed, package);
+            if (comparison == InstallComparison.SameBuild)
             {
                 Log("Este mesmo build ja esta instalado. Nada a fazer.");
                 return 0;
+            }
+
+            if (comparison == InstallComparison.Older)
+            {
+                Log($"ERRO: downgrade recusado. Instalado: {installed.Describe()}, pacote: {package.Describe()}.");
+                return 6;
             }
 
             var scriptPath = Path.Combine(payloadRoot, "payload", "Sync", "Agent", "self-update.ps1");

@@ -45,10 +45,11 @@ public sealed class SelfUpdater
         }
 
         var currentVersion = options.AgentVersion;
-        if (string.Equals(currentVersion, update.Version, StringComparison.OrdinalIgnoreCase))
+        if (AgentVersion.IsDowngradeOrSame(currentVersion, update.Version))
         {
             _logger.LogInformation(
-                "Self-update skipped: already at version {Version}.", update.Version);
+                "Self-update skipped: {Target} is not newer than the installed version {Current}.",
+                update.Version, currentVersion);
             return false;
         }
 

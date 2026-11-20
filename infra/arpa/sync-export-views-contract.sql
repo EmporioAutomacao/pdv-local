@@ -100,6 +100,8 @@ WHERE p.codigo IS NOT NULL;
 --   numero_nota, cliente_documento, cliente_nome, empresa_cnpj, empresa_nome,
 --   loja_codigo (o agente injeta o loja_codigo da conexao se ausente),
 --   itens: [ { codigo_produto_arpa, quantidade, valor_unitario, desconto } ].
+--   condicao_pagamento e especie_pagamento: codigo (ou nome) como esta no Arpa; o ERP
+--   resolve pelos vinculos da Conexao Arpa (sem vinculo fica vazio e vira pendencia).
 -- O schema legado do Arpa (pedidos/itenspedido) varia MUITO por cliente -
 -- ajuste tabelas/colunas ao real. O agente/ERP tratam a ausencia de campos.
 /*
@@ -144,6 +146,9 @@ WHERE v.codigo IS NOT NULL;
 --     pagar: compra_externa_id, documento, fornecedor_codigo, fornecedor_nome,
 --       emissao, vencimento, valor_base, multa, juros, valor_pago, data_pagamento,
 --       historico_codigo, historico_analitico, status, tem_quitacao.
+--     ambos (opcional): conta_bancaria = codigo da conta bancaria do Arpa onde o
+--       titulo foi baixado (parcela ou tabela de quitadas); o ERP lanca a quitacao na
+--       Conta de Caixa vinculada a ela na Conexao Arpa (sem vinculo: conta padrao).
 -- entity_key do pagar deve levar prefixo 'pag-' para nao colidir com um titulo
 -- a receber de mesmo codigo (a view do agente une as duas fontes com UNION ALL).
 /*
@@ -240,3 +245,10 @@ SELECT
 FROM public.contas_bancarias b
 WHERE b.codigo IS NOT NULL;
 */
+
+-- View: sync_export.catalogos (contrato Sync 2.19.0, entity_type=catalogo)
+-- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
+-- entity_key = '<tipo>:<codigo>'; payload_json: tipo ('especie' | 'condicao' | 'conta'),
+-- codigo, descricao, ativo. Cadastro de especies, vencimentos (condicoes) e contas
+-- bancarias do Arpa (+ conta 'CAIXA' = caixa do Arpa). occurred_at_utc = inicio do dia
+-- (reenvio diario). O ERP usa como lista de escolha dos vinculos da Conexao Arpa.

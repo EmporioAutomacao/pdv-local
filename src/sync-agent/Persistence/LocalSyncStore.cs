@@ -725,6 +725,41 @@ public sealed class LocalSyncStore
         return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture);
     }
 
+    public async Task<JsonObject?> GetJsonStateAsync(string stateKey, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT state_value::text
+            FROM sync_agent.agent_state
+            WHERE state_key = @state_key
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("state_key", stateKey);
+
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is string text && !string.IsNullOrWhiteSpace(text)
+            ? JsonNode.Parse(text) as JsonObject
+            : null;
+    }
+
+    public async Task SetJsonStateAsync(string stateKey, JsonObject value, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO sync_agent.agent_state (state_key, state_value)
+            VALUES (@state_key, @state_value)
+            ON CONFLICT (state_key) DO UPDATE
+            SET
+                state_value = EXCLUDED.state_value,
+                updated_at_utc = now()
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("state_key", stateKey);
+        command.Parameters.AddWithValue("state_value", NpgsqlDbType.Jsonb, ToCanonicalJson(value));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task SetDateTimeOffsetStateAsync(
         string stateKey,
         DateTimeOffset value,

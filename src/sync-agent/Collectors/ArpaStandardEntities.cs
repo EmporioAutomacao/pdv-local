@@ -83,6 +83,15 @@ public static class ArpaStandardEntities
             entities.Add(Make("plano_historico", "plano_historico"));
         }
 
+        // Cadastro de especies, condicoes (vencimentos) e contas bancarias do Arpa
+        // (contrato Sync 2.19.0): lista de escolha dos vinculos da Conexao Arpa no
+        // ERP, que traduzem os codigos que chegam nas vendas e titulos. Vai junto
+        // com Vendas/Financeiro, sem toggle proprio (como o Financeiro com Vendas).
+        if (vendas || financeiro)
+        {
+            entities.Add(Make("catalogos", "catalogo"));
+        }
+
         return entities;
     }
 

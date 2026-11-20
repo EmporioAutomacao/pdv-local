@@ -176,7 +176,9 @@ public sealed record ArpaLoja(
     [property: JsonPropertyName("nome")] string Nome,
     [property: JsonPropertyName("empresa_nome")] string EmpresaNome,
     [property: JsonPropertyName("empresa_cnpj")] string? EmpresaCnpj = null,
-    [property: JsonPropertyName("em_uso_por")] ArpaLojaEmUsoPor? EmUsoPor = null);
+    [property: JsonPropertyName("em_uso_por")] ArpaLojaEmUsoPor? EmUsoPor = null,
+    // Contrato 2.18.0, so exibicao ("01 - Emporio"); null com ERP antigo ou Loja sem empresa.
+    [property: JsonPropertyName("empresa_id")] long? EmpresaId = null);
 
 /// <summary>
 /// Conexao Arpa de OUTRO SyncAgent que ja usa a Loja/Estoque (o ERP so deixa
