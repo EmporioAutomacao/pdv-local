@@ -51,10 +51,45 @@ primeiro heartbeat o agente também considera que não aceita):
 
 Depois que o ERP for atualizado, tudo é liberado sozinho no próximo heartbeat.
 
+## Versão das views e pausa automática
+
+O script grava a própria versão no banco do Arpa. A última instrução de
+`infra/arpa/sync-export-views.sql` é
+`COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=AAAA.MM.DD.N'`. Suba esse número
+sempre que uma mudança no script exigir preparar as views de novo.
+
+A cada ciclo, antes de coletar uma conexão, o coletor (`ArpaCollector.EvaluateDependenciesAsync` +
+`Provisioning/ArpaDependencyRule.cs`) compara:
+- a versão gravada (`ArpaDdlRunner.GetInstalledViewsVersionAsync`, que só lê `pg_namespace`
+  e funciona com o usuário somente-leitura);
+- a versão do script embutido no agente (`ArpaDdlRunner.EmbeddedViewsVersion`).
+
+| Situação | Resultado |
+|---|---|
+| Views sem marca ou mais antigas, ERP compatível (0.0.164+) | **Pausa a coleta da conexão**, sem tocar na marca d'água, e retoma de onde parou depois de "Preparar views" |
+| Views sem marca ou mais antigas, ERP antigo | **Só aviso**: a coleta continua no formato atual ("atualize o ERP e depois prepare as views") |
+| Banco local sem um tipo que a conexão coleta | **Pausa** até "Corrigir outbox_events_entity_type_check" |
+
+Onde aparece:
+- aviso no topo de todas as páginas do painel e em `/status` (`config_warnings`,
+  `arpa_blocked_connections` com `kinds`, `arpa_connection_warnings`);
+- selo "⚠ Preparar views (pausada)" na linha da conexão;
+- ao editar a conexão, o bloco "Preparar banco Arpa" abre sozinho com o motivo. O bloco ganhou
+  destaque nos temas claro e escuro;
+- log do ciclo: "PAUSADA - ...".
+
+Heartbeat, envio da fila e PDV continuam. Depois de um "Preparar views" bem-sucedido, um ciclo
+novo começa na hora.
+
+Views criadas à mão (scripts `infra/windows/*sync-export-views*`) não têm a marca, então **pausam**
+quando o ERP for compatível, até rodar "Preparar views". O Arpa de Anápolis está nessa situação
+hoje (consultado só com leitura em 2026-11-20).
+
 ## Implantação
 
 1. ERP 0.0.164 publicado e clientes atualizados.
-2. SyncAgent novo (subir `<Version>` no `SyncAgent.csproj`).
+2. SyncAgent **1.6.54** ou mais novo, a primeira versão com a pausa por views desatualizadas.
+   A 1.6.53 (`+dcb8a04`) tem o catálogo e a proteção contra ERP antigo, mas não tem a pausa.
 3. Em cada instalação: "Preparar views", com credencial DBA, e depois "Corrigir
    outbox_events_entity_type_check" (Manutenção do banco local).
 

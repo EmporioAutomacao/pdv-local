@@ -291,6 +291,39 @@ e nao consegue usar essa auth).
 - **Criar usuario read-only**: cria um role so-leitura com `GRANT SELECT` nas
   views, para usar em Usuario/Senha da conexao.
 
+### 6.1 Versao das views e pausa automatica (contrato `../sync` 2.19.0)
+
+O bloco fica destacado (borda e fundo ambar, "⚠" no titulo) nos temas claro e
+escuro. Antes o titulo quase sumia no tema escuro.
+
+O script grava a propria versao no banco do Arpa (ultima instrucao:
+`COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=AAAA.MM.DD.N'`).
+A cada ciclo, antes de coletar cada conexao, o agente compara essa marca com a
+versao do script que ele traz:
+
+| Situacao | O que acontece |
+|---|---|
+| Views sem marca (antigas ou criadas a mao) ou de versao menor, ERP 0.0.164+ | **Coleta da conexao pausada**. Retoma de onde parou depois de "Preparar views" |
+| Mesma situacao, ERP antigo | **So aviso** ("atualize o ERP e depois prepare as views"). A coleta continua no formato atual |
+| Banco local sem um `entity_type` que a conexao coleta | **Pausada** ate a rotina "Corrigir outbox_events_entity_type_check" |
+
+Onde aparece:
+- aviso no topo de todas as paginas e em `/status` (`config_warnings`,
+  `arpa_blocked_connections[].kinds`, `arpa_connection_warnings`);
+- selo na linha da conexao: "⚠ Preparar views (pausada)" ou "⚠ Corrigir banco
+  local (pausada)";
+- em **Editar**, o motivo aparece acima do bloco, e o bloco abre sozinho quando o
+  motivo e "Preparar views";
+- log do ciclo: "Conexao "X": PAUSADA - ...".
+
+Heartbeat, envio ao ERP do que ja esta na fila e PDV **nao** param. Depois de um
+"Preparar views" bem-sucedido o agente comeca um ciclo novo na hora, e a pausa
+sai.
+
+Com o ERP antigo o botao "Preparar views" recusa e explica o motivo; ha uma opcao
+explicita de forcar, nao recomendada. Ver
+`docs/sync-agent-catalogo-vinculos-arpa.md`.
+
 ## Endpoints locais usados por esta tela
 
 | Metodo | Rota local | Uso |

@@ -61,18 +61,85 @@ public sealed class ArpaCollector
         var tabelas = coletaProdutos
             ? await _lojaListClient.GetTabelasPrecoAsync(TabelasPrecoMaxAge, cancellationToken)
             : null;
-        var reason = ArpaTabelaPrecoRule.BlockReason(connection.Nome, coletaProdutos, connection.TabelaPreco, tabelas);
+        var tabelaReason = ArpaTabelaPrecoRule.BlockReason(connection.Nome, coletaProdutos, connection.TabelaPreco, tabelas);
+        var dependencias = await EvaluateDependenciesAsync(connection, cancellationToken);
 
-        if (reason is null)
+        var motivos = new List<string>();
+        var kinds = ArpaBlockKind.None;
+        if (tabelaReason is not null)
         {
-            _connectionBlocks.Clear(connection.Id);
+            motivos.Add(tabelaReason);
+            kinds |= ArpaBlockKind.TabelaPreco;
+        }
+
+        if (dependencias.Pausar)
+        {
+            motivos.AddRange(dependencias.Pausas);
+            kinds |= ArpaBlockKind.Dependencias;
+        }
+
+        if (dependencias.Avisos.Count > 0)
+        {
+            _connectionBlocks.SetWarning(connection.Id, connection.Nome, string.Join(" ", dependencias.Avisos));
         }
         else
         {
-            _connectionBlocks.Set(connection.Id, connection.Nome, reason);
+            _connectionBlocks.ClearWarning(connection.Id);
         }
 
+        if (motivos.Count == 0)
+        {
+            _connectionBlocks.Clear(connection.Id);
+            return null;
+        }
+
+        var reason = string.Join(" ", motivos);
+        _connectionBlocks.Set(connection.Id, connection.Nome, reason, kinds);
         return reason;
+    }
+
+    /// <summary>
+    /// Views sync_export na versao do script embutido e banco local aceitando os
+    /// entity_type que esta conexao vai coletar (ver <see cref="ArpaDependencyRule"/>).
+    /// Falha ao ler a versao no Arpa (conexao recusada etc.) nao pausa por si: o erro
+    /// normal da coleta continua aparecendo no log do ciclo.
+    /// </summary>
+    private async Task<ArpaDependencyResult> EvaluateDependenciesAsync(
+        EffectiveArpaCollectorConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var erpCompatible = await _erpCompatibility.SupportsArpaVinculosAsync(cancellationToken);
+
+        var coletados = new List<string>();
+        foreach (var entity in connection.Entities)
+        {
+            if (await _erpCompatibility.AcceptsAsync(entity.EntityType, cancellationToken))
+            {
+                coletados.Add(entity.EntityType);
+            }
+        }
+
+        var outdatedCheck = await _localStore.GetOutdatedEntityTypeCheckEntitiesAsync(cancellationToken);
+
+        string? installed;
+        var embedded = ArpaDdlRunner.EmbeddedViewsVersion;
+        try
+        {
+            await using var dataSource = NpgsqlDataSource.Create(connection.ConnectionString);
+            installed = await ArpaDdlRunner.GetInstalledViewsVersionAsync(dataSource, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Arpa collector: nao foi possivel ler a versao das views de '{Nome}' (ignorado).", connection.Nome);
+            embedded = null; // sem leitura confiavel, nao exige versao neste ciclo
+            installed = null;
+        }
+
+        return ArpaDependencyRule.Evaluate(connection.Nome, installed, embedded, erpCompatible, outdatedCheck, coletados);
     }
 
     private static string EntityLabel(string entityType) => entityType switch

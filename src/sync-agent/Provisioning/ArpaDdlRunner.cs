@@ -22,6 +22,42 @@ public sealed partial class ArpaDdlRunner
         _logger = logger;
     }
 
+    private static readonly Lazy<string?> EmbeddedViewsVersionLazy = new(() => ParseViewsVersion(LoadViewsScript()));
+
+    /// <summary>
+    /// Versao do script de views embutido (ultima instrucao do
+    /// <c>infra/arpa/sync-export-views.sql</c>: <c>COMMENT ON SCHEMA sync_export IS
+    /// 'ararasuite:sync_export_versao=X'</c>). O "Preparar views" grava essa marca no
+    /// banco do Arpa; o coletor compara com <see cref="GetInstalledViewsVersionAsync"/>.
+    /// </summary>
+    public static string? EmbeddedViewsVersion => EmbeddedViewsVersionLazy.Value;
+
+    /// <summary>Extrai a versao de um texto (o script ou o comentario gravado no schema).</summary>
+    public static string? ParseViewsVersion(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var matches = ViewsVersionRegex().Matches(text);
+        return matches.Count == 0 ? null : matches[^1].Groups[1].Value;
+    }
+
+    /// <summary>
+    /// Versao das views gravada no banco do Arpa (comentario do schema
+    /// <c>sync_export</c>); <c>null</c> se o schema nao existe ou foi preparado antes da
+    /// marca de versao (views antigas ou criadas a mao). Funciona com o usuario
+    /// read-only: so le <c>pg_namespace</c>.
+    /// </summary>
+    public static async Task<string?> GetInstalledViewsVersionAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
+    {
+        await using var command = dataSource.CreateCommand(
+            "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname = 'sync_export'");
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return ParseViewsVersion(value as string);
+    }
+
     /// <summary>
     /// Script unico e generico (<c>infra/arpa/sync-export-views.sql</c>, embutido)
     /// que introspecta o schema real do Arpa e cria as views sync_export.
@@ -233,6 +269,9 @@ public sealed partial class ArpaDdlRunner
 
     [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")]
     private static partial Regex RoleNameRegex();
+
+    [GeneratedRegex(@"ararasuite:sync_export_versao=([0-9][0-9.]*[0-9])")]
+    private static partial Regex ViewsVersionRegex();
 }
 
 public sealed record ArpaTestResult(bool Ok, string Message, IReadOnlyDictionary<string, bool> Views);

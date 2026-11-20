@@ -47,23 +47,37 @@ public static class ArpaTabelaPrecoRule
 }
 
 /// <summary>
-/// Conexoes Arpa pausadas pelo coletor (hoje: tabela de preco obrigatoria nao
-/// informada). Lido por /status, pelo topo do dashboard e pela bandeja, que
-/// fica avisando enquanto houver item aqui.
+/// Conexoes Arpa pausadas pelo coletor (tabela de preco obrigatoria nao informada e/ou
+/// dependencia pendente - views sync_export desatualizadas, banco local sem o
+/// entity_type) e avisos que nao pausam (ex.: views desatualizadas com ERP antigo).
+/// Lido por /status, pelo topo do dashboard e pela bandeja, que fica avisando
+/// enquanto houver bloqueio.
 /// </summary>
 public sealed class ArpaConnectionBlocks
 {
     private readonly ConcurrentDictionary<string, ArpaConnectionBlock> _blocks = new();
+    private readonly ConcurrentDictionary<string, ArpaConnectionBlock> _warnings = new();
 
     public IReadOnlyList<ArpaConnectionBlock> Snapshot =>
         _blocks.Values.OrderBy(b => b.ConnectionName, StringComparer.OrdinalIgnoreCase).ToList();
 
-    public void Set(string connectionId, string connectionName, string reason) =>
-        _blocks[connectionId] = new ArpaConnectionBlock(connectionId, connectionName, reason);
+    /// <summary>Avisos que nao pausam a conexao.</summary>
+    public IReadOnlyList<ArpaConnectionBlock> WarningsSnapshot =>
+        _warnings.Values.OrderBy(b => b.ConnectionName, StringComparer.OrdinalIgnoreCase).ToList();
+
+    public void Set(string connectionId, string connectionName, string reason,
+        ArpaBlockKind kinds = ArpaBlockKind.TabelaPreco) =>
+        _blocks[connectionId] = new ArpaConnectionBlock(connectionId, connectionName, reason, kinds);
 
     public void Clear(string connectionId) => _blocks.TryRemove(connectionId, out _);
 
-    /// <summary>Remove bloqueios de conexoes que nao existem mais (apagadas/desativadas).</summary>
+    public void SetWarning(string connectionId, string connectionName, string reason,
+        ArpaBlockKind kinds = ArpaBlockKind.Dependencias) =>
+        _warnings[connectionId] = new ArpaConnectionBlock(connectionId, connectionName, reason, kinds);
+
+    public void ClearWarning(string connectionId) => _warnings.TryRemove(connectionId, out _);
+
+    /// <summary>Remove bloqueios/avisos de conexoes que nao existem mais (apagadas/desativadas).</summary>
     public void RetainOnly(IEnumerable<string> connectionIds)
     {
         var keep = connectionIds.ToHashSet(StringComparer.Ordinal);
@@ -71,7 +85,26 @@ public sealed class ArpaConnectionBlocks
         {
             _blocks.TryRemove(id, out _);
         }
+
+        foreach (var id in _warnings.Keys.Where(id => !keep.Contains(id)))
+        {
+            _warnings.TryRemove(id, out _);
+        }
     }
 }
 
-public sealed record ArpaConnectionBlock(string ConnectionId, string ConnectionName, string Reason);
+[Flags]
+public enum ArpaBlockKind
+{
+    None = 0,
+    /// <summary>Tabela de preco obrigatoria nao informada (coluna "Tabela" mostra "Informar!").</summary>
+    TabelaPreco = 1,
+    /// <summary>Dependencia pendente: views sync_export / banco local (ArpaDependencyRule).</summary>
+    Dependencias = 2,
+}
+
+public sealed record ArpaConnectionBlock(
+    string ConnectionId,
+    string ConnectionName,
+    string Reason,
+    ArpaBlockKind Kinds = ArpaBlockKind.TabelaPreco);

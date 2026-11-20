@@ -502,6 +502,7 @@ public sealed class LocalStatusServer : BackgroundService
         }
 
         warnings.AddRange(_arpaConnectionBlocks.Snapshot.Select(b => b.Reason));
+        warnings.AddRange(_arpaConnectionBlocks.WarningsSnapshot.Select(b => b.Reason));
 
         return warnings;
     }
@@ -533,6 +534,13 @@ public sealed class LocalStatusServer : BackgroundService
                 timestamp_utc = DateTimeOffset.UtcNow,
                 config_warnings = configWarnings,
                 arpa_blocked_connections = _arpaConnectionBlocks.Snapshot.Select(b => new
+                {
+                    connection_id = b.ConnectionId,
+                    connection_name = b.ConnectionName,
+                    reason = b.Reason,
+                    kinds = b.Kinds.ToString(),
+                }),
+                arpa_connection_warnings = _arpaConnectionBlocks.WarningsSnapshot.Select(b => new
                 {
                     connection_id = b.ConnectionId,
                     connection_name = b.ConnectionName,
@@ -768,6 +776,7 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
                     <tr><td><code>42501: permission denied for relation ...</code></td><td>Usuario read-only do agente sem <code>GRANT SELECT</code> nas views.</td><td>Aplicar os grants de <code>sync-export-readonly-user-*.template.sql</code>.</td></tr>
                     <tr><td><code>42703: column "..." does not exist</code></td><td>A view <code>sync_export</code> referencia colunas que nao existem no Arpa daquele cliente.</td><td>Regenerar a view do diagnostico real do schema.</td></tr>
+                    <tr><td><code>PAUSADA - ... precisa de "Preparar views"</code> (aviso no topo e selo <em>&#9888; Preparar views</em> na conexao)</td><td>As views <code>sync_export</code> do banco Arpa estao numa versao anterior a do script deste agente (marca <code>ararasuite:sync_export_versao</code> no schema <code>sync_export</code>; views criadas a mao nao tem a marca). Com o ERP ja compativel (0.0.164+) a coleta da conexao fica pausada ate preparar e retoma de onde parou. Com o ERP antigo e so aviso: continua no formato atual.</td><td>Atualize o ERP (se o aviso pedir) e use <strong>Preparar views sync_export</strong> em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> &rsaquo; Editar &rsaquo; Preparar banco Arpa (credencial DBA). Depois, se aparecer, a rotina "Corrigir outbox_events_entity_type_check".</td></tr>
                     <tr><td><code>23514: viola a restricao de verificacao "outbox_events_entity_type_check"</code></td><td>Instalacao criada antes do agente suportar esse <code>entity_type</code> (tipicamente <code>cobranca</code>/<code>plano_historico</code>) - a view Arpa ate le certo, mas o banco local recusa o INSERT.</td><td>Rodar a rotina <strong>"Corrigir outbox_events_entity_type_check"</strong> em <a href="/config/local-db">Configuracoes &rsaquo; Manutencao do banco local</a> (a partir de 1.6.20).</td></tr>
                   </table>
                   <p>Se o cliente <strong>nao usa Arpa Control</strong>, o coletor deve ficar desativado (botao <strong>Desativar coletor</strong> em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a>; ou <code>ArpaCollector:Enabled=false</code> no <code>appsettings.json</code> quando o botao nunca foi usado). A partir de 1.3.3 uma entidade Arpa quebrada e <strong>pulada</strong> e nao derruba o ciclo (heartbeat / vendas PDV / dispatcher continuam). A partir de 1.4.0 o agente suporta varias conexoes Arpa, geridas localmente na aba Configuracoes.</p>
@@ -1629,9 +1638,31 @@ public sealed class LocalStatusServer : BackgroundService
         var msg = flashMessage ?? ReadQueryParam(queryString, "msg");
 
         var blocks = _arpaConnectionBlocks.Snapshot;
-        var blockedIds = blocks.Select(b => b.ConnectionId).ToHashSet(StringComparer.Ordinal);
+        var depWarnings = _arpaConnectionBlocks.WarningsSnapshot;
+        // "Informar!" na coluna Tabela so para o bloqueio de tabela de preco; dependencia
+        // pendente (views/banco local) ganha selo proprio na linha da conexao.
+        var blockedIds = blocks.Where(b => b.Kinds.HasFlag(ArpaBlockKind.TabelaPreco))
+            .Select(b => b.ConnectionId).ToHashSet(StringComparer.Ordinal);
+        var depBlocks = blocks.Where(b => b.Kinds.HasFlag(ArpaBlockKind.Dependencias))
+            .ToDictionary(b => b.ConnectionId, b => b.Reason, StringComparer.Ordinal);
+        var depWarns = depWarnings.ToDictionary(b => b.ConnectionId, b => b.Reason, StringComparer.Ordinal);
         var blocksHtml = string.Concat(blocks.Select(b =>
-            $"""<div class="message warnbox">{Html(b.Reason)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Escolher agora</button></div>"""));
+            b.Kinds.HasFlag(ArpaBlockKind.Dependencias)
+                ? $"""<div class="message warnbox">&#9888; PAUSADA - {Html(b.Reason)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Resolver agora</button></div>"""
+                : $"""<div class="message warnbox">{Html(b.Reason)} <button type="button" class="mini" onclick="editConn('{Html(b.ConnectionId)}')">Escolher agora</button></div>"""))
+            + string.Concat(depWarnings.Select(b => $"""<div class="message infobox">{Html(b.Reason)}</div>"""));
+        var depsMap = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var kv in depWarns)
+        {
+            depsMap[kv.Key] = new { reason = kv.Value, pausa = false, dba = false };
+        }
+
+        foreach (var kv in depBlocks)
+        {
+            depsMap[kv.Key] = new { reason = kv.Value, pausa = true, dba = ArpaDependencyHtml.PrecisaPrepararViews(kv.Value) };
+        }
+
+        var depsJson = JsonSerializer.Serialize(depsMap, JsonOptions);
 
         var rows = new StringBuilder();
         if (connections.Count == 0)
@@ -1655,7 +1686,7 @@ public sealed class LocalStatusServer : BackgroundService
 
             rows.Append($$"""
                 <tr>
-                  <td>{{Html(c.Nome)}}{{(c.Enabled ? "" : " <span class=\"muted\">(inativa)</span>")}}</td>
+                  <td>{{Html(c.Nome)}}{{(c.Enabled ? "" : " <span class=\"muted\">(inativa)</span>")}}{{ArpaDependencyHtml.Badge(c.Id, depBlocks, depWarns)}}</td>
                   <td>{{Html($"{c.Host}:{c.Port}/{c.Database}")}}</td>
                   <td>{{Html(string.IsNullOrWhiteSpace(c.LojaCodigo) ? "-" : c.LojaCodigo)}}</td>
                   <td>{{(blockedIds.Contains(c.Id) ? "<span class=\"warn\">Informar!</span>" : Html(string.IsNullOrWhiteSpace(c.TabelaPreco) ? "Automatica" : c.TabelaPreco))}}</td>
@@ -1764,6 +1795,13 @@ public sealed class LocalStatusServer : BackgroundService
                 #status { margin-top: 10px; font-weight: 600; white-space: pre-wrap; }
                 details { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
                 summary { cursor: pointer; font-weight: 600; color: #334155; }
+                details.dba { border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 14px; background: #fffbeb; }
+                details.dba > summary { color: #92400e; font-size: 15px; }
+                details.dba[open] > summary { margin-bottom: 8px; }
+                .infobox { background: #e0f2fe; color: #075985; }
+                .depbadge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+                .depbadge.pausa { background: #fef3c7; color: #92400e; }
+                .depbadge.aviso { background: #e2e8f0; color: #475569; }
                 select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; }
                 #synclog { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; margin: 10px 0 0; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
                 #synclog .warn { color: #fbbf24; }
@@ -1893,8 +1931,9 @@ public sealed class LocalStatusServer : BackgroundService
                       <button type="button" class="secondary" onclick="resetForm()">Limpar</button>
                     </div>
 
-                    <details>
-                      <summary>Preparar banco Arpa (requer credencial DBA)</summary>
+                    <div id="deps_reason" class="message warnbox" style="display:none"></div>
+                    <details class="dba" id="dbadetails">
+                      <summary>&#9888; Preparar banco Arpa (requer credencial DBA)</summary>
                       <p class="muted">Usa uma credencial de administrador do Postgres do Arpa apenas para este comando. Nao e gravada. Deixe a Senha DBA em branco se esse Postgres usa <code>trust</code>/<code>peer</code> (sem senha).</p>
                       <div class="row2">
                         <div><label for="f_dbauser">Usuario DBA</label><input type="text" id="f_dbauser" name="dba_user" autocomplete="off" placeholder="postgres"></div>
@@ -1916,6 +1955,12 @@ public sealed class LocalStatusServer : BackgroundService
               </main>
               <script>
                 var CONNS = {{connectionsJson}};
+                var DEPS = {{depsJson}};
+                function showDeps(id){
+                  var d = id ? DEPS[id] : null, box = document.getElementById('deps_reason'), det = document.getElementById('dbadetails');
+                  if(d){ box.textContent = d.reason; box.className = 'message ' + (d.pausa ? 'warnbox' : 'infobox'); box.style.display = 'block'; if(d.dba){ det.open = true; } }
+                  else { box.textContent = ''; box.style.display = 'none'; }
+                }
                 var LOJAS_EM_USO = {{lojasEmUsoJson}};
                 var LOJAS = [];
                 var TABELAS = null;
@@ -2404,7 +2449,7 @@ public sealed class LocalStatusServer : BackgroundService
                 }
                 function fd(){ return new URLSearchParams(new FormData(document.getElementById('connform'))); }
                 function setStatus(t, ok){ var s=document.getElementById('status'); s.textContent=t; s.style.color = ok ? '#166534' : '#92400e'; }
-                function resetForm(){ document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('f_pass').placeholder=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); onVendasToggle(); }
+                function resetForm(){ showDeps(null); document.getElementById('connform').reset(); document.getElementById('f_id').value=''; document.getElementById('f_pass').placeholder=''; document.getElementById('formtitle').textContent='Adicionar conexao'; setStatus(''); loadLojas(); onVendasToggle(); }
                 function editConn(id){
                   var c = CONNS[id]; if(!c) return;
                   document.getElementById('f_id').value = c.id;
@@ -2429,6 +2474,7 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_enabled').checked = !!c.enabled;
                   onVendasToggle();
                   document.getElementById('formtitle').textContent = 'Editar conexao: ' + (c.nome||'');
+                  showDeps(c.id);
                   window.scrollTo(0, document.getElementById('formtitle').offsetTop - 20);
                 }
                 function save(){
@@ -2786,6 +2832,12 @@ public sealed class LocalStatusServer : BackgroundService
 
                 var result = await _arpaDdlRunner.PrepareViewsAsync(
                     V("host"), I("port", 5432), V("database"), V("dba_user"), V("dba_password"), runtimeUser, cancellationToken);
+                if (result.Ok)
+                {
+                    // Reavalia as dependencias ja: o ciclo que comeca agora tira a pausa "Preparar views".
+                    _manualSyncSignal.TrySignal();
+                }
+
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
                 return;
             }
@@ -3078,6 +3130,13 @@ public sealed class LocalStatusServer : BackgroundService
                 body.dark button.mini.danger { background: #7f1d1d; color: #fecaca; }
                 body.dark .okbox { background: #14532d; color: #bbf7d0; }
                 body.dark .warnbox { background: #78350f; color: #fde68a; }
+                body.dark .infobox { background: #0c4a6e; color: #bae6fd; }
+                body.dark summary { color: #e2e8f0; }
+                body.dark details { border-color: #334155; }
+                body.dark details.dba { background: #422006; border-color: #d97706; }
+                body.dark details.dba > summary { color: #fde68a; }
+                body.dark .depbadge.pausa { background: #78350f; color: #fde68a; }
+                body.dark .depbadge.aviso { background: #334155; color: #cbd5e1; }
                 body.dark .pill { background: #334155; color: #e2e8f0; }
                 body.dark .syncstep { background: #334155; color: #94a3b8; }
                 body.dark .syncstep.active { background: #1e3a8a; color: #bfdbfe; }

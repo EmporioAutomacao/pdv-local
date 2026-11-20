@@ -563,6 +563,41 @@ $env:ARPA_SYNC_READONLY_PASSWORD = "<senha-runtime-read-only>"
 
 5. Acionar ciclo manual e confirmar `runtime_status=idle`.
 
+## Incidente: conexao Arpa pausada pedindo "Preparar views"
+
+Sinais:
+
+- aviso no topo do dashboard e em `/status`: "A conexao Arpa "X" precisa de
+  "Preparar views": as views sync_export do banco Arpa estao desatualizadas
+  (instalada: ...; necessaria: ...)";
+- selo "⚠ Preparar views (pausada)" na conexao, em Configuracoes > Arpa;
+- log do ciclo: `Conexao "X": PAUSADA - ...`; nada novo daquela conexao chega ao ERP.
+
+Causa: o agente foi atualizado com um script de views mais novo (marca
+`ararasuite:sync_export_versao` no schema `sync_export`) e o banco Arpa ainda tem
+as views anteriores, ou views criadas a mao, sem marca. So pausa quando o ERP ja e
+compativel (heartbeat com `accepted_entity_types`, ERP 0.0.164+). Com o ERP antigo
+e so aviso.
+
+Passos:
+
+1. Se o aviso pedir, atualize o ERP primeiro.
+2. Em `http://127.0.0.1:47891/config/arpa`, clique em **Editar** na conexao. O
+   bloco "Preparar banco Arpa" abre com o motivo.
+3. Informe o usuario DBA (senha em branco se trust/peer) e clique em **Preparar
+   views sync_export**. **Nao** marque "Forcar".
+4. Se aparecer o aviso do banco local, rode a rotina "Corrigir
+   outbox_events_entity_type_check" (incidente abaixo).
+5. Confirme no log do ciclo, que comeca sozinho logo depois, que a conexao nao
+   esta mais `PAUSADA` e que "Cadastros (especies/condicoes/contas)" leu itens.
+6. Confira a marca, so leitura, com o usuario da conexao:
+
+```sql
+SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname = 'sync_export';
+```
+
+   Deve devolver `ararasuite:sync_export_versao=<versao do agente>`.
+
 ## Incidente: entity_type nao permitido na fila local (23514)
 
 Sinais:
@@ -570,8 +605,10 @@ Sinais:
 - log do coletor mostra `<entidade>: falhou - 23514: a nova linha da relacao
   "outbox_events" viola a restricao de verificacao
   "outbox_events_entity_type_check"`;
-- afeta tipicamente `cobranca` e/ou `plano_historico` (entity_type mais
-  recentes no contrato Sync, 2.10.0/2.11.0);
+- afeta tipicamente `cobranca`, `plano_historico` ou `catalogo` (entity_type
+  mais recentes no contrato Sync: 2.10.0, 2.11.0 e 2.19.0). A partir do agente com
+  o contrato 2.19.0 o problema tambem **pausa** a conexao, com o aviso
+  "o banco local do agente nao aceita ...", em vez de so falhar a entidade;
 - a view `sync_export.<entidade>` correspondente existe e le normalmente (sem
   `42P01`) - o erro acontece so ao tentar enfileirar localmente.
 
@@ -598,8 +635,8 @@ psql -U ararasuite -h localhost -d ararasuite -c "SELECT pg_get_constraintdef(oi
 ```
 
    Deve listar todos os `entity_type` do contrato atual (`cliente`,
-   `produto`, `estoque`, `venda`, `financeiro`, `cobranca`,
-   `plano_historico`). Contagem por entidade/status para fechar o
+   `produto`, `estoque`, `venda`, `financeiro`, `compra`, `cobranca`,
+   `plano_historico`, `catalogo`). Contagem por entidade/status para fechar o
    diagnostico:
 
 ```sql

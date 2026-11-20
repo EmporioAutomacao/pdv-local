@@ -1298,3 +1298,12 @@ BEGIN
   END;
 END;
 $catalogos$;
+
+-- ---------------------------------------------------------------------------
+-- Versao deste script (lida pelo SyncAgent: ArpaDdlRunner.EmbeddedViewsVersion).
+-- O agente compara com a versao gravada no banco do Arpa e, se a gravada for
+-- menor ou nao existir, avisa "Preparar views" e pausa a coleta da conexao (quando
+-- o ERP ja e compativel). Subir este numero sempre que uma mudanca no script exigir
+-- preparar as views de novo. Precisa ser a ultima instrucao do arquivo.
+-- ---------------------------------------------------------------------------
+COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.21.1';
