@@ -93,7 +93,24 @@ hoje (consultado só com leitura em 2026-11-20).
 3. Em cada instalação: "Preparar views", com credencial DBA, e depois "Corrigir
    outbox_events_entity_type_check" (Manutenção do banco local).
 
-A VM 192.168.0.184 recebeu um binário com o catálogo às 17:58 de 2026-11-20, **antes** desta
-proteção. Até receber o binário novo, os passos 3 dependem do operador.
+## Histórico na VM 192.168.0.184 (2026-11-20)
 
-Testes: `tests/sync-agent-tests/ErpCompatibilityTests.cs` e `ArpaStandardEntitiesTests.cs`.
+A conexão "Geral" da VM lê o Arpa **real** de Anápolis e envia ao ERP do demo.
+
+| Horário | O que |
+|---|---|
+| 17:58 | Agente com o catálogo, **antes** da proteção (sessão `pdv-local`) |
+| 19:00 | 1.6.53 (`+dcb8a04`): catálogo e proteção contra ERP antigo |
+| 20:47 | 1.6.54 (`+97f374b`). Depois de um ciclo, "Geral" ficou **PAUSADA** pedindo "Preparar views" (instalada: sem versão; necessária: 2026.11.21.1). Isso confirmou que o ERP do demo já declara `catalogo` |
+| depois das 20:47 | "Preparar views" rodado no painel. O Arpa de Anápolis passou a ter a marca `2026.11.21.1` e a view `sync_export.catalogos` |
+| 21:04 | Agente **e bandeja** 1.6.55 (`+f3fc520`). Bandeja reaberta na sessão do usuário `suporte`. Conexão sem pausa, 0 pendentes, dead letters inalteradas (135), ciclo sem erro, etapa "Cadastros" rodando |
+
+Backups dos binários anteriores ficam em `C:\ProgramData\AraraSuite.com.br\backups\SyncAgent-bin-*` e
+`SyncTray-bin-*`. Para atualizar a bandeja, veja `development-structure-and-vm-runbook.md`, seção
+"Publicar nova build da bandeja (SyncAgent.Tray) na VM".
+
+Ainda não confirmado: se os 103 itens do cadastro já chegaram ao ERP do demo. O ciclo das 21:08 leu
+0 porque o cadastro vai uma vez por dia. Confira os quadros da Conexão Arpa no ERP.
+
+Testes: `tests/sync-agent-tests/ErpCompatibilityTests.cs`, `ArpaStandardEntitiesTests.cs`,
+`ArpaDependencyRuleTests.cs` e `ArpaDependencyHtmlTests.cs`.

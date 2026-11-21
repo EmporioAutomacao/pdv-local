@@ -414,6 +414,61 @@ finally {
 }
 ```
 
+## Publicar nova build da bandeja (SyncAgent.Tray) na VM
+
+A bandeja fica em `C:\Program Files\AraraSuite.com.br\Sync\Tray` (5 arquivos, sem
+configuracao propria) e roda na **sessao do usuario logado**, nao como servico. O fluxo
+do agente acima nao a atualiza.
+
+> **Armadilhas confirmadas em 2026-11-20:**
+> - O processo roda pelo caminho curto (`SYNCAG~1.EXE`). `Get-Process -Name 'SyncAgent.Tray'`
+>   **nao encontra** a bandeja aberta. Procure pela linha de comando:
+>   `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*Sync\Tray*' }`.
+> - Com a bandeja aberta, `SyncAgent.Tray.dll` fica travada. Uma copia em lote para no meio e
+>   deixa a pasta **misturada**: no caso real o `deps.json` ficou novo e a `dll` antiga. Faca
+>   backup antes e, se a copia falhar, restaure o backup inteiro.
+> - Para reabrir na sessao do usuario **nao** use `schtasks /create ... /it`: com o gatilho no
+>   passado ele imprime um aviso em stderr, que o PowerShell remoto trata como erro e que
+>   interrompe o script. Use `Register-ScheduledTask` com `-LogonType Interactive`, que roda na
+>   sessao de quem esta logado e nao guarda senha. Depois remova a tarefa.
+> - `$home` e variavel reservada do PowerShell: nao use esse nome em script remoto.
+
+```powershell
+$trayDir = 'D:\GitHub\ararasuite\pdv-local\artifacts\sync-agent-tray\manual-publish'
+dotnet publish D:\GitHub\ararasuite\pdv-local\src\sync-agent-tray\SyncAgent.Tray.csproj -c Release -r win-x64 --self-contained false -o $trayDir
+# copiar $trayDir\* para uma pasta temporaria na VM ($tmpT), como no fluxo do agente, e entao:
+Invoke-Command -Session $session -ScriptBlock {
+    param($tmpT)
+    $ErrorActionPreference = 'Stop'
+    $tray = 'C:\Program Files\AraraSuite.com.br\Sync\Tray'
+    $bkT = "C:\ProgramData\AraraSuite.com.br\backups\SyncTray-bin-$(Get-Date -Format yyyyMMdd-HHmmss)"
+    New-Item -ItemType Directory -Path $bkT -Force | Out-Null
+    Get-ChildItem -LiteralPath $tray -File | Copy-Item -Destination $bkT -Force
+
+    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*Sync\Tray*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Start-Sleep -Seconds 2
+    try { Get-ChildItem -LiteralPath $tmpT -File | Copy-Item -Destination $tray -Force }
+    catch { Get-ChildItem -LiteralPath $bkT -File | Copy-Item -Destination $tray -Force; throw }
+
+    # reabre na sessao do usuario logado (Suporte) e remove a tarefa
+    $nome = 'AraraSuiteTrayRestartOnce'
+    $exe = Join-Path $tray 'SyncAgent.Tray.exe'
+    Register-ScheduledTask -TaskName $nome -TaskPath '' -Force `
+        -Action (New-ScheduledTaskAction -Execute $exe -WorkingDirectory $tray) `
+        -Principal (New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\Suporte" -LogonType Interactive -RunLevel Limited) | Out-Null
+    Start-ScheduledTask -TaskName $nome -TaskPath ''
+    Start-Sleep -Seconds 8
+    Unregister-ScheduledTask -TaskName $nome -TaskPath '' -Confirm:$false
+    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*Sync\Tray*' } |
+        ForEach-Object { "bandeja pid=$($_.ProcessId) sessao=$($_.SessionId)" }   # deve ser a sessao do usuario
+} -ArgumentList $tmpT
+```
+
+Sem ninguem logado, a tarefa interativa nao roda. A bandeja abre sozinha no proximo logon
+pelo atalho `AraraSuite Sync Tray.lnk` em
+`C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp`, criado pelo instalador
+(conferido na VM em 2026-11-20).
+
 ## Instalador e homologacao limpa
 
 Scripts principais:
