@@ -22,33 +22,53 @@ namespace SyncAgent.Configuration;
 /// </summary>
 public static class ErpSecurityConfigDiagnostics
 {
-    public static IReadOnlyList<string> EvaluateWarnings(ErpSecurityOptions options)
+    /// <summary>Chave estavel do aviso de mTLS (usada no heartbeat, contrato Sync 2.20.0).</summary>
+    public const string MutualTlsKey = "mutual_tls";
+
+    /// <summary>Chave estavel do aviso de bearer token (usada no heartbeat, contrato Sync 2.20.0).</summary>
+    public const string BearerTokenKey = "bearer_token";
+
+    public static IReadOnlyList<string> EvaluateWarnings(ErpSecurityOptions options, string? provisionedAccessToken)
+        => Evaluate(options, provisionedAccessToken).Select(w => w.Message).ToList();
+
+    /// <param name="provisionedAccessToken">
+    /// Token gravado pela ativacao (<c>EffectiveSyncAgentConfiguration.AccessToken</c>). E o
+    /// primeiro que <see cref="Security.ErpCredentialProvider.CreateAuthorizationHeader"/> usa;
+    /// sem considerar ele, toda instalacao ativada mostrava o aviso de bearer token falso.
+    /// </param>
+    public static IReadOnlyList<ErpSecurityConfigWarning> Evaluate(ErpSecurityOptions options, string? provisionedAccessToken)
     {
-        var warnings = new List<string>();
+        var warnings = new List<ErpSecurityConfigWarning>();
 
         if (options.RequireMutualTls
             && string.IsNullOrWhiteSpace(options.ClientCertificateThumbprint)
             && string.IsNullOrWhiteSpace(options.ClientCertificatePath))
         {
-            warnings.Add(
+            warnings.Add(new ErpSecurityConfigWarning(
+                MutualTlsKey,
                 "ErpSecurity:RequireMutualTls esta habilitado, mas nenhum certificado foi provisionado "
                 + "(ClientCertificateThumbprint e ClientCertificatePath vazios). Toda chamada ao ERP vai "
                 + "falhar com 'Client certificate is required...'. Corrija editando appsettings.json "
                 + "(elevado, secao ErpSecurity: RequireMutualTls=false se este cliente nao usa mTLS, ou "
                 + "provisione um certificado via provision-sync-agent-security.ps1 -PfxPath) e reinicie "
-                + "o servico AraraSuiteSync.");
+                + "o servico AraraSuiteSync."));
         }
 
         if (options.RequireBearerToken
+            && string.IsNullOrWhiteSpace(provisionedAccessToken)
             && string.IsNullOrWhiteSpace(options.AccessToken)
             && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(options.AccessTokenEnvironmentVariable)))
         {
-            warnings.Add(
-                $"ErpSecurity:RequireBearerToken esta habilitado, mas nao ha token configurado (nem em "
-                + $"ErpSecurity:AccessToken, nem na variavel de ambiente '{options.AccessTokenEnvironmentVariable}'). "
-                + "Toda chamada ao ERP vai falhar com 'Bearer token is required...'.");
+            warnings.Add(new ErpSecurityConfigWarning(
+                BearerTokenKey,
+                $"ErpSecurity:RequireBearerToken esta habilitado, mas nao ha token configurado (nem pela "
+                + $"ativacao, nem em ErpSecurity:AccessToken, nem na variavel de ambiente "
+                + $"'{options.AccessTokenEnvironmentVariable}'). Toda chamada ao ERP vai falhar com "
+                + "'Bearer token is required...'."));
         }
 
         return warnings;
     }
 }
+
+public sealed record ErpSecurityConfigWarning(string Key, string Message);

@@ -489,7 +489,9 @@ public sealed class LocalStatusServer : BackgroundService
     /// </summary>
     private async Task<IReadOnlyList<string>> BuildConfigWarningsAsync(CancellationToken cancellationToken)
     {
-        var warnings = new List<string>(ErpSecurityConfigDiagnostics.EvaluateWarnings(_erpSecurityOptions.CurrentValue));
+        var warnings = new List<string>(ErpSecurityConfigDiagnostics.EvaluateWarnings(
+            _erpSecurityOptions.CurrentValue,
+            _effectiveConfigProvider.GetCurrent().AccessToken));
 
         var outdatedEntityTypes = await _localStore.GetOutdatedEntityTypeCheckEntitiesAsync(cancellationToken);
         if (outdatedEntityTypes.Count > 0)

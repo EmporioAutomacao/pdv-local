@@ -136,8 +136,8 @@ D:\GitHub\erp\venv\Scripts\python.exe D:\GitHub\erp\manage.py test sync_api.test
 
 | Item | Valor atual |
 | --- | --- |
-| Nome observado | `ERP` |
-| IP | `192.168.0.184` |
+| Nome da maquina | `ERP` (usar o nome, nao o IP) |
+| IP | DHCP (muda com a rede; ate 2026-11-21 era `192.168.0.184` fixo). Use sempre o nome `ERP` nos comandos |
 | Protocolo | WinRM HTTP |
 | Porta | `5985` |
 | Usuario operacional | `Suporte` |
@@ -249,7 +249,7 @@ if ([string]::IsNullOrWhiteSpace($env:SYNC_VM_PASSWORD)) {
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 
-Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic -ScriptBlock {
+Invoke-Command -ComputerName ERP -Credential $cred -Authentication Basic -ScriptBlock {
     hostname
     Get-Service 'AraraSuiteSync'
 }
@@ -262,7 +262,7 @@ Administrador na maquina local:
 winrm quickconfig -force
 Set-Service WinRM -StartupType Automatic
 Start-Service WinRM
-Set-Item WSMan:\localhost\Client\TrustedHosts -Value "192.168.0.184" -Concatenate -Force
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value "ERP" -Concatenate -Force
 Set-Item WSMan:\localhost\Client\AllowUnencrypted -Value $true
 Set-Item WSMan:\localhost\Client\Auth\Basic -Value $true
 ```
@@ -283,7 +283,7 @@ netstat -ano | findstr ":5985"
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 
-Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic -ScriptBlock {
+Invoke-Command -ComputerName ERP -Credential $cred -Authentication Basic -ScriptBlock {
     $service = Get-Service 'AraraSuiteSync'
     $root = Invoke-WebRequest -Uri 'http://127.0.0.1:47891/' -UseBasicParsing -TimeoutSec 10
     $status = Invoke-WebRequest -Uri 'http://127.0.0.1:47891/status' -UseBasicParsing -TimeoutSec 10
@@ -310,7 +310,7 @@ Exemplo para alterar a conexao read-only do Arpa:
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
 
-Invoke-Command -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic -ScriptBlock {
+Invoke-Command -ComputerName ERP -Credential $cred -Authentication Basic -ScriptBlock {
     $ErrorActionPreference = 'Stop'
 
     $path = 'C:\Program Files\AraraSuite.com.br\Sync\Agent\appsettings.json'
@@ -349,6 +349,12 @@ instalados.
 > `runtimes\win\lib\net8.0\*.dll` para
 > `<installDir>\runtimes\win\lib\net8.0\` junto com os binarios soltos.
 >
+> **Pegadinha confirmada em 2026-11-22:** a versao que o agente informa (`/status`,
+> heartbeat, "Atualizar App") vem do arquivo `VERSION` na pasta do agente, nao do
+> binario (`Program.cs`). Trocar so os binarios deixa o `VERSION` antigo: em 20/11 a VM
+> rodava a 1.6.55 informando 1.6.53, e o ERP tambem registrou 1.6.53. O script abaixo
+> grava o `VERSION` com a versao do `SyncAgent.dll` publicado.
+>
 > Se a ferramenta que estiver rodando o deploy bloquear `Remove-Item` em
 > caminhos `C:\Program Files\...` (classificador de seguranca local), use
 > uma pasta de staging remota com timestamp exclusivo em vez de apagar a
@@ -361,7 +367,7 @@ dotnet publish D:\GitHub\pdv-local\src\sync-agent\SyncAgent.csproj -c Release -o
 
 $sec = ConvertTo-SecureString $env:SYNC_VM_PASSWORD -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('Suporte', $sec)
-$session = New-PSSession -ComputerName 192.168.0.184 -Credential $cred -Authentication Basic
+$session = New-PSSession -ComputerName ERP -Credential $cred -Authentication Basic
 
 try {
     $stamp = Get-Date -Format yyyyMMddHHmmss
@@ -378,8 +384,11 @@ try {
     Invoke-Command -Session $session -ScriptBlock { param($remoteTemp) New-Item -ItemType Directory -Path (Join-Path $remoteTemp 'runtimes\win\lib\net8.0') -Force | Out-Null } -ArgumentList $remoteTemp
     Copy-Item -Path (Join-Path $publishDir 'runtimes\win\lib\net8.0\*.dll') -Destination (Join-Path $remoteTemp 'runtimes\win\lib\net8.0') -ToSession $session -Force
 
+    # Versao sem o "+commit" (ex.: 1.6.56), para o arquivo VERSION (ver nota acima).
+    $agentVersion = ((Get-Item (Join-Path $publishDir 'SyncAgent.dll')).VersionInfo.ProductVersion -split '\+')[0]
+
     Invoke-Command -Session $session -ScriptBlock {
-        param($remoteTemp, $installDir)
+        param($remoteTemp, $installDir, $agentVersion)
         $ErrorActionPreference = 'Stop'
         $serviceName = 'AraraSuiteSync'
         $backupDir = "C:\ProgramData\AraraSuite.com.br\backups\SyncAgent-bin-$(Get-Date -Format yyyyMMdd-HHmmss)"
@@ -396,16 +405,19 @@ try {
         New-Item -ItemType Directory -Path $runtimesTarget -Force | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $remoteTemp 'runtimes\win\lib\net8.0') -File | Copy-Item -Destination $runtimesTarget -Force
 
+        Set-Content -Path (Join-Path $installDir 'VERSION') -Value $agentVersion -Encoding UTF8 -NoNewline
+
         Start-Service $serviceName
         Start-Sleep -Seconds 5
 
         [pscustomobject]@{
             ServiceStatus = (Get-Service $serviceName).Status.ToString()
             BackupDir = $backupDir
+            AgentVersion = (Invoke-RestMethod -Uri 'http://127.0.0.1:47891/status' -TimeoutSec 10).agent_version
             DashboardHttp = (Invoke-WebRequest -Uri 'http://127.0.0.1:47891/' -UseBasicParsing -TimeoutSec 10).StatusCode
             StatusHttp = (Invoke-WebRequest -Uri 'http://127.0.0.1:47891/status' -UseBasicParsing -TimeoutSec 10).StatusCode
         }
-    } -ArgumentList $remoteTemp, $installDir
+    } -ArgumentList $remoteTemp, $installDir, $agentVersion
 }
 finally {
     if ($session) {

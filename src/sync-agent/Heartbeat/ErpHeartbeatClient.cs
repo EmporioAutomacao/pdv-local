@@ -26,6 +26,7 @@ public sealed class ErpHeartbeatClient
     private readonly ArpaConnectionsStore _arpaConnectionsStore;
     private readonly ErpCredentialProvider _credentialProvider;
     private readonly ErpCompatibility _erpCompatibility;
+    private readonly AgentAlertsProvider _alertsProvider;
 
     public ErpHeartbeatClient(
         ILogger<ErpHeartbeatClient> logger,
@@ -35,9 +36,11 @@ public sealed class ErpHeartbeatClient
         LocalSyncStore localStore,
         ArpaConnectionsStore arpaConnectionsStore,
         ErpCredentialProvider credentialProvider,
-        ErpCompatibility erpCompatibility)
+        ErpCompatibility erpCompatibility,
+        AgentAlertsProvider alertsProvider)
     {
         _erpCompatibility = erpCompatibility;
+        _alertsProvider = alertsProvider;
         _logger = logger;
         _effectiveConfigProvider = effectiveConfigProvider;
         _heartbeatOptions = heartbeatOptions;
@@ -67,6 +70,7 @@ public sealed class ErpHeartbeatClient
         timeout.CancelAfter(TimeSpan.FromSeconds(heartbeatOptions.TimeoutSeconds));
 
         var arpaConnections = _arpaConnectionsStore.ReadAll();
+        var alerts = await TryGetAlertsAsync(cancellationToken);
         var request = new HeartbeatRequest(
             DateTimeOffset.UtcNow,
             syncOptions.AgentVersion,
@@ -80,7 +84,8 @@ public sealed class ErpHeartbeatClient
                     c.ControlaEstoque, c.SyncProdutos, c.SyncClientes, c.SyncEstoque,
                     c.SyncVendas, c.SyncFinanceiro, c.SyncCompra, c.SyncCobranca, c.SyncPlanoHistorico,
                     c.Enabled,
-                    string.IsNullOrWhiteSpace(c.TabelaPreco) ? null : c.TabelaPreco.Trim())).ToList());
+                    string.IsNullOrWhiteSpace(c.TabelaPreco) ? null : c.TabelaPreco.Trim())).ToList(),
+            alerts);
 
         var escapedInstanceId = Uri.EscapeDataString(syncOptions.InstanceId);
         using var httpRequest = new HttpRequestMessage(
@@ -180,6 +185,27 @@ public sealed class ErpHeartbeatClient
         }
     }
 
+    /// <summary>
+    /// Avisos do painel para o ERP (contrato Sync 2.20.0). Falha aqui nao derruba o heartbeat:
+    /// sem a lista o campo nao vai, e o ERP mantem os avisos que ja tinha (lista vazia
+    /// resolveria todos, o que esconderia o problema).
+    /// </summary>
+    private async Task<IReadOnlyList<AgentAlert>?> TryGetAlertsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _alertsProvider.GetActiveAlertsAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not build agent alerts for the heartbeat; sending without alerts.");
+            return null;
+        }
+    }
 }
 
 public static class ErpHeartbeatHttpClient
@@ -205,7 +231,8 @@ public sealed record HeartbeatRequest(
     [property: JsonPropertyName("queue_size")] long QueueSize,
     [property: JsonPropertyName("oldest_pending_age_seconds")] int OldestPendingAgeSeconds,
     [property: JsonPropertyName("connectivity")] string Connectivity,
-    [property: JsonPropertyName("arpa_connections")] IReadOnlyList<HeartbeatArpaConnection>? ArpaConnections = null);
+    [property: JsonPropertyName("arpa_connections")] IReadOnlyList<HeartbeatArpaConnection>? ArpaConnections = null,
+    [property: JsonPropertyName("alerts")] IReadOnlyList<AgentAlert>? Alerts = null);
 
 public sealed record HeartbeatArpaConnection(
     [property: JsonPropertyName("nome")] string Nome,

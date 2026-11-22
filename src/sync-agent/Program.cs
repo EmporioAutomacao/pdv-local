@@ -96,6 +96,7 @@ builder.Services.AddSingleton<ArpaCollector>();
 builder.Services.AddSingleton<ArpaResyncProcessor>();
 builder.Services.AddSingleton<ErpCredentialProvider>();
 builder.Services.AddSingleton<ErpEventDispatcher>();
+builder.Services.AddSingleton<AgentAlertsProvider>();
 builder.Services.AddSingleton<ErpHeartbeatClient>();
 builder.Services.AddSingleton<ErpResyncAckClient>();
 builder.Services.AddSingleton<ErpUpdateAckClient>();

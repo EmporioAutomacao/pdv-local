@@ -314,7 +314,9 @@ Onde aparece:
   local (pausada)";
 - em **Editar**, o motivo aparece acima do bloco, e o bloco abre sozinho quando o
   motivo e "Preparar views";
-- log do ciclo: "Conexao "X": PAUSADA - ...".
+- log do ciclo: "Conexao "X": PAUSADA - ...";
+- **no ERP (agente 1.6.56+ e ERP 0.0.166+):** notificacao para os superusuarios
+  quando o aviso aparece e quando e resolvido. Ver `docs/sync-agent-avisos-no-erp.md`.
 
 **Link direto:** nos avisos (topo do dashboard, caixas desta pagina, inclusive a
 do ERP antigo) o texto **"Preparar views"** e um link para
