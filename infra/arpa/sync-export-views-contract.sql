@@ -108,7 +108,7 @@ WHERE p.codigo IS NOT NULL;
 CREATE OR REPLACE VIEW sync_export.vendas AS
 SELECT
     v.codigo::text AS entity_key,
-    COALESCE(v.updated_at_utc, v.data, now())::timestamptz AS occurred_at_utc,
+    COALESCE(v.updated_at_utc, v.data, TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS occurred_at_utc,  -- nunca now(): mudaria a cada leitura e o coletor (limite = agora) nunca leria
     jsonb_build_object(
         'codigo_venda_arpa', v.codigo,
         'data', COALESCE(v.data, v.updated_at_utc),
@@ -155,7 +155,15 @@ WHERE v.codigo IS NOT NULL;
 CREATE OR REPLACE VIEW sync_export.financeiro AS
 SELECT
     r.codigo::text AS entity_key,
-    COALESCE(r.updated_at_utc, r.datapagamento, r.vencimento, now())::timestamptz AS occurred_at_utc,
+    -- occurred_at = ultima mudanca real do titulo (venda/emissao ou baixa), nunca
+    -- o vencimento nem data futura: o SyncAgent pagina por (occurred_at, entity_key)
+    -- e nao le linha no futuro - vencimento no futuro adiaria o titulo ate vencer.
+    -- Data futura vira NULL (sync_export._nao_futuro), nunca LEAST(now(), ...): now()
+    -- mudaria a cada leitura e cada leitura geraria um event_id novo.
+    COALESCE(sync_export._nao_futuro(r.updated_at_utc),
+        GREATEST(sync_export._nao_futuro((SELECT pd.data FROM public.pedidos pd WHERE pd.codigo = r.codpedido LIMIT 1)::timestamptz),
+                 sync_export._nao_futuro(r.datapagamento::timestamptz)),
+        TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS occurred_at_utc,
     jsonb_build_object(
         'titulo_externo_id', r.codigo,
         'natureza', 'receber',
@@ -177,7 +185,9 @@ WHERE r.codigo IS NOT NULL
 UNION ALL
 SELECT
     ('pag-' || p.codigo)::text AS entity_key,
-    COALESCE(p.updated_at_utc, p.datapagamento, p.vencimento, now())::timestamptz AS occurred_at_utc,
+    COALESCE(sync_export._nao_futuro(p.updated_at_utc),
+        GREATEST(sync_export._nao_futuro(p.dataemissao::timestamptz), sync_export._nao_futuro(p.datapagamento::timestamptz)),
+        TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS occurred_at_utc,
     jsonb_build_object(
         'titulo_externo_id', p.codigo,
         'natureza', 'pagar',

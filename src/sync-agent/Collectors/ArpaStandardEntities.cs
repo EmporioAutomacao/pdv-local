@@ -12,11 +12,19 @@ namespace SyncAgent.Collectors;
 /// </summary>
 public static class ArpaStandardEntities
 {
+    // Pagina por (occurred_at_utc, entity_key) entre @from (exclusivo) e @to
+    // (inclusivo; @to_key nulo = qualquer chave naquele instante). Ver
+    // ArpaCollectionCursor: o coletor nunca passa @to_utc no futuro.
+    // entity_key sempre em COLLATE "C" (ordem de bytes = ordinal do C#): com a
+    // collation do banco (pt_BR/en_US ignoram pontuacao) a ordem do Postgres e a do
+    // ArpaCollectionPager divergiriam e a paginacao poderia pular ou repetir linhas.
     private const string QueryTemplate =
         "SELECT entity_key, occurred_at_utc, payload_json, trace_id " +
         "FROM sync_export.{0} " +
-        "WHERE occurred_at_utc > @watermark_utc " +
-        "ORDER BY occurred_at_utc, entity_key LIMIT @limit";
+        "WHERE (occurred_at_utc, entity_key COLLATE \"C\") > (@from_utc, @from_key::text COLLATE \"C\") " +
+        "AND (occurred_at_utc < @to_utc OR (occurred_at_utc = @to_utc " +
+        "AND (@to_key::text IS NULL OR entity_key COLLATE \"C\" <= @to_key::text COLLATE \"C\"))) " +
+        "ORDER BY occurred_at_utc, entity_key COLLATE \"C\" LIMIT @limit";
 
     public static IReadOnlyList<ArpaEntityCollectorOptions> Build(
         bool produtos,

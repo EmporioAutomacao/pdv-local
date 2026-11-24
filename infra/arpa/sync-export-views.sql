@@ -74,6 +74,15 @@ BEGIN
 END;
 $fn$;
 
+-- Data que ainda nao chegou vira NULL (some do GREATEST/COALESCE do occurred_at).
+-- Nao usar LEAST(now(), ...): o occurred_at viraria now() e mudaria a cada leitura,
+-- e cada leitura geraria um event_id novo (o SyncAgent pagina por occurred_at e
+-- o usa no event_id). Assim o valor so muda uma vez, quando a data chega.
+CREATE OR REPLACE FUNCTION sync_export._nao_futuro(p_ts timestamptz)
+RETURNS timestamptz LANGUAGE sql STABLE AS $fn$
+    SELECT CASE WHEN p_ts <= now() THEN p_ts END
+$fn$;
+
 DO $sync_export$
 DECLARE
     v_tz        text := 'America/Sao_Paulo';
@@ -323,9 +332,18 @@ $sync_export$;
 --    fora do escopo desta view.
 DO $vf$
 DECLARE
+    -- Ramo padrao criou a view NESTA execucao? O fallback roda quando nao criou.
+    -- Nao usar to_regclass(...) IS NULL: no re-preparo a view antiga ja existe e o
+    -- fallback era pulado, deixando a definicao velha com a versao nova gravada.
+    vendas_padrao_ok boolean := false;
+    fin_padrao_ok    boolean := false;
     fin_receber_sql text;
     fin_pagar_sql   text := '';
     fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
+    -- occurred_at do financeiro: data da venda (cabecalho) / emissao do titulo e
+    -- data da baixa - NUNCA o vencimento (data futura levava o watermark do agente
+    -- para o futuro e todo titulo novo ou baixa ficava para tras para sempre).
+    fv_t text; fv_ord text; fv_date text; r_emis text; venda_dt_expr text; pg_dt_expr text;
 
     v_t text; v_ord text; v_date text; v_cust text; v_status text; v_cancel text;
     v_disc text; v_especie text; v_vend text; v_cond text;
@@ -363,7 +381,7 @@ BEGIN
         EXECUTE $v$
             CREATE OR REPLACE VIEW sync_export.vendas AS
             SELECT v.codigo::text AS entity_key,
-                COALESCE(v.updated_at_utc, v.data, now())::timestamptz AS occurred_at_utc,
+                COALESCE(v.updated_at_utc, v.data, TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS occurred_at_utc,  -- nunca now(): mudaria a cada leitura e o coletor (limite = agora) nunca leria
                 jsonb_build_object(
                     'codigo_venda_arpa', v.codigo, 'data', COALESCE(v.data, v.updated_at_utc),
                     'status', v.status, 'vendedor_codigo', v.codvendedor,
@@ -380,13 +398,14 @@ BEGIN
             WHERE v.codigo IS NOT NULL
         $v$;
         RAISE NOTICE 'sync_export.vendas criada (schema padrao pedidos/itenspedido).';
+        vendas_padrao_ok := true;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'sync_export.vendas (schema padrao) pulada (%).', SQLERRM;
     END;
 
     -- ---- fallback dinamico de VENDAS ----
     BEGIN
-      IF to_regclass('sync_export.vendas') IS NULL THEN
+      IF NOT vendas_padrao_ok THEN
         v_t := sync_export._first_table(ARRAY['cabecalho_ordem_servico','cabecalho_os','cabecalho_venda',
             'vendas','venda','pedidos','pedido']);
         IF v_t IS NULL THEN
@@ -482,7 +501,10 @@ BEGIN
     -- para nao colidir com o codigo de um titulo a receber homonimo.
     fin_receber_sql := $f$
         SELECT r.codigo::text AS entity_key,
-            COALESCE(r.updated_at_utc, r.datapagamento, r.vencimento, now())::timestamptz AS occurred_at_utc,
+            COALESCE(sync_export._nao_futuro(r.updated_at_utc),
+                GREATEST(sync_export._nao_futuro((SELECT pd.data FROM public.pedidos pd WHERE pd.codigo = r.codpedido LIMIT 1)::timestamptz),
+                         sync_export._nao_futuro(r.datapagamento::timestamptz)),
+                TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS occurred_at_utc,
             jsonb_build_object(
                 'titulo_externo_id', r.codigo, 'natureza', 'receber',
                 'codigo_venda_arpa', r.codpedido, 'cliente_documento', c.cnpj_cpf,
@@ -501,7 +523,9 @@ BEGIN
         fin_pagar_sql := $fp$
             UNION ALL
             SELECT ('pag-' || p.codigo)::text AS entity_key,
-                COALESCE(p.updated_at_utc, p.datapagamento, p.vencimento, now())::timestamptz AS occurred_at_utc,
+                COALESCE(sync_export._nao_futuro(p.updated_at_utc),
+                    GREATEST(sync_export._nao_futuro(p.dataemissao::timestamptz), sync_export._nao_futuro(p.datapagamento::timestamptz)),
+                    TIMESTAMPTZ '2000-01-01 00:00:00+00')::timestamptz AS occurred_at_utc,
                 jsonb_build_object(
                     'titulo_externo_id', p.codigo, 'natureza', 'pagar',
                     'compra_externa_id', p.codpedido, 'documento', p.documento,
@@ -522,12 +546,14 @@ BEGIN
         EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql || fin_pagar_sql;
         RAISE NOTICE 'sync_export.financeiro criada% (schema padrao).',
             CASE WHEN fin_pagar_sql <> '' THEN ' (receber + pagar)' ELSE ' (receber)' END;
+        fin_padrao_ok := true;
     EXCEPTION WHEN OTHERS THEN
         -- o ramo de contas_pagar bateu num schema diferente do template;
         -- recria so com contas_receber para nao regredir o que ja funcionava.
         BEGIN
             EXECUTE 'CREATE OR REPLACE VIEW sync_export.financeiro AS ' || fin_receber_sql;
             RAISE NOTICE 'sync_export.financeiro criada (receber; pagar pulado: %).', SQLERRM;
+            fin_padrao_ok := true;
         EXCEPTION WHEN OTHERS THEN
             RAISE NOTICE 'sync_export.financeiro (schema padrao) pulada (%).', SQLERRM;
         END;
@@ -535,7 +561,7 @@ BEGIN
 
     -- ---- fallback dinamico de FINANCEIRO (receber + pagar) ----
     BEGIN
-      IF to_regclass('sync_export.financeiro') IS NULL THEN
+      IF NOT fin_padrao_ok THEN
         r_t := sync_export._first_table(ARRAY['parcelas','parcela','contas_receber','conta_receber',
             'titulos_receber','titulo_receber','receber']);
         IF r_t IS NULL THEN
@@ -650,11 +676,30 @@ BEGIN
                     IF conta_nome_expr IS NOT NULL THEN pairs := pairs || format(', ''conta_bancaria_nome'', %s', conta_nome_expr); END IF;
                 END IF;
 
-                occ_expr := format('COALESCE(%s, %s, %s',
-                    CASE WHEN r_datapg IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_datapg) ELSE 'NULL' END,
-                    CASE WHEN q_datapg_expr <> 'NULL' THEN format('CAST(%s AS timestamptz)', q_datapg_expr) ELSE 'NULL' END,
-                    CASE WHEN r_venc   IS NOT NULL THEN format('CAST(r.%I AS timestamptz)', r_venc)   ELSE 'NULL' END);
-                occ_expr := occ_expr || ', ' || fixed || ')';
+                -- data da venda pelo cabecalho (mesma tabela/chave da view de vendas)
+                venda_dt_expr := 'NULL';
+                IF r_ordem IS NOT NULL THEN
+                    fv_t := sync_export._first_table(ARRAY['cabecalho_ordem_servico','cabecalho_os','cabecalho_venda',
+                        'vendas','venda','pedidos','pedido']);
+                    IF fv_t IS NOT NULL THEN
+                        fv_ord  := sync_export._pick(fv_t, ARRAY['ordem','codigo','id','numero','pedido','os']);
+                        fv_date := sync_export._pick(fv_t, ARRAY['dataordem','data_venda','data','emissao','data_emissao',
+                            'data_abertura','abertura','data_cadastro','data_criacao','dt_cadastro','created_at','criado_em',
+                            'data_fechamento','fechamento','data_finalizacao','data_finalizado','encerrado_em']);
+                        IF fv_ord IS NOT NULL AND fv_date IS NOT NULL THEN
+                            venda_dt_expr := format('(SELECT %s FROM public.%I fv WHERE CAST(fv.%I AS TEXT) = CAST(r.%I AS TEXT) LIMIT 1)',
+                                sync_export._occurred_expr('fv', fv_t, fv_date, 'Etc/GMT+3'), fv_t, fv_ord, r_ordem);
+                        END IF;
+                    END IF;
+                END IF;
+                r_emis := sync_export._pick(r_t, ARRAY['emissao','data_emissao','dataemissao','data_lancamento','lancamento','data_cadastro']);
+                IF r_emis IS NOT NULL THEN
+                    venda_dt_expr := format('COALESCE(%s, %s)', venda_dt_expr, sync_export._occurred_expr('r', r_t, r_emis, 'Etc/GMT+3'));
+                END IF;
+                pg_dt_expr := format('COALESCE(%s, %s)',
+                    CASE WHEN r_datapg IS NOT NULL THEN sync_export._occurred_expr('r', r_t, r_datapg, 'Etc/GMT+3') ELSE 'NULL' END,
+                    CASE WHEN q_datapg_expr <> 'NULL' THEN sync_export._occurred_expr('pq', q_t, q_data, 'Etc/GMT+3') ELSE 'NULL' END);
+                occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)', venda_dt_expr, pg_dt_expr, fixed);
 
                 fin_receber_sql := 'SELECT '
                     || format('r.%I::text', r_code) || ' AS entity_key, '
@@ -781,11 +826,12 @@ BEGIN
                     pairs := pairs || format(', ''status'', %s', q_status_synth);
                 END IF;
 
-                occ_expr := format('COALESCE(%s, %s, %s',
-                    CASE WHEN p_datapg2 IS NOT NULL THEN format('CAST(p.%I AS timestamptz)', p_datapg2) ELSE 'NULL' END,
-                    CASE WHEN q_datapg_expr <> 'NULL' THEN format('CAST(%s AS timestamptz)', q_datapg_expr) ELSE 'NULL' END,
-                    CASE WHEN p_venc2   IS NOT NULL THEN format('CAST(p.%I AS timestamptz)', p_venc2)   ELSE 'NULL' END);
-                occ_expr := occ_expr || ', ' || fixed || ')';
+                pg_dt_expr := format('COALESCE(%s, %s)',
+                    CASE WHEN p_datapg2 IS NOT NULL THEN sync_export._occurred_expr('p', p_t2, p_datapg2, 'Etc/GMT+3') ELSE 'NULL' END,
+                    CASE WHEN q_datapg_expr <> 'NULL' THEN sync_export._occurred_expr('pq', q_t, q_data, 'Etc/GMT+3') ELSE 'NULL' END);
+                occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)',
+                    CASE WHEN p_emissao2 IS NOT NULL THEN sync_export._occurred_expr('p', p_t2, p_emissao2, 'Etc/GMT+3') ELSE 'NULL' END,
+                    pg_dt_expr, fixed);
 
                 fin_pagar_sql := ' UNION ALL SELECT '
                     || format('(''pag-'' || p.%I)::text', p_code2) || ' AS entity_key, '
@@ -829,6 +875,8 @@ $vf$;
 -- recalcula codigo_erp). So criadas se as tabelas padrao existirem.
 DO $cob$
 DECLARE
+    -- tabela unica criou a view nesta execucao? (ver vendas_padrao_ok mais acima)
+    cob_simples_ok boolean := false;
     v_tz  text := 'Etc/GMT+3';
     fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
     t text; pairs text; sql text;
@@ -922,6 +970,7 @@ BEGIN
                 || format('FROM public.%I b WHERE b.%I IS NOT NULL', t, c_ext);
             EXECUTE sql;
             RAISE NOTICE 'sync_export.cobranca criada (tabela %).', t;
+            cob_simples_ok := true;
         END IF;
     END IF;
   EXCEPTION WHEN OTHERS THEN
@@ -932,9 +981,9 @@ BEGIN
   -- 3 tabelas (ctabancarias = conta+banco(FK); bancos = agencia/num_banco/dv;
   -- convenio_bancos = carteira/convenio/cedente por conta) em vez de uma unica
   -- tabela com todos os campos - o bloco acima so tenta tabela unica e pula.
-  -- So roda se a view ainda nao existir (o bloco de tabela unica teve sucesso).
+  -- So roda se o bloco de tabela unica nao criou a view nesta execucao.
   BEGIN
-    IF to_regclass('sync_export.cobranca') IS NULL
+    IF NOT cob_simples_ok
        AND to_regclass('public.ctabancarias') IS NOT NULL
        AND to_regclass('public.bancos') IS NOT NULL
        AND to_regclass('public.convenio_bancos') IS NOT NULL THEN
@@ -1306,4 +1355,4 @@ $catalogos$;
 -- o ERP ja e compativel). Subir este numero sempre que uma mudanca no script exigir
 -- preparar as views de novo. Precisa ser a ultima instrucao do arquivo.
 -- ---------------------------------------------------------------------------
-COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.21.1';
+COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.24.2';

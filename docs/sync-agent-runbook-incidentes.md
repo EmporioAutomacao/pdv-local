@@ -300,6 +300,44 @@ O reenvio nao duplica vendas da mesma loja (o ERP atualiza pelo codigo +
 estoque) e nao movimenta estoque, mas sobrescreve edicoes feitas no ERP nas
 vendas reenviadas.
 
+## Incidente: vendas do Arpa chegam sem financeiro (watermark no futuro)
+
+Sintoma: a venda aparece no ERP, mas a aba Financeiro dela fica vazia. A baixa
+de titulos antigos tambem para de chegar. "Sincronizar tudo" resolve por um
+tempo e o defeito volta.
+
+Causa: views `sync_export` anteriores a `2026.11.24.2` usavam o vencimento
+como `occurred_at_utc` do financeiro, e o coletor guardava o maior valor lido
+como watermark. Bastava uma parcela que vence no futuro para o watermark ir
+para o futuro e o coletor deixar de ler tudo o que aconteceu antes dessa data.
+Corrigido no SyncAgent 1.6.57 (views `2026.11.24.2`) junto com o ERP 0.0.168,
+que liga a venda ao titulo que chegou antes dela.
+
+Diagnostico:
+1. No banco local do agente:
+   `SELECT state_key, state_value FROM sync_agent.agent_state WHERE state_key LIKE 'collector.arpa.%.financeiro.watermark';`
+   Se `value` estiver depois de agora, e este incidente.
+2. No Arpa: `SELECT max(occurred_at_utc), count(*) FILTER (WHERE occurred_at_utc > now()) FROM sync_export.financeiro;`
+   Se a contagem for maior que zero, a view ainda e a antiga.
+
+Correcao:
+1. Atualizar o agente para a versao com `ArpaCollectionCursor`. Ela pagina por
+   `(occurred_at_utc, entity_key)`, nunca le nem grava posicao no futuro e
+   descarta sozinha um watermark que ja esteja no futuro, relendo a entidade
+   uma vez. O `event_id` passa a incluir o hash do payload, entao uma baixa com
+   a mesma data da venda tambem chega.
+2. "Preparar views" na conexao (a versao nova das views pausa a coleta ate isso).
+   Conferir depois: `SELECT pg_get_viewdef('sync_export.financeiro'::regclass) ~ '_nao_futuro';`
+   deve dar `true` (antes de `2026.11.24.2` o re-preparo de um banco no esquema
+   fallback mantinha a view antiga).
+3. Conferir no ERP que os titulos chegaram e que a aba Financeiro das vendas
+   novas mostra as parcelas. Se faltar titulo com o watermark ja no passado, use
+   "Sincronizar" so o financeiro a partir de uma data anterior a primeira venda
+   sem financeiro.
+
+Detalhes: `erp/docs/infra/sync-agent-arpa.md`, secao "Financeiro das vendas do
+Arpa: watermark nunca no futuro".
+
 ## Incidente: reconciliacao divergente
 
 Sinais:

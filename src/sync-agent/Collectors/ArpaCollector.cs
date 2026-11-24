@@ -283,119 +283,156 @@ public sealed class ArpaCollector
     {
         var syncOptions = _effectiveConfigProvider.GetCurrent();
         var watermarkKey = $"collector.arpa.{connection.Id}.{entity.EntityType}.watermark";
-        var watermark = await _localStore.GetDateTimeOffsetStateAsync(
-            watermarkKey,
-            InitialWatermark,
+        var nowUtc = DateTimeOffset.UtcNow;
+        var saved = ArpaCollectionCursor.FromState(await _localStore.GetJsonStateAsync(watermarkKey, cancellationToken));
+
+        if (saved.IsInFuture(nowUtc))
+        {
+            // Estado deixado pela view antiga (occurred_at = vencimento): tudo o que
+            // aconteceu depois do salto ficou para tras. O pager rele a entidade
+            // inteira uma vez; o que ja foi enviado com o mesmo event_id e ignorado.
+            _runLog.Add(
+                "warn",
+                $"  {EntityLabel(entity.EntityType)}: marcador no futuro ({saved.OccurredAtUtc:yyyy-MM-dd HH:mm}Z) descartado - relendo desde o inicio.");
+            _logger.LogWarning(
+                "Arpa collector: conexao '{Nome}' entidade '{EntityType}' com watermark no futuro ({Watermark}); relendo desde o inicio.",
+                connection.Nome,
+                entity.EntityType,
+                saved.OccurredAtUtc);
+        }
+
+        var result = await ArpaCollectionPager.RunAsync(
+            saved,
+            nowUtc,
+            connection.BatchSize,
+            (after, toUtc, toKey, limit, ct) => ReadPageAsync(dataSource, entity, after, toUtc, toKey, limit, ct),
+            row => EnqueueRowAsync(connection, entity, row, resyncGeneration, syncOptions, cancellationToken),
             cancellationToken);
 
-        var collected = 0;
-        var inserted = 0;
-        var nextWatermark = watermark;
-
-        await using var command = dataSource.CreateCommand(entity.Query);
-        command.Parameters.AddWithValue("watermark_utc", watermark);
-        command.Parameters.AddWithValue("limit", connection.BatchSize);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        if (result.PositionChanged)
         {
-            var row = ReadCollectorRow(reader);
-            nextWatermark = row.OccurredAtUtc > nextWatermark ? row.OccurredAtUtc : nextWatermark;
-
-            var payload = JsonNode.Parse(row.PayloadJson)?.AsObject()
-                ?? throw new InvalidOperationException($"Collector '{entity.Name}' returned invalid payload_json.");
-
-            // Estoque, venda e compra sao por Loja: injeta o loja_codigo da
-            // conexao (nome da Loja no ERP) quando a view sync_export nao o traz.
-            // O catalogo tambem leva o loja_codigo: o ERP usa para achar a Conexao
-            // Arpa certa quando o agente tem mais de uma conexao.
-            if ((entity.EntityType == "estoque" || entity.EntityType == "venda" || entity.EntityType == "compra"
-                    || entity.EntityType == "catalogo")
-                && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
-                && payload["loja_codigo"] is null)
-            {
-                payload["loja_codigo"] = connection.LojaCodigo;
-            }
-
-            // Empresa dona da Loja acima (obtida do ERP quando a Loja foi escolhida
-            // no dropdown, nao digitada a mao) - sem isso o ERP so resolve a Empresa
-            // pelo fallback de "empresa unica ativa" em apply_arpa_venda, que roda
-            // depois da resolucao de estoque e pode deixar a Loja sem empresa
-            // vinculada. Nunca sobrescreve um valor que a propria view ja trouxer.
-            if (entity.EntityType is "estoque" or "venda" or "compra")
-            {
-                if (!string.IsNullOrWhiteSpace(connection.EmpresaCnpj) && payload["empresa_cnpj"] is null)
-                {
-                    payload["empresa_cnpj"] = connection.EmpresaCnpj;
-                }
-
-                if (!string.IsNullOrWhiteSpace(connection.EmpresaNome) && payload["empresa_nome"] is null)
-                {
-                    payload["empresa_nome"] = connection.EmpresaNome;
-                }
-            }
-
-            var normalizedPayload = _normalizers.Normalize(entity.EntityType, row.EntityKey, payload);
-
-            // Geracao > 0 (apos "Sincronizar tudo") entra no seed do event_id,
-            // igual ao resync sob demanda (ArpaResyncProcessor): sem isso, um
-            // full-resync re-leria tudo mas gerar o mesmo event_id do envio
-            // anterior, e o outbox descartaria por ON CONFLICT DO NOTHING sem
-            // reenviar nada ao ERP.
-            var eventId = resyncGeneration > 0
-                ? DeterministicGuid.Create(
-                    "sync-agent:v1",
-                    "arpa",
-                    syncOptions.InstanceId,
-                    entity.EntityType,
-                    row.EntityKey,
-                    row.OccurredAtUtc.ToString("O"),
-                    $"resync-gen-{resyncGeneration}")
-                : DeterministicGuid.Create(
-                    "sync-agent:v1",
-                    "arpa",
-                    syncOptions.InstanceId,
-                    entity.EntityType,
-                    row.EntityKey,
-                    row.OccurredAtUtc.ToString("O"));
-
-            var draft = new OutboxEventDraft(
-                eventId,
-                syncOptions.InstanceId,
-                "arpa",
-                entity.EntityType,
-                row.EntityKey,
-                "upsert",
-                row.OccurredAtUtc,
-                DateTimeOffset.UtcNow,
-                SyncContractValues.CurrentSchemaVersion,
-                normalizedPayload,
-                row.TraceId);
-
-            var result = await _localStore.EnqueueOutboxEventAsync(draft, cancellationToken);
-            collected++;
-
-            if (result.Inserted)
-            {
-                inserted++;
-            }
+            await _localStore.SetJsonStateAsync(watermarkKey, result.Position.ToState(), cancellationToken);
         }
 
-        if (nextWatermark > watermark)
-        {
-            await _localStore.SetDateTimeOffsetStateAsync(watermarkKey, nextWatermark, cancellationToken);
-        }
+        var position = result.Position;
+        var collected = result.Collected;
+        var reread = result.Reread;
+        var inserted = result.Inserted;
+        var caughtUp = result.CaughtUp;
 
         _logger.LogInformation(
-            "Arpa collector entity completed. Connection={Connection}; Entity={EntityName}; Type={EntityType}; Collected={Collected}; Inserted={Inserted}; Watermark={Watermark}",
+            "Arpa collector entity completed. Connection={Connection}; Entity={EntityName}; Type={EntityType}; Collected={Collected}; Reread={Reread}; Inserted={Inserted}; Watermark={Watermark}; Key={Key}; CaughtUp={CaughtUp}",
             connection.Nome,
             entity.Name,
             entity.EntityType,
             collected,
+            reread,
             inserted,
-            nextWatermark);
+            position.OccurredAtUtc,
+            position.EntityKey,
+            caughtUp);
 
         return new ArpaEntityCollectorRunSummary(collected, inserted);
+    }
+
+    internal static async Task<IReadOnlyList<ArpaCollectorRow>> ReadPageAsync(
+        NpgsqlDataSource dataSource,
+        ArpaEntityCollectorOptions entity,
+        ArpaCollectionCursor after,
+        DateTimeOffset toUtc,
+        string? toKey,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        await using var command = dataSource.CreateCommand(entity.Query);
+        command.Parameters.AddWithValue("from_utc", after.OccurredAtUtc.ToUniversalTime());
+        command.Parameters.Add(new NpgsqlParameter("from_key", NpgsqlTypes.NpgsqlDbType.Text) { Value = after.EntityKey });
+        command.Parameters.AddWithValue("to_utc", toUtc.ToUniversalTime());
+        command.Parameters.Add(new NpgsqlParameter("to_key", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)toKey ?? DBNull.Value });
+        command.Parameters.AddWithValue("limit", limit);
+        if (entity.Query.Contains("@watermark_utc", StringComparison.OrdinalIgnoreCase))
+        {
+            // Query antiga do appsettings (conexao estatica nao migrada): so tem o
+            // limite inferior. O pager descarta o que passar do limite superior.
+            command.Parameters.AddWithValue("watermark_utc", after.OccurredAtUtc.ToUniversalTime());
+        }
+
+        var rows = new List<ArpaCollectorRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(ReadCollectorRow(reader));
+        }
+
+        return rows;
+    }
+
+    private async Task<bool> EnqueueRowAsync(
+        EffectiveArpaCollectorConnection connection,
+        ArpaEntityCollectorOptions entity,
+        ArpaCollectorRow row,
+        int resyncGeneration,
+        EffectiveSyncAgentConfiguration syncOptions,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonNode.Parse(row.PayloadJson)?.AsObject()
+            ?? throw new InvalidOperationException($"Collector '{entity.Name}' returned invalid payload_json.");
+
+        // Estoque, venda e compra sao por Loja: injeta o loja_codigo da
+        // conexao (nome da Loja no ERP) quando a view sync_export nao o traz.
+        // O catalogo tambem leva o loja_codigo: o ERP usa para achar a Conexao
+        // Arpa certa quando o agente tem mais de uma conexao.
+        if ((entity.EntityType == "estoque" || entity.EntityType == "venda" || entity.EntityType == "compra"
+                || entity.EntityType == "catalogo")
+            && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
+            && payload["loja_codigo"] is null)
+        {
+            payload["loja_codigo"] = connection.LojaCodigo;
+        }
+
+        // Empresa dona da Loja acima (obtida do ERP quando a Loja foi escolhida
+        // no dropdown, nao digitada a mao) - sem isso o ERP so resolve a Empresa
+        // pelo fallback de "empresa unica ativa" em apply_arpa_venda, que roda
+        // depois da resolucao de estoque e pode deixar a Loja sem empresa
+        // vinculada. Nunca sobrescreve um valor que a propria view ja trouxer.
+        if (entity.EntityType is "estoque" or "venda" or "compra")
+        {
+            if (!string.IsNullOrWhiteSpace(connection.EmpresaCnpj) && payload["empresa_cnpj"] is null)
+            {
+                payload["empresa_cnpj"] = connection.EmpresaCnpj;
+            }
+
+            if (!string.IsNullOrWhiteSpace(connection.EmpresaNome) && payload["empresa_nome"] is null)
+            {
+                payload["empresa_nome"] = connection.EmpresaNome;
+            }
+        }
+
+        var normalizedPayload = _normalizers.Normalize(entity.EntityType, row.EntityKey, payload);
+
+        var eventId = ArpaEventIds.ForCollectedRow(
+            syncOptions.InstanceId,
+            entity.EntityType,
+            row.EntityKey,
+            row.OccurredAtUtc,
+            normalizedPayload,
+            resyncGeneration);
+
+        var draft = new OutboxEventDraft(
+            eventId,
+            syncOptions.InstanceId,
+            "arpa",
+            entity.EntityType,
+            row.EntityKey,
+            "upsert",
+            row.OccurredAtUtc,
+            DateTimeOffset.UtcNow,
+            SyncContractValues.CurrentSchemaVersion,
+            normalizedPayload,
+            row.TraceId);
+
+        var result = await _localStore.EnqueueOutboxEventAsync(draft, cancellationToken);
+        return result.Inserted;
     }
 
     private static ArpaCollectorRow ReadCollectorRow(NpgsqlDataReader reader)
