@@ -29,6 +29,13 @@ public sealed class LocalDbMaintenanceRunner
         _configuration = configuration;
     }
 
+    // Declarados ANTES de Routines: inicializadores estaticos rodam na ordem do texto,
+    // e BuildRoutines usa OutboxStatuses.
+    public const string EnableDeadLetterResolutionKey = "enable_dead_letter_resolution";
+
+    /// <summary>Status permitidos em outbox_events (o mesmo do init SQL).</summary>
+    public static readonly string[] OutboxStatuses = ["pending", "in_flight", "accepted", "rejected", "dead_letter", "resolved"];
+
     /// <summary>
     /// Rotinas conhecidas, montadas a partir das mesmas constantes de
     /// contrato que o resto do agente usa (<see cref="SyncContractValues"/>) -
@@ -68,6 +75,21 @@ public sealed class LocalDbMaintenanceRunner
                 ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_label text NULL;
                 ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_external_key text NULL;
                 ALTER TABLE pdv.sale_items ADD COLUMN IF NOT EXISTS unit_factor numeric(14, 6) NULL;
+                """),
+            new MaintenanceRoutine(
+                EnableDeadLetterResolutionKey,
+                "Habilitar encerramento de dead-letter",
+                "Permite o status 'resolved' na fila local (outbox_events_status_check) e adiciona as "
+                    + "colunas resolved_at_utc e resolved_by_event_id em dead_letter_events. Necessario "
+                    + "para a tela Dead-letter (1.6.59+) encerrar os registros ja superados por um envio "
+                    + "posterior aceito pelo ERP - sem isso a tela so mostra a previa. Nada e apagado. "
+                    + "Seguro re-rodar.",
+                $"""
+                ALTER TABLE sync_agent.outbox_events DROP CONSTRAINT IF EXISTS outbox_events_status_check;
+                ALTER TABLE sync_agent.outbox_events ADD CONSTRAINT outbox_events_status_check
+                    CHECK (status IN ({string.Join(", ", OutboxStatuses.Select(s => $"'{s}'"))}));
+                ALTER TABLE sync_agent.dead_letter_events ADD COLUMN IF NOT EXISTS resolved_at_utc timestamptz NULL;
+                ALTER TABLE sync_agent.dead_letter_events ADD COLUMN IF NOT EXISTS resolved_by_event_id uuid NULL;
                 """),
         };
     }

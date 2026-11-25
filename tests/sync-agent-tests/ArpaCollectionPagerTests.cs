@@ -273,6 +273,85 @@ public sealed class ArpaCollectionPagerTests
     }
 
     [Fact]
+    public async Task Reenvio_por_periodo_le_so_entre_inicio_e_fim()
+    {
+        var view = new FakeView();
+        var inicio = HojeMeiaNoite.AddDays(-10);
+        var fim = HojeMeiaNoite.AddDays(-5).AddDays(1).AddTicks(-10); // dia -5 inteiro
+        view.Add("antes", inicio.AddDays(-1));
+        view.Add("no-inicio", inicio);
+        view.Add("meio", HojeMeiaNoite.AddDays(-7));
+        view.Add("no-fim", HojeMeiaNoite.AddDays(-5).AddHours(20));
+        view.Add("depois", HojeMeiaNoite.AddDays(-4));
+        var outbox = new FakeOutbox();
+
+        var result = await ArpaCollectionPager.RunRangeAsync(
+            new ArpaCollectionCursor(inicio, string.Empty), fim, 50, view.Read, outbox.Enqueue, CancellationToken.None);
+
+        Assert.True(result.Finished);
+        Assert.Equal(["no-inicio", "meio", "no-fim"], outbox.Ids.Select(i => i.Item1).ToArray());
+        Assert.Equal("no-fim", result.Position.EntityKey);
+    }
+
+    [Fact]
+    public async Task Reenvio_por_periodo_continua_entre_ciclos_sem_perder_nem_repetir()
+    {
+        var view = new FakeView();
+        var fixo = HojeMeiaNoite.AddDays(-3);
+        var total = (ArpaCollectionCursor.MaxPagesPerCycle * 2 * 5) + 3;
+        for (var i = 0; i < total; i++)
+        {
+            view.Add($"{i:D5}", fixo);
+        }
+
+        var outbox = new FakeOutbox();
+        var pos = new ArpaCollectionCursor(HojeMeiaNoite.AddDays(-30), string.Empty);
+        var ciclos = 0;
+        ArpaRangePagerResult result;
+        do
+        {
+            result = await ArpaCollectionPager.RunRangeAsync(pos, Agora, 5, view.Read, outbox.Enqueue, CancellationToken.None);
+            pos = result.Position;
+            ciclos++;
+        }
+        while (!result.Finished && ciclos < 100);
+
+        Assert.Equal(3, ciclos);
+        Assert.Equal(total, outbox.Ids.Count);
+        Assert.Equal(total, outbox.Attempts);
+    }
+
+    [Fact]
+    public async Task Reenvio_com_query_antiga_para_no_fim_do_periodo()
+    {
+        var view = new FakeView();
+        view.Add("1", HojeMeiaNoite.AddDays(-20));
+        view.Add("2", HojeMeiaNoite.AddDays(-2));
+        var outbox = new FakeOutbox();
+
+        var result = await ArpaCollectionPager.RunRangeAsync(
+            ArpaCollectionCursor.Initial, HojeMeiaNoite.AddDays(-10), 1, view.ReadLegacy, outbox.Enqueue, CancellationToken.None);
+
+        Assert.True(result.Finished);
+        Assert.Equal(["1"], outbox.Ids.Select(i => i.Item1).ToArray());
+    }
+
+    [Fact]
+    public async Task Reenvio_com_inicio_depois_do_fim_nao_le_nada()
+    {
+        var view = new FakeView();
+        view.Add("1", HojeMeiaNoite);
+        var outbox = new FakeOutbox();
+
+        var result = await ArpaCollectionPager.RunRangeAsync(
+            new ArpaCollectionCursor(Agora, "zzz"), HojeMeiaNoite, 10, view.Read, outbox.Enqueue, CancellationToken.None);
+
+        Assert.True(result.Finished);
+        Assert.Equal(0, view.Reads);
+        Assert.Empty(outbox.Ids);
+    }
+
+    [Fact]
     public async Task Cenario_do_incidente_vendas_novas_chegam_com_financeiro_por_varios_dias()
     {
         // Carga inicial com parcela de crediario vencendo em 2028; depois, todo dia

@@ -454,7 +454,9 @@ public sealed class LocalSyncStore
                 count(*) FILTER (WHERE captured_at_utc >= @window_start_utc AND captured_at_utc < @window_end_utc),
                 count(*) FILTER (WHERE status = 'accepted' AND captured_at_utc >= @window_start_utc AND captured_at_utc < @window_end_utc),
                 count(*) FILTER (WHERE status = 'rejected' AND captured_at_utc >= @window_start_utc AND captured_at_utc < @window_end_utc),
-                count(*) FILTER (WHERE status = 'dead_letter' AND captured_at_utc >= @window_start_utc AND captured_at_utc < @window_end_utc),
+                -- 'resolved' (dead-letter encerrado por envio posterior aceito, 1.6.59) segue
+                -- contando como dead_letter para o ERP: o numero enviado nao muda com o encerramento.
+                count(*) FILTER (WHERE status IN ('dead_letter', 'resolved') AND captured_at_utc >= @window_start_utc AND captured_at_utc < @window_end_utc),
                 COALESCE(
                     string_agg(payload_hash, E'\n' ORDER BY event_id)
                         FILTER (WHERE captured_at_utc >= @window_start_utc AND captured_at_utc < @window_end_utc),
@@ -557,106 +559,428 @@ public sealed class LocalSyncStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    // ---------------------------------------------------------------------
+    // Dead-letter superado (1.6.59). Regra unica, usada pela previa, pelo botao
+    // da tela Dead-letter e pelo encerramento automatico: um dead-letter do Arpa
+    // esta superado quando ha um envio POSTERIOR da mesma entidade (tipo + chave
+    // + loja) aceito pelo ERP - o dado ja chegou certo por outro event_id. A loja
+    // entra porque venda/compra repetem codigo entre lojas. pdv_local fica de fora:
+    // tem fluxo proprio (Reprocessar venda PDV, pdv.sales.sync_status).
+    // ---------------------------------------------------------------------
+    private const string SupersededDeadLettersCte = """
+        superseded AS (
+            SELECT d.event_id, s.event_id AS superseded_by
+            FROM sync_agent.outbox_events d
+            CROSS JOIN LATERAL (
+                SELECT a.event_id
+                FROM sync_agent.outbox_events a
+                WHERE a.status = 'accepted'
+                  AND a.source_system = d.source_system
+                  AND a.entity_type = d.entity_type
+                  AND a.entity_key = d.entity_key
+                  AND COALESCE(a.payload ->> 'loja_codigo', '') = COALESCE(d.payload ->> 'loja_codigo', '')
+                  AND a.captured_at_utc > d.captured_at_utc
+                ORDER BY a.captured_at_utc DESC, a.event_id DESC
+                LIMIT 1
+            ) s
+            WHERE d.status = 'dead_letter'
+              AND d.source_system = 'arpa'
+        )
+        """;
+
     /// <summary>
-    /// Apaga os watermarks do coletor Arpa de uma conexao
-    /// (<c>collector.arpa.&lt;connectionId&gt;.&lt;entidade&gt;.watermark</c>).
-    /// Sem o registro, <see cref="GetDateTimeOffsetStateAsync"/> devolve o
-    /// default (epoch) e o coletor re-le tudo. Usado pelo botao "Sincronizar
-    /// tudo" (Configuracoes &gt; Arpa) para backfill / corrigir erros.
-    /// <paramref name="entityTypes"/> nulo/vazio = todas as entidades
-    /// (comportamento historico); com filtro, so as entidades selecionadas
-    /// tem o watermark apagado - as demais ficam como estavam.
+    /// O banco local aceita o status <c>resolved</c> e tem as colunas de auditoria
+    /// em dead_letter_events (rotina <c>enable_dead_letter_resolution</c> ou init SQL
+    /// da 1.6.59+). So leitura de catalogo; falha de leitura = false.
     /// </summary>
-    public async Task<int> ResetArpaWatermarksAsync(
-        string connectionId,
-        IReadOnlyCollection<string>? entityTypes,
-        CancellationToken cancellationToken)
+    public async Task<bool> SupportsDeadLetterResolutionAsync(CancellationToken cancellationToken)
     {
-        if (entityTypes is null || entityTypes.Count == 0)
-        {
-            const string sqlAll = """
-                DELETE FROM sync_agent.agent_state
-                WHERE state_key LIKE 'collector.arpa.' || @conn || '.%'
-                AND state_key NOT LIKE 'collector.arpa.' || @conn || '.resync_generation'
-                """;
-
-            await using var commandAll = _dataSource.CreateCommand(sqlAll);
-            commandAll.Parameters.AddWithValue("conn", connectionId);
-            return await commandAll.ExecuteNonQueryAsync(cancellationToken);
-        }
-
         const string sql = """
-            DELETE FROM sync_agent.agent_state
-            WHERE state_key = ANY(@keys)
+            SELECT
+                COALESCE((
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conname = 'outbox_events_status_check'
+                      AND connamespace = 'sync_agent'::regnamespace
+                ), ''),
+                (
+                    SELECT count(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = 'sync_agent'
+                      AND table_name = 'dead_letter_events'
+                      AND column_name IN ('resolved_at_utc', 'resolved_by_event_id')
+                )
             """;
 
-        var keys = entityTypes.Select(entityType => $"collector.arpa.{connectionId}.{entityType}.watermark").ToArray();
-        await using var command = _dataSource.CreateCommand(sql);
-        command.Parameters.AddWithValue("keys", keys);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Alternativa a <see cref="ResetArpaWatermarksAsync"/> para um resync
-    /// parcial: em vez de apagar o watermark (que volta pro epoch e rele o
-    /// historico inteiro), fixa-o numa data especifica - ex.: "so os ultimos
-    /// 3 meses" em vez de "desde sempre". Sem filtro, usa
-    /// <see cref="SyncContractValues.EntityTypes"/> (a mesma lista que
-    /// <c>ArpaStandardEntities.Build</c> usa para nomear as entidades) para
-    /// cobrir toda entidade que o coletor suporta, mesmo as desligadas nessa
-    /// conexao (marcador parado nao atrapalha - so e lido se o toggle ligar).
-    /// Com <paramref name="entityTypes"/> informado, so essas entidades tem o
-    /// watermark ajustado.
-    /// </summary>
-    public async Task SetArpaWatermarksSinceAsync(
-        string connectionId,
-        DateTimeOffset since,
-        IReadOnlyCollection<string>? entityTypes,
-        CancellationToken cancellationToken)
-    {
-        var types = entityTypes is null || entityTypes.Count == 0 ? SyncContractValues.EntityTypes : entityTypes;
-        foreach (var entityType in types)
+        try
         {
-            var stateKey = $"collector.arpa.{connectionId}.{entityType}.watermark";
-            await SetDateTimeOffsetStateAsync(stateKey, since, cancellationToken);
+            await using var command = _dataSource.CreateCommand(sql);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return false;
+            }
+
+            var definition = reader.GetString(0);
+            var columns = reader.GetInt64(1);
+            return definition.Contains("'resolved'", StringComparison.Ordinal) && columns == 2;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Nao foi possivel ler o suporte a encerramento de dead-letter (ignorado).");
+            return false;
         }
     }
 
     /// <summary>
-    /// Le a geracao atual de full-resync de uma conexao Arpa
-    /// (<c>collector.arpa.&lt;connectionId&gt;.resync_generation</c>). Comeca
-    /// em 0 (nenhum full-resync ainda pedido). O <see cref="Collectors.ArpaCollector"/>
-    /// inclui esse valor no seed do <c>event_id</c> quando &gt; 0, para gerar
-    /// IDs novos apos um full-resync e o ERP reaplicar em vez de deduplicar
-    /// (mesma ideia do resync sob demanda em <see cref="Collectors.ArpaResyncProcessor"/>).
+    /// Resumo dos dead-letter por origem, tipo e motivo: abertos, quantos deles estao
+    /// superados (encerraveis) e quantos ja foram encerrados. So leitura; funciona
+    /// tambem sem a rotina de schema (encerrados = 0).
     /// </summary>
-    public async Task<int> GetArpaResyncGenerationAsync(string connectionId, CancellationToken cancellationToken)
+    public async Task<DeadLetterSummary> GetDeadLetterSummaryAsync(CancellationToken cancellationToken)
+    {
+        const string sql = $"""
+            WITH {SupersededDeadLettersCte},
+            dead AS (
+                SELECT
+                    o.event_id,
+                    o.source_system,
+                    o.entity_type,
+                    o.status,
+                    o.captured_at_utc,
+                    left(COALESCE(dl.reason, o.last_error, ''), 200) AS reason
+                FROM sync_agent.outbox_events o
+                LEFT JOIN sync_agent.dead_letter_events dl ON dl.event_id = o.event_id
+                WHERE o.status IN ('dead_letter', 'resolved')
+            ),
+            grouped AS (
+                SELECT
+                    d.source_system,
+                    d.entity_type,
+                    d.reason,
+                    count(*) FILTER (WHERE d.status = 'dead_letter') AS open_count,
+                    count(*) FILTER (WHERE d.status = 'dead_letter' AND d.event_id IN (SELECT event_id FROM superseded)) AS superseded_count,
+                    count(*) FILTER (WHERE d.status = 'resolved') AS resolved_count,
+                    min(d.captured_at_utc) AS first_at,
+                    max(d.captured_at_utc) AS last_at
+                FROM dead d
+                GROUP BY d.source_system, d.entity_type, d.reason
+            )
+            -- Totais pelas janelas (antes do LIMIT): exatos mesmo com mais grupos que o limite
+            -- (motivo com id no texto vira um grupo por evento).
+            SELECT
+                source_system, entity_type, reason, open_count, superseded_count, resolved_count, first_at, last_at,
+                sum(open_count) OVER (), sum(superseded_count) OVER (), sum(resolved_count) OVER (), count(*) OVER ()
+            FROM grouped
+            ORDER BY open_count DESC, resolved_count DESC, source_system, entity_type, reason
+            LIMIT @limit
+            """;
+
+        var rows = new List<DeadLetterSummaryRow>();
+        long open = 0, superseded = 0, resolved = 0, groups = 0;
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("limit", DeadLetterSummary.MaxRows);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            open = Convert.ToInt64(reader.GetValue(8), CultureInfo.InvariantCulture);
+            superseded = Convert.ToInt64(reader.GetValue(9), CultureInfo.InvariantCulture);
+            resolved = Convert.ToInt64(reader.GetValue(10), CultureInfo.InvariantCulture);
+            groups = reader.GetInt64(11);
+            rows.Add(new DeadLetterSummaryRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetInt64(3),
+                reader.GetInt64(4),
+                reader.GetInt64(5),
+                reader.GetFieldValue<DateTimeOffset>(6),
+                reader.GetFieldValue<DateTimeOffset>(7)));
+        }
+
+        return new DeadLetterSummary(open, superseded, resolved, groups, rows);
+    }
+
+    /// <summary>
+    /// Encerra (status <c>resolved</c>) os dead-letter superados, guardando em
+    /// dead_letter_events quando e por qual event_id aceito. Nada e apagado.
+    /// Idempotente e seguro em paralelo: o UPDATE so pega quem ainda e dead_letter.
+    /// Sem a rotina de schema devolve <see cref="DeadLetterResolveResult.NotSupported"/>.
+    /// </summary>
+    public async Task<DeadLetterResolveResult> ResolveSupersededDeadLettersAsync(CancellationToken cancellationToken)
+    {
+        if (!await SupportsDeadLetterResolutionAsync(cancellationToken))
+        {
+            return DeadLetterResolveResult.NotSupported;
+        }
+
+        const string sql = $"""
+            WITH {SupersededDeadLettersCte},
+            upd AS (
+                UPDATE sync_agent.outbox_events o
+                SET status = 'resolved', updated_at_utc = now()
+                FROM superseded s
+                WHERE o.event_id = s.event_id
+                  AND o.status = 'dead_letter'
+                RETURNING o.event_id, o.entity_type, s.superseded_by
+            ),
+            audit AS (
+                UPDATE sync_agent.dead_letter_events dl
+                SET resolved_at_utc = now(), resolved_by_event_id = u.superseded_by
+                FROM upd u
+                WHERE dl.event_id = u.event_id
+                RETURNING dl.event_id
+            )
+            SELECT u.entity_type, count(*), (SELECT count(*) FROM audit)
+            FROM upd u
+            GROUP BY u.entity_type
+            ORDER BY u.entity_type
+            """;
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // Botao da tela e automatico do ciclo podem rodar juntos: um de cada vez
+        // (sem isso, dois UPDATE nas mesmas linhas podem dar deadlock).
+        await using (var lockCommand = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(hashtext('sync_agent.dead_letter_resolve'))", connection, transaction))
+        {
+            await lockCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var byEntity = new Dictionary<string, long>(StringComparer.Ordinal);
+        await using (var command = new NpgsqlCommand(sql, connection, transaction))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                byEntity[reader.GetString(0)] = reader.GetInt64(1);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return new DeadLetterResolveResult(true, byEntity.Values.Sum(), byEntity);
+    }
+
+    private const string DeadLetterAutoResolveKey = "dead_letter.auto_resolve_superseded";
+
+    /// <summary>Encerramento automatico a cada ciclo; desligado ate alguem ligar na tela.</summary>
+    public async Task<bool> GetDeadLetterAutoResolveAsync(CancellationToken cancellationToken)
+    {
+        var state = await GetJsonStateAsync(DeadLetterAutoResolveKey, cancellationToken);
+        return state?["enabled"] is JsonValue value && value.TryGetValue<bool>(out var enabled) && enabled;
+    }
+
+    public Task SetDeadLetterAutoResolveAsync(bool enabled, CancellationToken cancellationToken) =>
+        SetJsonStateAsync(DeadLetterAutoResolveKey, new JsonObject { ["enabled"] = enabled }, cancellationToken);
+
+    private static string ArpaResyncJobKey(string connectionId) => $"collector.arpa.{connectionId}.resync_job";
+
+    /// <summary>
+    /// Reenvio "Sincronizar tudo" em andamento na conexao, ou null. Ver
+    /// <see cref="Collectors.ArpaResyncJob"/>.
+    /// </summary>
+    public async Task<Collectors.ArpaResyncJob?> GetArpaResyncJobAsync(string connectionId, CancellationToken cancellationToken) =>
+        Collectors.ArpaResyncJob.FromState(await GetJsonStateAsync(ArpaResyncJobKey(connectionId), cancellationToken));
+
+    /// <summary>
+    /// Grava o job so se a conexao nao tiver outro (<c>ON CONFLICT DO NOTHING</c>):
+    /// e a trava contra dois "Sincronizar tudo" ao mesmo tempo, valida tambem depois
+    /// de reiniciar o agente. Devolve null quando gravou, ou o job que ja existia.
+    /// Estado ilegivel (gravado por versao futura/corrompido) e substituido.
+    /// </summary>
+    public async Task<Collectors.ArpaResyncJob?> TryStartArpaResyncJobAsync(
+        string connectionId,
+        Collectors.ArpaResyncJob job,
+        CancellationToken cancellationToken)
     {
         const string sql = """
+            INSERT INTO sync_agent.agent_state (state_key, state_value)
+            VALUES (@state_key, @state_value)
+            ON CONFLICT (state_key) DO NOTHING
+            RETURNING state_key
+            """;
+
+        var key = ArpaResyncJobKey(connectionId);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await using var command = _dataSource.CreateCommand(sql);
+            command.Parameters.AddWithValue("state_key", key);
+            command.Parameters.AddWithValue("state_value", NpgsqlDbType.Jsonb, ToCanonicalJson(job.ToState()));
+            if (await command.ExecuteScalarAsync(cancellationToken) is not null)
+            {
+                return null;
+            }
+
+            var existing = await GetArpaResyncJobAsync(connectionId, cancellationToken);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            await DeleteArpaResyncJobAsync(connectionId, cancellationToken);
+        }
+
+        return await GetArpaResyncJobAsync(connectionId, cancellationToken);
+    }
+
+    private static string ArpaResyncLastResultKey(string connectionId) => $"collector.arpa.{connectionId}.resync_last";
+
+    /// <summary>
+    /// Resultado do ultimo "Sincronizar tudo" concluido da conexao (periodo, quando
+    /// terminou e as entidades nao reenviadas por erro). O job some ao terminar; isto
+    /// fica para a tela mostrar o que faltou.
+    /// </summary>
+    public Task SaveArpaResyncLastResultAsync(
+        string connectionId,
+        Collectors.ArpaResyncJob job,
+        DateTimeOffset finishedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var failed = new JsonObject();
+        foreach (var (entityType, reason) in job.FailedEntities.OrderBy(f => f.Key, StringComparer.Ordinal))
+        {
+            failed[entityType] = reason;
+        }
+
+        var state = new JsonObject
+        {
+            ["generation"] = job.Generation,
+            ["period"] = job.PeriodLabel(TimeZoneInfo.Local),
+            ["finished_at_utc"] = finishedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            ["failed_entities"] = failed,
+        };
+        return SetJsonStateAsync(ArpaResyncLastResultKey(connectionId), state, cancellationToken);
+    }
+
+    public Task<JsonObject?> GetArpaResyncLastResultAsync(string connectionId, CancellationToken cancellationToken) =>
+        GetJsonStateAsync(ArpaResyncLastResultKey(connectionId), cancellationToken);
+
+    public async Task DeleteArpaResyncLastResultAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        await using var command = _dataSource.CreateCommand("DELETE FROM sync_agent.agent_state WHERE state_key = @state_key");
+        command.Parameters.AddWithValue("state_key", ArpaResyncLastResultKey(connectionId));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Atualiza o progresso do job so se ele ainda for o mesmo (mesma geracao).
+    /// False = foi cancelado (ou trocado) enquanto o coletor lia: o coletor para e
+    /// nao recria o job apagado.
+    /// </summary>
+    public async Task<bool> SaveArpaResyncJobAsync(string connectionId, Collectors.ArpaResyncJob job, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            UPDATE sync_agent.agent_state
+            SET state_value = @state_value, updated_at_utc = now()
+            WHERE state_key = @state_key
+            AND state_value ->> 'generation' = @generation
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("state_key", ArpaResyncJobKey(connectionId));
+        command.Parameters.AddWithValue("state_value", NpgsqlDbType.Jsonb, ToCanonicalJson(job.ToState()));
+        command.Parameters.AddWithValue("generation", job.Generation.ToString(CultureInfo.InvariantCulture));
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    /// <summary>
+    /// Apaga o job (fim do reenvio, "Cancelar reenvio" ou conexao removida). Com
+    /// <paramref name="generation"/>, so apaga se for esse job. True se apagou.
+    /// </summary>
+    public async Task<bool> DeleteArpaResyncJobAsync(string connectionId, CancellationToken cancellationToken, int? generation = null)
+    {
+        var sql = generation is null
+            ? "DELETE FROM sync_agent.agent_state WHERE state_key = @state_key"
+            : "DELETE FROM sync_agent.agent_state WHERE state_key = @state_key AND state_value ->> 'generation' = @generation";
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("state_key", ArpaResyncJobKey(connectionId));
+        if (generation is not null)
+        {
+            command.Parameters.AddWithValue("generation", generation.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    /// <summary>
+    /// Eventos do Arpa ainda pendentes de envio ao ERP, das entidades do reenvio,
+    /// capturados desde o inicio dele. O outbox nao guarda a conexao nem o job, entao
+    /// conta tambem a coleta incremental dessas entidades no periodo - ela drena junto.
+    /// Dead-letter fica de fora: nao pode segurar a trava para sempre.
+    /// </summary>
+    public async Task<long> CountPendingArpaResyncEventsAsync(
+        IReadOnlyCollection<string> entityTypes,
+        DateTimeOffset sinceCapturedUtc,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT count(*)
+            FROM sync_agent.outbox_events
+            WHERE status IN ('pending', 'in_flight')
+            AND source_system = 'arpa'
+            AND entity_type = ANY(@types)
+            AND captured_at_utc >= @since
+            """;
+
+        await using var command = _dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("types", entityTypes.ToArray());
+        command.Parameters.AddWithValue("since", sinceCapturedUtc.ToUniversalTime());
+        return (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+    }
+
+    /// <summary>
+    /// Geracao usada no <c>event_id</c> da coleta incremental
+    /// (<c>collector.arpa.&lt;connectionId&gt;.incremental_generation</c>). Fica fixa:
+    /// so o job de "Sincronizar tudo" usa geracao nova (<see cref="BumpArpaResyncGenerationAsync"/>).
+    /// Antes de 1.6.59 a coleta incremental usava a geracao de resync, e cada
+    /// "Sincronizar tudo" reenviava ao ERP, com IDs novos, os ultimos 2 dias (janela
+    /// de releitura) de todas as entidades - inclusive as nao escolhidas.
+    ///
+    /// Na primeira leitura grava a geracao de resync atual, a mesma que a coleta
+    /// incremental ja usava: a atualizacao nao muda nenhum event_id nem reenvia nada.
+    /// </summary>
+    public async Task<int> GetArpaIncrementalGenerationAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        // O SELECT externo nao enxerga a linha inserida pelo CTE (mesmo snapshot):
+        // vem do INSERT quando grava agora, ou da linha existente.
+        const string sql = """
+            WITH ins AS (
+                INSERT INTO sync_agent.agent_state (state_key, state_value)
+                SELECT
+                    'collector.arpa.' || @conn || '.incremental_generation',
+                    jsonb_build_object('value', COALESCE((
+                        SELECT (state_value ->> 'value')::int
+                        FROM sync_agent.agent_state
+                        WHERE state_key = 'collector.arpa.' || @conn || '.resync_generation'
+                    ), 0))
+                ON CONFLICT (state_key) DO NOTHING
+                RETURNING state_value ->> 'value' AS value
+            )
+            SELECT value FROM ins
+            UNION ALL
             SELECT state_value ->> 'value'
             FROM sync_agent.agent_state
-            WHERE state_key = 'collector.arpa.' || @conn || '.resync_generation'
+            WHERE state_key = 'collector.arpa.' || @conn || '.incremental_generation'
+            LIMIT 1
             """;
 
         await using var command = _dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("conn", connectionId);
 
         var value = await command.ExecuteScalarAsync(cancellationToken);
-        if (value is not string text
-            || !int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-        {
-            return 0;
-        }
-
-        return parsed;
+        return value is string text
+            && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : 0;
     }
 
     /// <summary>
-    /// Incrementa a geracao de full-resync de uma conexao Arpa. Chamado junto
-    /// com <see cref="ResetArpaWatermarksAsync"/> pelo botao "Sincronizar
-    /// tudo" (Configuracoes &gt; Arpa) - sem isso, o coletor re-le tudo mas o
-    /// event_id deterministico e igual ao ja enviado e o outbox deduplica
-    /// (ON CONFLICT DO NOTHING), sem reenviar nada ao ERP.
+    /// Incrementa a geracao de full-resync de uma conexao Arpa. Chamado ao criar
+    /// o job de "Sincronizar tudo" (<see cref="TryStartArpaResyncJobAsync"/>) -
+    /// sem isso, o reenvio re-le o periodo mas o event_id deterministico e igual
+    /// ao ja enviado e o outbox deduplica (ON CONFLICT DO NOTHING), sem reenviar
+    /// nada ao ERP.
     /// </summary>
     public async Task<int> BumpArpaResyncGenerationAsync(string connectionId, CancellationToken cancellationToken)
     {
@@ -2589,6 +2913,33 @@ public sealed record PdvSalePendingPublishRecord(
     JsonArray Items,
     JsonArray Payments,
     string? CustomerDocument = null);
+
+public sealed record DeadLetterSummaryRow(
+    string SourceSystem,
+    string EntityType,
+    string Reason,
+    long Open,
+    long Superseded,
+    long Resolved,
+    DateTimeOffset FirstCapturedAtUtc,
+    DateTimeOffset LastCapturedAtUtc);
+
+public sealed record DeadLetterSummary(
+    long Open,
+    long Superseded,
+    long Resolved,
+    long TotalGroups,
+    IReadOnlyList<DeadLetterSummaryRow> Rows)
+{
+    /// <summary>Linhas (grupos tipo/motivo) devolvidas para a tela; os totais sao sempre exatos.</summary>
+    public const int MaxRows = 100;
+}
+
+public sealed record DeadLetterResolveResult(bool Supported, long Resolved, IReadOnlyDictionary<string, long> ByEntity)
+{
+    public static readonly DeadLetterResolveResult NotSupported =
+        new(false, 0, new Dictionary<string, long>(StringComparer.Ordinal));
+}
 
 public sealed record PdvRejectedSaleRecord(
     Guid SaleId,

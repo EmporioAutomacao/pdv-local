@@ -7,6 +7,10 @@ Referencia da aba **Configuracoes > Arpa** do dashboard local do Sync Agent
 coletor Arpa e cadastra as conexoes com o(s) banco(s) Arpa Control do
 cliente, sem editar arquivo nem mexer no ERP.
 
+Como a sincronizacao funciona de ponta a ponta (ciclo, marcadores, `event_id`,
+envio ao ERP, "Sincronizar tudo", dead-letter):
+[sync-agent-sincronizacao.md](sync-agent-sincronizacao.md).
+
 Vale a partir de **1.6.2** (a tela existe desde 1.4.0; o botao de
 ligar/desligar, o dropdown de Loja e a trava anti-duplicata sao de 1.6.2).
 
@@ -156,35 +160,78 @@ um ciclo "concluido" com milhares de eventos ainda pendentes e normal - a barra
 mostra a fila drenando nos ciclos seguintes. Recarregar a pagina no meio de um
 ciclo restaura log, etapas e barra.
 
-**Sincronizar tudo** (1.6.9+) **zera os marcadores (watermarks)** desta conexao
-e dispara um ciclo — a coleta re-le e re-envia o cadastro ao ERP (produtos,
-clientes, estoque, vendas, financeiro, compras, cobranca, plano_historico - as
-entidades ligadas nessa conexao). Use para backfill ou para corrigir dados
-errados no ERP. Pede confirmacao (pode gerar milhares de eventos; drenam ao
-tamanho de lote configurado em "Envio ao ERP", secao 2).
+**Sincronizar tudo** (1.6.9+) relê do Arpa um periodo e reenvia ao ERP o
+cadastro e o movimento da conexao (produtos, clientes, estoque, vendas,
+financeiro, compras, cobranca, plano_historico - as entidades ligadas nessa
+conexao). Use para backfill ou para corrigir dados errados no ERP. Pede
+confirmacao (pode gerar milhares de eventos; drenam ao tamanho de lote
+configurado em "Envio ao ERP", secao 2).
 
 A partir de 1.6.36, um grupo de checkboxes de entidade (por linha, ao lado do
-botao) restringe **quais entidades** tem o watermark zerado/ajustado — as
-demais ficam como estavam, sem nenhum efeito (nao e resync delas). Todas
-marcadas por padrao (comportamento identico ao de antes).
+botao) restringe **quais entidades** sao reenviadas — as demais nao sao
+tocadas. Todas marcadas por padrao.
 
-A partir de 1.6.25, um seletor ao lado do botao escolhe o **periodo** do
-reenvio em vez de sempre "desde sempre":
+Um seletor ao lado do botao escolhe o **periodo** do reenvio (1.6.25+; data
+final a partir de 1.6.59):
 
-| Opcao | Efeito |
+| Opcao | Periodo |
 |---|---|
-| **Tudo** | Comportamento original - apaga o watermark, re-le o historico inteiro. |
-| **Ultimos 3 meses** / **Ultimo dia** | Fixa o watermark em `agora - 3 meses` / `agora - 1 dia` (janela relativa, calculada no servidor). |
-| **Data especifica** | Abre um campo de data (`input type="date"`); fixa o watermark na meia-noite UTC dessa data. |
+| **Tudo** | Todo o historico, ate o momento do clique. |
+| **Ultimos 3 meses** / **Ontem e hoje** | Da meia-noite local de 3 meses atras / de ontem ate agora. Antes de 1.6.59 era uma janela movel (`agora - 3 meses` / `agora - 1 dia`), e a opcao se chamava "Ultimo dia": como as datas do Arpa caem na meia-noite local, ela perdia as vendas de ontem. |
+| **Data especifica** | Campos **de** e **ate** (`input type="date"`, ate hoje). Da meia-noite da data inicial ate o fim do dia da data final, no fuso da maquina do agente (a coluna `date` do Arpa cai na meia-noite local). Data final = hoje vai ate o momento do clique. |
 
-Util para conexoes com muito historico (ex.: vendas/financeiro de anos) onde
-reenviar tudo geraria dezenas de milhares de eventos sem necessidade. Em
-qualquer opcao, a geracao de resync da conexao e incrementada (mesmo
-mecanismo do "Tudo") para os `event_id` saírem novos e nao serem
-descartados por deduplicacao.
+**Como funciona (1.6.59+).** O clique grava um *job* de reenvio da conexao em
+`sync_agent.agent_state` (`collector.arpa.<conexao>.resync_job`): periodo,
+entidades, geracao e um cursor por entidade. A cada ciclo, depois da coleta
+incremental, o coletor le o periodo de cada entidade a partir do cursor do job
+(ate 10 paginas por ciclo; o resto continua no ciclo seguinte, inclusive apos
+reiniciar o servico). O **watermark da coleta incremental nao e alterado** —
+antes de 1.6.59 o botao zerava ou movia o watermark, e a coleta normal relia
+tudo dali ate agora. A geracao de resync e incrementada a cada job, para os
+`event_id` do reenvio sairem novos e o ERP reaplicar em vez de deduplicar.
 
-Endpoint: `POST /config/arpa/full-resync` (`id`, `since_preset=all|3m|1d|custom`,
-`since_date` quando `since_preset=custom`).
+A coleta incremental usa uma geracao **fixa**
+(`collector.arpa.<conexao>.incremental_generation`, gravada na primeira coleta
+da 1.6.59 com a geracao que ela ja usava, para a atualizacao nao mudar nenhum
+`event_id`). Antes de 1.6.59 ela usava a geracao de resync, e cada
+"Sincronizar tudo" fazia a releitura dos ultimos 2 dias reenviar ao ERP, com IDs
+novos, **todas** as entidades, inclusive as nao marcadas. Na VM isso aparecia
+como 47 rejeicoes a cada clique: os vendedores do catalogo (1.6.58) recusados
+por um ERP anterior a 0.0.169.
+
+**Trava (1.6.59+).** Enquanto o job existir, a conexao **nao aceita outro
+Sincronizar tudo**: o servidor responde HTTP 409 com o periodo e a fase, e o
+botao fica desabilitado como "Reenvio em andamento...", com o status abaixo
+(a tela consulta a cada 5s). O job termina, e a trava libera, quando:
+
+1. a leitura de todas as entidades do periodo terminou; e
+2. nao ha mais evento do Arpa dessas entidades `pending`/`in_flight` capturado
+   desde o inicio do reenvio (a coleta incremental das mesmas entidades entra na
+   conta e drena junto). **Dead-letter nao segura a trava.**
+
+Um tipo que falha na leitura (ex.: view best-effort ausente nesse Arpa) e tentado
+de novo a cada ciclo. O reenvio so desiste dele depois de **3 falhas seguidas
+durante pelo menos 30 minutos**, para que uma queda curta de rede nao o faca
+desistir. Ao terminar com falhas, o log do ciclo mostra "concluido COM FALHAS" e
+a linha da conexao continua mostrando o que nao foi reenviado e o motivo
+(`collector.arpa.<conexao>.resync_last`) ate o proximo reenvio concluido.
+
+O pedido e recusado com o coletor Arpa desativado ou com a conexao inativa, porque
+nesses casos o reenvio nunca avancaria. Um reenvio ja em andamento que nao avanca
+mostra o motivo no status: conexao pausada, inativa ou coletor desativado.
+
+A trava e por conexao: um reenvio na loja ANP nao impede outro na loja BSB.
+**Cancelar reenvio** apaga o job: o que ja foi lido continua na fila e segue para
+o ERP; o resto do periodo nao e lido. Remover a conexao tambem apaga o job.
+
+Endpoints:
+
+- `POST /config/arpa/full-resync`: `id`, `since_preset=all|3m|1d|custom`,
+  `since_date` e `until_date` (`yyyy-MM-dd`) quando `custom`, `entity_types`.
+  Responde 409 `{ok:false, running:true, message}` se ja houver reenvio.
+- `POST /config/arpa/cancel-resync`: `id`.
+- `GET /config/arpa/resync-status`: `jobs[]` com `id`, `phase` (`reading` ou
+  `sending`), `phase_text`, `period`, `entity_types`, `pending`, `started_at`.
 
 Botoes do formulario: **Salvar**, **Testar conexao** (valida credencial +
 presenca das views `sync_export`), **Limpar**.

@@ -5,6 +5,9 @@
 Orientar suporte tecnico na triagem de falhas do Sync Agent entre PDV/local,
 Arpa e ERP.
 
+Funcionamento normal da sincronizacao, para comparar com o incidente:
+[sync-agent-sincronizacao.md](sync-agent-sincronizacao.md).
+
 ## Fontes de diagnostico
 
 Local no cliente:
@@ -220,6 +223,28 @@ LIMIT 50;
    `event_id`) se a entidade ja existe correta no ERP via um evento
    posterior que deu certo - se ja existir, o registro antigo pode ser
    arquivado/fechado como resolvido em vez de reprocessado.
+
+   **A partir do SyncAgent 1.6.59** isso e a tela **Dead-letter**
+   (`http://127.0.0.1:47891/dead-letter`, link no contador do Dashboard e em
+   Configuracoes):
+   - mostra abertos, **superados** e encerrados por origem, tipo e motivo;
+   - **superado** = existe envio posterior aceito pelo ERP da mesma entidade
+     (`source_system` + `entity_type` + `entity_key` + `payload.loja_codigo`,
+     `captured_at_utc` maior). So entra `arpa`: venda do PDV segue no
+     **Reprocessar** do Dashboard;
+   - **Encerrar N superados** muda o status para `resolved` e grava em
+     `dead_letter_events` `resolved_at_utc` e `resolved_by_event_id` (o aceito
+     mais recente). **Nada e apagado**;
+   - opcional, desligado por padrao: **Encerrar superados automaticamente a
+     cada ciclo**;
+   - instalacao anterior a 1.6.59 precisa antes da rotina **Habilitar
+     encerramento de dead-letter** (Configuracoes > Manutencao do banco local),
+     senao a tela so mostra a previa;
+   - o contador `dead_letter_events` do painel/bandeja passa a contar so os
+     abertos. A reconciliacao enviada ao ERP continua contando o encerrado como
+     `dead_letter` (o numero enviado nao muda).
+   O que continua aberto sem superado exige corrigir a causa e reenviar (ex.:
+   vendedores do catalogo com ERP anterior a 0.0.169).
 5. Nao existe hoje reprocessamento automatico nem em lote pra entidades
    vindas do Arpa (so ha um botao manual, por linha, pra vendas feitas no
    proprio PDV - `RequeueRejectedPdvSaleAsync`/`/pdv-sales/reprocess`).
@@ -228,9 +253,19 @@ LIMIT 50;
    mesmo `event_id`; o agente precisaria filtrar por motivo pra nao
    reprocessar infinitamente erro de dado malformado, que nunca se resolve
    sozinho) - nao tratar como pendencia trivial.
-6. Nunca apagar DLQ para "limpar painel" sem decisao tecnica.
+6. Nunca apagar DLQ para "limpar painel" sem decisao tecnica. Encerrar um
+   superado pela tela Dead-letter nao apaga nada e e o caminho para limpar o
+   painel.
 
 ## Incidente: "Sincronizar tudo" usado mais de uma vez gera duplicacao de eventos
+
+> A partir do SyncAgent 1.6.59, o agente **recusa** um segundo "Sincronizar tudo"
+> na mesma conexao enquanto o primeiro estiver lendo do Arpa ou com eventos
+> pendentes de envio ao ERP (HTTP 409; botao desabilitado). O reenvio tambem nao
+> mexe mais no watermark da coleta incremental. O cuidado abaixo continua valendo
+> entre reenvios **consecutivos**: depois que um termina, o proximo gera um lote
+> novo. Para destravar um reenvio parado (ex.: conexao pausada), use **Cancelar
+> reenvio** na linha da conexao.
 
 "Sincronizar tudo" (full-resync, por conexao Arpa) **nao e idempotente** -
 cada clique incrementa um contador de "geracao de resync"
@@ -848,6 +883,13 @@ antes: ERP antigo recusa `catalogo` com `tipo=vendedor`).
 
 Estrutura conferida em Anapolis (2026-11-24): `cabecalho_ordem_servico.vendedor` ->
 `vendedores(codigo, nome, cpf, status)`; `status` true = ativo.
+
+Sinal de que o ERP ainda nao e 0.0.169: dead-letter de `catalogo` com o motivo
+`catalogo payload requires tipo (especie|condicao|conta) and codigo`, um por vendedor. Na VM
+`ERP` (2026-11-25, ERP demo) foram 47 por vez. Ate o SyncAgent 1.6.58, cada "Sincronizar tudo"
+reenviava esses 47 de novo pela releitura da coleta incremental. A partir da 1.6.59 isso nao
+acontece mais (geracao da coleta incremental fixa). Atualizar o ERP resolve a causa, e os
+registros antigos de dead-letter continuam la (ver "Incidente: dead-letter").
 
 ## Evidencias obrigatorias
 

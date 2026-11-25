@@ -5,6 +5,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SyncAgent.Collectors;
 using SyncAgent.Configuration;
 using SyncAgent.Contracts;
 using SyncAgent.Persistence;
@@ -28,6 +29,11 @@ public sealed class LocalStatusServer : BackgroundService
     private const string ConfigArpaPath = "/config/arpa";
     private const string ConfigArpaLojasPath = "/config/arpa/lojas";
     private const string ConfigArpaSyncLogPath = "/config/arpa/sync-log";
+    private const string ConfigArpaResyncStatusPath = "/config/arpa/resync-status";
+    private const string DeadLetterPath = "/dead-letter";
+    private const string DeadLetterSummaryPath = "/dead-letter/summary";
+    private const string DeadLetterResolvePath = "/dead-letter/resolve-superseded";
+    private const string DeadLetterAutoPath = "/dead-letter/auto";
     private const string ConfigLocalDbPath = "/config/local-db";
     private const string ConfigLocalDbTestPath = "/config/local-db/test";
     private const string ConfigLocalDbRoutinePath = "/config/local-db/routine";
@@ -66,6 +72,13 @@ public sealed class LocalStatusServer : BackgroundService
     private readonly ArpaLojaListClient _arpaLojaListClient;
     private readonly ArpaDdlRunner _arpaDdlRunner;
     private static readonly SemaphoreSlim PrepareViewsLock = new(1, 1);
+
+    // Serializa "ver se ha reenvio -> incrementar geracao -> gravar job": dois
+    // cliques simultaneos nao incrementam a geracao duas vezes.
+    private static readonly SemaphoreSlim ResyncStartLock = new(1, 1);
+
+    // Um "Encerrar superados" por vez (clique duplo, outra aba).
+    private static readonly SemaphoreSlim DeadLetterResolveLock = new(1, 1);
     private readonly SyncAgent.Heartbeat.ErpCompatibility _erpCompatibility;
     private readonly LocalDbMaintenanceRunner _localDbMaintenanceRunner;
     private readonly LocalSyncStore _localStore;
@@ -226,6 +239,18 @@ public sealed class LocalStatusServer : BackgroundService
             if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaLojasPath)
             {
                 await HandleConfigArpaLojasAsync(context.Response, cancellationToken);
+                return;
+            }
+
+            if (context.Request.Url?.AbsolutePath is DeadLetterPath or DeadLetterSummaryPath or DeadLetterResolvePath or DeadLetterAutoPath)
+            {
+                await HandleDeadLetterAsync(context, cancellationToken);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath == ConfigArpaResyncStatusPath)
+            {
+                await HandleConfigArpaResyncStatusAsync(context.Response, cancellationToken);
                 return;
             }
 
@@ -636,7 +661,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <section class="card"><div class="label">Tenant ERP</div><div class="value">{{Html(effectiveOptions.TenantId)}}</div></section>
                   <section class="card"><div class="label">Instalacao</div><div class="value">{{Html(effectiveOptions.InstanceId)}}</div></section>
                   <section class="card"><div class="label">Pendentes</div><div class="value">{{storeStatus.PendingOutboxEvents}}</div></section>
-                  <section class="card"><div class="label">Dead-letter</div><div class="value warn">{{storeStatus.DeadLetterEvents}}</div></section>
+                  <section class="card"><div class="label">Dead-letter</div><div class="value warn"><a href="/dead-letter">{{storeStatus.DeadLetterEvents}}</a></div></section>
                   <section class="card"><div class="label">Vendas PDV pendentes</div><div class="value">{{ReadJsonLong(storeStatus.PdvSalesSummary, "pending_sync")}}</div></section>
                   <section class="card"><div class="label">Vendas PDV enviadas</div><div class="value">{{ReadJsonLong(storeStatus.PdvSalesSummary, "sent")}}</div></section>
                   <section class="card"><div class="label">Vendas PDV aceitas</div><div class="value ok">{{ReadJsonLong(storeStatus.PdvSalesSummary, "accepted")}}</div></section>
@@ -717,7 +742,7 @@ public sealed class LocalStatusServer : BackgroundService
                     <div><div class="label">Versao</div><div class="value">{{Html(options.AgentVersion)}}</div></div>
                     <div><div class="label">Status runtime</div><div class="value ok">{{Html(runtimeState.CurrentStatus)}}</div></div>
                     <div><div class="label">Pendentes</div><div class="value">{{storeStatus.PendingOutboxEvents}}</div></div>
-                    <div><div class="label">Dead-letter</div><div class="value warn">{{storeStatus.DeadLetterEvents}}</div></div>
+                    <div><div class="label">Dead-letter</div><div class="value warn"><a href="/dead-letter">{{storeStatus.DeadLetterEvents}}</a></div></div>
                     <div><div class="label">Vendas PDV aceitas</div><div class="value ok">{{ReadJsonLong(storeStatus.PdvSalesSummary, "accepted")}}</div></div>
                     <div><div class="label">Vendas PDV rejeitadas</div><div class="value warn">{{ReadJsonLong(storeStatus.PdvSalesSummary, "rejected")}}</div></div>
                     <div><div class="label">Heartbeat</div><div class="value">{{Html(FormatHeartbeat(storeStatus))}}</div></div>
@@ -760,7 +785,7 @@ public sealed class LocalStatusServer : BackgroundService
                     <tr><th>Indicador</th><th>Significado</th><th>Acao sugerida</th></tr>
                     <tr><td><code>runtime_status</code></td><td>Estado atual do Worker.</td><td>Se estiver <code>degraded</code>, consulte <code>last_error</code> em <a href="/status">/status</a>.</td></tr>
                     <tr><td><code>pending_outbox_events</code></td><td>Eventos ainda nao confirmados pelo ERP.</td><td>Se crescer continuamente, validar internet, token, certificado e endpoint ERP.</td></tr>
-                    <tr><td><code>dead_letter_events</code></td><td>Eventos que nao serao reenviados automaticamente.</td><td>Abrir suporte tecnico para analisar motivo e decidir reprocessamento.</td></tr>
+                    <tr><td><code>dead_letter_events</code></td><td>Eventos recusados pelo ERP que ainda nao foram superados (nao sao reenviados automaticamente).</td><td>Abrir a tela <a href="/dead-letter">Dead-letter</a>: ver o motivo por tipo e encerrar os ja superados por um envio posterior aceito (1.6.59+). Os que sobram exigem corrigir a causa e reenviar.</td></tr>
                     <tr><td><code>oldest_pending_age_seconds</code></td><td>Idade do evento pendente mais antigo.</td><td>Se ultrapassar o SLA operacional, investigar conectividade e resposta do ERP.</td></tr>
                     <tr><td><code>last_heartbeat_succeeded</code></td><td>Resultado do ultimo heartbeat para o ERP.</td><td>Se falhar, validar autenticacao e disponibilidade da API ERP.</td></tr>
                     <tr><td><code>last_reconciliation_summary</code></td><td>Resumo local da janela reconciliada nas ultimas 24h.</td><td>Use para localizar crescimento de pendentes, rejeicoes e dead-letter por entidade.</td></tr>
@@ -773,7 +798,7 @@ public sealed class LocalStatusServer : BackgroundService
                   <h2>Fluxo de sincronizacao</h2>
                   <pre>Arpa local -> Collector -> Normalizers -> Outbox PostgreSQL -> Dispatcher HTTPS -> ERP Sync API</pre>
                   <p>O agente nunca precisa receber conexoes de entrada da internet. Toda comunicacao normal e de saida para o ERP.</p>
-                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro,compras,cobranca,plano_historico}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6), com etapas e barra de acompanhamento do envio (a partir de 1.6.14). O botao <strong>Sincronizar tudo</strong> zera os marcadores e reenvia dessa conexao ao ERP (a partir de 1.6.13); a partir de 1.6.25 um seletor ao lado escolhe o <strong>periodo</strong> (tudo / ultimos 3 meses / ultimo dia / data especifica) em vez de sempre reenviar o historico inteiro. A partir de 1.6.36, os dois botoes ganham checkboxes de <strong>tipo de entidade</strong> (produtos, vendas, financeiro etc.) — "Sincronizar" le um painel global de selecao valido para o proximo ciclo (sem mexer em watermark nem nos toggles da conexao), "Sincronizar tudo" tem seu proprio grupo por linha (so as entidades marcadas tem o watermark tocado); nesse mesmo release o painel <strong>Envio ao ERP</strong> passa a deixar o tamanho do lote de envio (<code>ErpDispatcher:BatchSize</code>, padrao 1000, antes 50 fixo) editavel direto na tela, sem reiniciar o servico. Vendas/financeiro/cobranca tem um fallback dinamico para schemas Arpa fora do padrao fixo original (a partir de 1.6.17). Produtos exportam <strong>unidade de medida</strong> quando o Arpa tiver a coluna (contrato Sync 2.13.0, a partir de 1.6.24). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
+                  <p><strong>Coletor Arpa</strong> (quando habilitado): le as views <code>sync_export.{produtos,clientes,estoque,vendas,financeiro,compras,cobranca,plano_historico}</code> no(s) banco(s) Arpa Control do cliente, com um usuario <em>read-only</em>. As conexoes sao configuradas em <a href="/config/arpa">Configuracoes &rsaquo; Arpa</a> (uma por Loja/Estoque do ERP; toggles por entidade; botoes de Testar, Preparar views e Criar usuario read-only). O proprio botao <strong>Ativar/Desativar coletor</strong> nessa tela liga e desliga a coleta sem editar arquivo nem reiniciar o servico. O campo <strong>Loja/Estoque</strong> puxa a lista de Lojas cadastradas no ERP (a partir de 1.6.2) e recusa vincular a mesma Loja em duas conexoes. O botao <strong>Sincronizar</strong> abre um log ao vivo do que esta sendo lido/enviado por entidade (a partir de 1.6.6), com etapas e barra de acompanhamento do envio (a partir de 1.6.14). O botao <strong>Sincronizar tudo</strong> zera os marcadores e reenvia dessa conexao ao ERP (a partir de 1.6.13); a partir de 1.6.25 um seletor ao lado escolhe o <strong>periodo</strong> (tudo / ultimos 3 meses / ultimo dia / data especifica) em vez de sempre reenviar o historico inteiro. A partir de 1.6.59, a data especifica tem <strong>inicio e fim</strong>, o reenvio le o periodo com marcador proprio (sem mexer no da coleta normal) e a conexao <strong>nao aceita outro Sincronizar tudo</strong> enquanto o anterior estiver lendo do Arpa ou com eventos pendentes de envio ao ERP (botao <strong>Cancelar reenvio</strong> destrava). Na mesma versao, a tela <a href="/dead-letter">Dead-letter</a> mostra os eventos recusados por tipo e motivo e encerra (status <code>resolved</code>, sem apagar) os ja superados por um envio posterior aceito pelo ERP, com encerramento automatico opcional. A partir de 1.6.36, os dois botoes ganham checkboxes de <strong>tipo de entidade</strong> (produtos, vendas, financeiro etc.) — "Sincronizar" le um painel global de selecao valido para o proximo ciclo (sem mexer em watermark nem nos toggles da conexao), "Sincronizar tudo" tem seu proprio grupo por linha (so as entidades marcadas tem o watermark tocado); nesse mesmo release o painel <strong>Envio ao ERP</strong> passa a deixar o tamanho do lote de envio (<code>ErpDispatcher:BatchSize</code>, padrao 1000, antes 50 fixo) editavel direto na tela, sem reiniciar o servico. Vendas/financeiro/cobranca tem um fallback dinamico para schemas Arpa fora do padrao fixo original (a partir de 1.6.17). Produtos exportam <strong>unidade de medida</strong> quando o Arpa tiver a coluna (contrato Sync 2.13.0, a partir de 1.6.24). Erros comuns no log <code>SyncAgent.Collectors.ArpaCollector</code>:</p>
                   <table>
                     <tr><th>Erro</th><th>Causa</th><th>Correcao</th></tr>
                     <tr><td><code>42P01: relation "sync_export.produtos" does not exist</code></td><td>As views <code>sync_export</code> nunca foram criadas nesse banco Arpa.</td><td>DBA cria o schema/views (<code>infra/arpa/apply-arpa-sync-export-views.ps1</code>, geradas do diagnostico do schema real) + grants read-only.</td></tr>
@@ -1399,6 +1424,12 @@ public sealed class LocalStatusServer : BackgroundService
                     <p class="muted">Conexoes com bancos Arpa Control para importar produtos, clientes e estoque. {{Html(arpaLine)}}</p>
                   </section>
                 </a>
+                <a class="cardlink" href="/dead-letter">
+                  <section class="panel">
+                    <h2>Dead-letter</h2>
+                    <p class="muted">Eventos recusados pelo ERP: motivo por tipo e encerramento dos ja superados por um envio posterior aceito.</p>
+                  </section>
+                </a>
                 <a class="cardlink" href="/config/local-db">
                   <section class="panel">
                     <h2>Manutencao do banco local</h2>
@@ -1667,6 +1698,7 @@ public sealed class LocalStatusServer : BackgroundService
 
         var depsJson = JsonSerializer.Serialize(depsMap, JsonOptions);
 
+        var todayIso = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var rows = new StringBuilder();
         if (connections.Count == 0)
         {
@@ -1701,12 +1733,17 @@ public sealed class LocalStatusServer : BackgroundService
                     <select id="resync_scope_{{Html(c.Id)}}" class="mini" style="width:auto; display:inline-block" onchange="onResyncScopeChange('{{Html(c.Id)}}')">
                       <option value="all">Tudo</option>
                       <option value="3m">Ultimos 3 meses</option>
-                      <option value="1d">Ultimo dia</option>
+                      <option value="1d">Ontem e hoje</option>
                       <option value="custom">Data especifica...</option>
                     </select>
-                    <input type="date" id="resync_date_{{Html(c.Id)}}" class="mini" style="width:auto; display:none">
-                    <button type="button" class="mini" onclick="fullResync('{{Html(c.Id)}}')">Sincronizar tudo</button>
+                    <span id="resync_range_{{Html(c.Id)}}" style="display:none">
+                      de <input type="date" id="resync_date_{{Html(c.Id)}}" class="mini" style="width:auto; display:inline-block" max="{{todayIso}}">
+                      ate <input type="date" id="resync_until_{{Html(c.Id)}}" class="mini" style="width:auto; display:inline-block" max="{{todayIso}}">
+                    </span>
+                    <button type="button" class="mini" id="resync_btn_{{Html(c.Id)}}" onclick="fullResync('{{Html(c.Id)}}')">Sincronizar tudo</button>
+                    <button type="button" class="mini danger" id="resync_cancel_{{Html(c.Id)}}" style="display:none" onclick="cancelResync('{{Html(c.Id)}}')">Cancelar reenvio</button>
                     <button type="button" class="mini danger" onclick="if(confirm('Remover a conexao {{Html(c.Nome)}}?'))postAct('delete','{{Html(c.Id)}}')">Remover</button>
+                    <div id="resync_state_{{Html(c.Id)}}" class="warn" style="margin-top:6px; white-space:normal; display:none"></div>
                     <div style="margin-top:6px">
                       {{BuildEntityTypeChecksHtml($"resync_entities_{Html(c.Id)}", $"re_{Html(c.Id)}", compact: true)}}
                     </div>
@@ -2404,44 +2441,101 @@ public sealed class LocalStatusServer : BackgroundService
 
                 function onResyncScopeChange(id){
                   var scope = document.getElementById('resync_scope_' + id).value;
-                  document.getElementById('resync_date_' + id).style.display = (scope === 'custom') ? 'inline-block' : 'none';
+                  document.getElementById('resync_range_' + id).style.display = (scope === 'custom') ? 'inline' : 'none';
+                }
+
+                function fmtIsoDate(v){ var p = (v || '').split('-'); return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : v; }
+
+                // Reenvio em andamento (job por conexao): trava o botao ate a leitura e o
+                // envio ao ERP terminarem. O servidor tambem recusa (HTTP 409).
+                var RESYNC_TIMER = null;
+                function applyResyncStatus(jobs, lastFailures){
+                  var byId = {}, lastById = {};
+                  (jobs || []).forEach(function(j){ byId[j.id] = j; });
+                  (lastFailures || []).forEach(function(l){ lastById[l.id] = l; });
+                  document.querySelectorAll('[id^="resync_btn_"]').forEach(function(btn){
+                    var id = btn.id.substring('resync_btn_'.length);
+                    var job = byId[id];
+                    var state = document.getElementById('resync_state_' + id);
+                    var cancel = document.getElementById('resync_cancel_' + id);
+                    btn.disabled = !!job;
+                    btn.textContent = job ? 'Reenvio em andamento...' : 'Sincronizar tudo';
+                    cancel.style.display = job ? 'inline-block' : 'none';
+                    var last = lastById[id];
+                    state.style.display = (job || last) ? 'block' : 'none';
+                    state.textContent = job
+                      ? ('Sincronizar tudo em andamento (' + job.period + ', iniciado ' + job.started_at + '): ' + job.phase_text + '.')
+                      : (last ? last.message : '');
+                  });
+                  return (jobs || []).length > 0;
+                }
+                function loadResyncStatus(){
+                  fetch('/config/arpa/resync-status').then(function(r){ return r.json(); }).then(function(j){
+                    var active = applyResyncStatus(j.jobs, j.last_failures);
+                    if(active && !RESYNC_TIMER){ RESYNC_TIMER = setInterval(loadResyncStatus, 5000); }
+                    if(!active && RESYNC_TIMER){ clearInterval(RESYNC_TIMER); RESYNC_TIMER = null; }
+                  }).catch(function(){});
+                }
+
+                function cancelResync(id){
+                  if(!confirm('Cancelar o Sincronizar tudo desta conexao? O que ja foi lido continua na fila e segue para o ERP; o restante do periodo nao sera reenviado.')) return;
+                  var b = new URLSearchParams(); b.set('id', id);
+                  fetch('/config/arpa/cancel-resync', { method:'POST', body: b })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ alert(j.message || 'OK'); loadResyncStatus(); })
+                    .catch(function(e){ alert('Falha: ' + e); });
                 }
 
                 function fullResync(id){
                   var scope = document.getElementById('resync_scope_' + id).value;
+                  var since = document.getElementById('resync_date_' + id).value;
+                  var until = document.getElementById('resync_until_' + id).value;
+                  if(scope === 'custom'){
+                    if(!since || !until){ alert('Escolha a data inicial e a data final.'); return; }
+                    if(since > until){ alert('A data inicial deve ser anterior ou igual a data final.'); return; }
+                  }
                   var scopeLabel = {
                     all: 'TODOS os dados (desde sempre)',
                     '3m': 'os dados dos ultimos 3 meses',
-                    '1d': 'os dados do ultimo dia',
-                    custom: 'os dados desde a data escolhida'
+                    '1d': 'os dados de ontem e hoje',
+                    custom: 'os dados de ' + fmtIsoDate(since) + ' a ' + fmtIsoDate(until)
                   }[scope] || 'os dados selecionados';
-                  if(scope === 'custom' && !document.getElementById('resync_date_' + id).value){
-                    alert('Escolha uma data.'); return;
-                  }
                   var entityTypes = selectedEntityTypes('re_' + id);
                   if(!entityTypes){ alert('Selecione ao menos um tipo de dado.'); return; }
-                  if(!confirm('Re-enviar ' + scopeLabel + ' desta conexao ao ERP? Pode gerar muitos eventos.')) return;
-                  var panel = document.getElementById('synclogpanel');
-                  panel.hidden = false;
-                  document.getElementById('synclogclose').hidden = true;
-                  document.getElementById('synclog').textContent = 'Ajustando marcadores...';
-                  document.getElementById('syncsteps').innerHTML = '';
-                  document.getElementById('syncdrain').hidden = true;
-                  stopDrainPoll();
-                  SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0; SYNCRUN_MAXPENDING = 0;
-                  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  if(!confirm('Re-enviar ' + scopeLabel + ' desta conexao ao ERP? Pode gerar muitos eventos. Ate terminar, outro Sincronizar tudo nesta conexao fica bloqueado.')) return;
+                  var btn = document.getElementById('resync_btn_' + id);
+                  btn.disabled = true;
+                  var b = new URLSearchParams(); b.set('id', id); b.set('since_preset', scope); b.set('entity_types', entityTypes);
+                  if(scope === 'custom'){ b.set('since_date', since); b.set('until_date', until); }
+                  var baseline = null;
                   fetch('/config/arpa/sync-log').then(function(r){ return r.json(); }).then(function(j){
-                    SYNCLOG_BASELINE = j.run_id;
-                    var b = new URLSearchParams(); b.set('id', id); b.set('since_preset', scope); b.set('entity_types', entityTypes);
-                    if(scope === 'custom'){ b.set('since_date', document.getElementById('resync_date_' + id).value); }
+                    baseline = j.run_id;
                     return fetch('/config/arpa/full-resync', { method:'POST', body: b });
                   }).then(function(r){ return r.json(); }).then(function(j){
+                    if(!j.ok){
+                      // 409 (ja ha reenvio) ou dado invalido: nao abre o log como se tivesse iniciado.
+                      alert(j.message || 'Nao foi possivel iniciar.');
+                      btn.disabled = false;
+                      loadResyncStatus();
+                      return;
+                    }
+                    var panel = document.getElementById('synclogpanel');
+                    panel.hidden = false;
+                    document.getElementById('synclogclose').hidden = true;
+                    document.getElementById('syncsteps').innerHTML = '';
+                    document.getElementById('syncdrain').hidden = true;
+                    stopDrainPoll();
+                    SYNCLOG_STARTED = false; SYNCLOG_WAITS = 0; SYNCRUN_MAXPENDING = 0;
+                    SYNCLOG_BASELINE = baseline;
+                    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     document.getElementById('synclog').textContent = (j.message || 'OK') + '\nAguardando o agente iniciar...';
                     if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); }
                     SYNCLOG_TIMER = setInterval(pollSyncLog, 1000);
                     pollSyncLog();
-                  }).catch(function(e){ document.getElementById('synclog').textContent = 'Falha: ' + e; });
+                    loadResyncStatus();
+                  }).catch(function(e){ alert('Falha: ' + e); btn.disabled = false; });
                 }
+                loadResyncStatus();
 
                 function closeSyncLog(){
                   if(SYNCLOG_TIMER){ clearInterval(SYNCLOG_TIMER); SYNCLOG_TIMER = null; }
@@ -2593,6 +2687,338 @@ public sealed class LocalStatusServer : BackgroundService
                 tabelas_preco = result.TabelasPreco?.Select(t => new { id = t.Id, nome = t.Nome, empresa_nome = t.EmpresaNome ?? string.Empty }),
             },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Tela Dead-letter (1.6.59): resumo por tipo/motivo, encerramento dos superados
+    /// (envio posterior da mesma entidade aceito pelo ERP) e o automatico opcional.
+    /// </summary>
+    private async Task HandleDeadLetterAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var path = context.Request.Url!.AbsolutePath;
+        var method = context.Request.HttpMethod;
+
+        if (method == "GET" && path == DeadLetterPath)
+        {
+            await WriteDeadLetterPageAsync(context.Response, cancellationToken);
+            return;
+        }
+
+        if (method == "GET" && path == DeadLetterSummaryPath)
+        {
+            await WriteJsonAsync(context.Response, HttpStatusCode.OK, await BuildDeadLetterSummaryAsync(cancellationToken), cancellationToken);
+            return;
+        }
+
+        if (method == "POST" && path == DeadLetterResolvePath)
+        {
+            if (!await DeadLetterResolveLock.WaitAsync(0, cancellationToken))
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.Conflict, new { ok = false, message = "Ja existe um encerramento em andamento. Aguarde terminar." }, cancellationToken);
+                return;
+            }
+
+            try
+            {
+                var result = await _localStore.ResolveSupersededDeadLettersAsync(cancellationToken);
+                if (!result.Supported)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.OK,
+                        new { ok = false, supported = false, message = "O banco local ainda nao aceita o encerramento. Rode a rotina \"Habilitar encerramento de dead-letter\" em Configuracoes > Manutencao do banco local." },
+                        cancellationToken);
+                    return;
+                }
+
+                _logger.LogInformation("Dead-letter: {Count} encerrado(s) pela tela (superados).", result.Resolved);
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    new
+                    {
+                        ok = true,
+                        supported = true,
+                        resolved = result.Resolved,
+                        by_entity = result.ByEntity,
+                        message = result.Resolved == 0
+                            ? "Nenhum dead-letter superado para encerrar."
+                            : $"{result.Resolved} dead-letter(s) encerrado(s). O historico continua em dead_letter_events.",
+                    },
+                    cancellationToken);
+                return;
+            }
+            finally
+            {
+                DeadLetterResolveLock.Release();
+            }
+        }
+
+        if (method == "POST" && path == DeadLetterAutoPath)
+        {
+            Dictionary<string, string> form;
+            try
+            {
+                form = await ReadFormAsync(context.Request, MaxConfigFormBytes, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = ex.Message }, cancellationToken);
+                return;
+            }
+
+            var enabled = form.GetValueOrDefault("enabled", string.Empty).Trim() is "true" or "on" or "1";
+            if (enabled && !await _localStore.SupportsDeadLetterResolutionAsync(cancellationToken))
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = false, message = "Rode antes a rotina \"Habilitar encerramento de dead-letter\"." }, cancellationToken);
+                return;
+            }
+
+            await _localStore.SetDeadLetterAutoResolveAsync(enabled, cancellationToken);
+            await WriteJsonAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                new { ok = true, enabled, message = enabled ? "Encerramento automatico ligado: a cada ciclo os superados sao encerrados." : "Encerramento automatico desligado." },
+                cancellationToken);
+            return;
+        }
+
+        await WriteJsonAsync(context.Response, HttpStatusCode.MethodNotAllowed, new { ok = false, message = "Metodo nao permitido." }, cancellationToken);
+    }
+
+    private async Task<object> BuildDeadLetterSummaryAsync(CancellationToken cancellationToken)
+    {
+        var supported = await _localStore.SupportsDeadLetterResolutionAsync(cancellationToken);
+        var auto = await _localStore.GetDeadLetterAutoResolveAsync(cancellationToken);
+        var summary = await _localStore.GetDeadLetterSummaryAsync(cancellationToken);
+        return new
+        {
+            ok = true,
+            supported,
+            auto_resolve = auto,
+            routine_url = $"{ConfigLocalDbPath}?routine={LocalDbMaintenanceRunner.EnableDeadLetterResolutionKey}",
+            open = summary.Open,
+            superseded = summary.Superseded,
+            resolved = summary.Resolved,
+            total_groups = summary.TotalGroups,
+            truncated = summary.TotalGroups > summary.Rows.Count,
+            rows = summary.Rows.Select(r => new
+            {
+                source_system = r.SourceSystem,
+                entity_type = r.EntityType,
+                reason = r.Reason,
+                open = r.Open,
+                superseded = r.Superseded,
+                resolved = r.Resolved,
+                first = r.FirstCapturedAtUtc.ToLocalTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                last = r.LastCapturedAtUtc.ToLocalTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+            }),
+        };
+    }
+
+    private async Task WriteDeadLetterPageAsync(HttpListenerResponse response, CancellationToken cancellationToken)
+    {
+        var html = $$"""
+            <!doctype html>
+            <html lang="pt-BR">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Dead-letter - AraraSuite Sync</title>
+              <style>
+                body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
+                h1 { margin-bottom: 4px; font-size: 28px; }
+                h2 { margin: 0 0 6px; font-size: 18px; }
+                .muted { color: #64748b; margin: 0; }
+                {{BaseStyles}}
+                .panel { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin: 16px 0; }
+                .warnbox { border-color: #f59e0b; }
+                .totals { display: flex; gap: 24px; flex-wrap: wrap; margin: 8px 0 12px; }
+                .totals div { font-size: 14px; } .totals strong { font-size: 22px; display: block; }
+                .tablewrap { overflow-x: auto; }
+                table { width: 100%; border-collapse: collapse; font-size: 14px; }
+                th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+                td.num, th.num { text-align: right; white-space: nowrap; }
+                button { padding: 8px 14px; border-radius: 8px; border: 1px solid #2563eb; background: #2563eb; color: #fff; font-weight: 700; cursor: pointer; }
+                button:disabled { opacity: .5; cursor: not-allowed; }
+                .ok { color: #166534; } .warn { color: #92400e; }
+                body.dark .ok { color: #4ade80; } body.dark .warn { color: #fbbf24; }
+                #msg { margin-top: 10px; }
+              </style>
+            </head>
+            <body>
+              <main>
+                <h1>Dead-letter</h1>
+                <p class="muted">Eventos que o ERP recusou. Nada aqui e apagado: encerrar so marca como resolvido o que ja chegou certo ao ERP por um envio posterior.</p>
+                {{LocalNavHtml(ConfigPath)}}
+                <section class="panel warnbox" id="needroutine" hidden>
+                  <h2>Falta habilitar o encerramento</h2>
+                  <p class="muted">O banco local ainda nao aceita o status "resolvido". Rode a rotina <strong>Habilitar encerramento de dead-letter</strong> em <a id="routinelink" href="#">Configuracoes &rsaquo; Manutencao do banco local</a> (credencial admin do Postgres local, informada na hora). Ate la esta tela so mostra a previa.</p>
+                </section>
+                <section class="panel">
+                  <div class="totals">
+                    <div><strong id="t_open">-</strong>abertos</div>
+                    <div><strong id="t_sup" class="ok">-</strong>superados (podem ser encerrados)</div>
+                    <div><strong id="t_res">-</strong>ja encerrados</div>
+                  </div>
+                  <button type="button" id="resolvebtn" onclick="resolveSuperseded()" disabled>Encerrar superados</button>
+                  <label style="margin-left:16px"><input type="checkbox" id="autochk" onchange="setAuto(this.checked)" disabled> Encerrar superados automaticamente a cada ciclo</label>
+                  <div id="msg" class="muted"></div>
+                </section>
+                <section class="panel">
+                  <h2>Por tipo e motivo</h2>
+                  <p class="muted">Superado = existe um envio posterior da mesma entidade (mesma chave e loja) aceito pelo ERP. Vendas do PDV rejeitadas ficam de fora: use <strong>Reprocessar</strong> no Dashboard. O que continuar aberto e sem superado precisa corrigir a causa (ex.: atualizar o ERP) e reenviar.</p>
+                  <div class="tablewrap">
+                    <table>
+                      <thead><tr><th>Origem</th><th>Tipo</th><th>Motivo</th><th class="num">Abertos</th><th class="num">Superados</th><th class="num">Encerrados</th><th>Periodo</th></tr></thead>
+                      <tbody id="rows"><tr><td colspan="7" class="muted">Carregando...</td></tr></tbody>
+                    </table>
+                  </div>
+                </section>
+              </main>
+              <script>
+                var SUMMARY = null;
+                function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+                function render(j){
+                  SUMMARY = j;
+                  document.getElementById('needroutine').hidden = !!j.supported;
+                  document.getElementById('routinelink').href = j.routine_url;
+                  document.getElementById('t_open').textContent = j.open;
+                  document.getElementById('t_sup').textContent = j.superseded;
+                  document.getElementById('t_res').textContent = j.resolved;
+                  var btn = document.getElementById('resolvebtn');
+                  btn.disabled = !j.supported || j.superseded <= 0;
+                  btn.textContent = j.superseded > 0 ? ('Encerrar ' + j.superseded + ' superado(s)') : 'Nada para encerrar';
+                  var chk = document.getElementById('autochk');
+                  chk.disabled = !j.supported; chk.checked = !!j.auto_resolve;
+                  var body = document.getElementById('rows');
+                  if(!j.rows || !j.rows.length){ body.innerHTML = '<tr><td colspan="7" class="muted">Nenhum dead-letter.</td></tr>'; return; }
+                  body.innerHTML = j.rows.map(function(r){
+                    return '<tr><td>' + esc(r.source_system) + '</td><td>' + esc(r.entity_type) + '</td><td>' + esc(r.reason) + '</td>'
+                      + '<td class="num">' + r.open + '</td><td class="num ok">' + r.superseded + '</td><td class="num">' + r.resolved + '</td>'
+                      + '<td>' + esc(r.first) + (r.first !== r.last ? ' a ' + esc(r.last) : '') + '</td></tr>';
+                  }).join('')
+                    + (j.truncated ? '<tr><td colspan="7" class="muted">Mostrando ' + j.rows.length + ' de ' + j.total_groups + ' grupos (os de mais abertos primeiro). Os totais acima contam todos.</td></tr>' : '');
+                }
+                function load(){
+                  return fetch('/dead-letter/summary').then(function(r){ return r.json(); }).then(render)
+                    .catch(function(e){ document.getElementById('msg').textContent = 'Falha ao carregar: ' + e; });
+                }
+                function resolveSuperseded(){
+                  if(!SUMMARY || SUMMARY.superseded <= 0) return;
+                  var porTipo = {};
+                  SUMMARY.rows.forEach(function(r){ if(r.superseded > 0){ porTipo[r.entity_type] = (porTipo[r.entity_type] || 0) + r.superseded; } });
+                  var lista = Object.keys(porTipo).map(function(k){ return k + ': ' + porTipo[k]; }).join(', ')
+                    + (SUMMARY.truncated ? ' (e outros fora da lista exibida)' : '');
+                  if(!confirm('Encerrar ' + SUMMARY.superseded + ' dead-letter(s) ja superado(s) por envio posterior aceito pelo ERP?\n\n' + lista + '\n\nNada e apagado; o historico fica em dead_letter_events.')) return;
+                  var btn = document.getElementById('resolvebtn'); btn.disabled = true;
+                  fetch('/dead-letter/resolve-superseded', { method:'POST' })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ document.getElementById('msg').textContent = j.message || 'OK'; return load(); })
+                    .catch(function(e){ document.getElementById('msg').textContent = 'Falha: ' + e; btn.disabled = false; });
+                }
+                function setAuto(on){
+                  var b = new URLSearchParams(); b.set('enabled', on ? 'true' : 'false');
+                  fetch('/dead-letter/auto', { method:'POST', body: b })
+                    .then(function(r){ return r.json(); })
+                    .then(function(j){ document.getElementById('msg').textContent = j.message || 'OK'; return load(); })
+                    .catch(function(e){ document.getElementById('msg').textContent = 'Falha: ' + e; });
+                }
+                load();
+              </script>
+            </body>
+            </html>
+            """;
+
+        await WriteHtmlAsync(response, html, cancellationToken);
+    }
+
+    /// <summary>Reenvio "Sincronizar tudo" em andamento por conexao (para a tela travar o botao).</summary>
+    private async Task HandleConfigArpaResyncStatusAsync(HttpListenerResponse response, CancellationToken cancellationToken)
+    {
+        var jobs = new List<object>();
+        var lastFailures = new List<object>();
+        foreach (var connection in _arpaConnectionsStore.ReadAll())
+        {
+            var job = await _localStore.GetArpaResyncJobAsync(connection.Id, cancellationToken);
+            if (job is not null)
+            {
+                jobs.Add((await DescribeResyncJobAsync(connection.Id, job, cancellationToken)).Payload);
+                continue;
+            }
+
+            // Ultimo reenvio concluido que deixou entidades sem reenviar por erro.
+            var last = await _localStore.GetArpaResyncLastResultAsync(connection.Id, cancellationToken);
+            if (last?["failed_entities"] is JsonObject failed && failed.Count > 0)
+            {
+                var finished = DateTimeOffset.TryParse(last["finished_at_utc"]?.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var f)
+                    ? TimeZoneInfo.ConvertTime(f, TimeZoneInfo.Local).ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)
+                    : "-";
+                lastFailures.Add(new
+                {
+                    id = connection.Id,
+                    message = $"Ultimo Sincronizar tudo ({last["period"]}, concluido em {finished}) nao reenviou por erro: "
+                        + string.Join("; ", failed.Select(kv => $"{kv.Key}: {kv.Value}")) + ". Corrija a causa e rode de novo so esses tipos.",
+                });
+            }
+        }
+
+        await WriteJsonAsync(response, HttpStatusCode.OK, new { ok = true, jobs, last_failures = lastFailures }, cancellationToken);
+    }
+
+    private async Task<(object Payload, string Message)> DescribeResyncJobAsync(string connectionId, ArpaResyncJob job, CancellationToken cancellationToken)
+    {
+        var pending = job.ReadingDone
+            ? await _localStore.CountPendingArpaResyncEventsAsync(job.EntityTypes, job.StartedAtUtc, cancellationToken)
+            : 0;
+        var timeZone = TimeZoneInfo.Local;
+        var phase = job.ReadingDone ? "sending" : "reading";
+        var started = TimeZoneInfo.ConvertTime(job.StartedAtUtc, timeZone);
+        var phaseText = job.ReadingDone
+            ? $"{pending} evento(s) aguardando envio ao ERP"
+            : $"lendo do Arpa ({job.DoneEntities.Count(job.EntityTypes.Contains)} de {job.EntityTypes.Count} tipo(s) concluido(s))";
+
+        // Por que o reenvio nao avanca (a coleta da conexao nao roda nesses casos).
+        if (!job.ReadingDone)
+        {
+            var block = _arpaConnectionBlocks.Snapshot.FirstOrDefault(b => b.ConnectionId == connectionId);
+            if (!_arpaSettingsStore.IsEffectivelyEnabled())
+            {
+                phaseText += " - parado: coletor Arpa desativado";
+            }
+            else if (_arpaConnectionsStore.Get(connectionId) is { Enabled: false })
+            {
+                phaseText += " - parado: conexao inativa";
+            }
+            else if (block is not null)
+            {
+                phaseText += " - parado: conexao pausada (" + block.Reason + ")";
+            }
+        }
+
+        if (job.FailedEntities.Count > 0)
+        {
+            phaseText += "; nao reenviado(s) por erro: " + string.Join(", ", job.FailedEntities.Keys.Order(StringComparer.Ordinal));
+        }
+        var message = $"Ja existe um Sincronizar tudo em andamento nesta conexao ({job.PeriodLabel(timeZone)}, iniciado em {started.ToString("dd/MM HH:mm", CultureInfo.InvariantCulture)}): {phaseText}. Aguarde terminar ou use \"Cancelar reenvio\".";
+        var payload = new
+        {
+            id = connectionId,
+            phase,
+            phase_text = phaseText,
+            period = job.PeriodLabel(timeZone),
+            entity_types = job.EntityTypes,
+            pending,
+            started_at = started.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture),
+            message,
+        };
+        return (payload, message);
+    }
+
+    private async Task WriteResyncRunningAsync(HttpListenerResponse response, string connectionId, ArpaResyncJob job, CancellationToken cancellationToken)
+    {
+        var (_, message) = await DescribeResyncJobAsync(connectionId, job, cancellationToken);
+        await WriteJsonAsync(response, HttpStatusCode.Conflict, new { ok = false, running = true, message }, cancellationToken);
     }
 
     private async Task HandleConfigArpaPostAsync(HttpListenerContext context, string action, CancellationToken cancellationToken)
@@ -2765,6 +3191,12 @@ public sealed class LocalStatusServer : BackgroundService
             case "delete":
             {
                 var removed = _arpaConnectionsStore.Delete(V("id"));
+                if (removed)
+                {
+                    await _localStore.DeleteArpaResyncJobAsync(V("id"), cancellationToken);
+                    await _localStore.DeleteArpaResyncLastResultAsync(V("id"), cancellationToken);
+                }
+
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = removed, message = removed ? "Conexao removida." : "Conexao nao encontrada." }, cancellationToken);
                 return;
             }
@@ -2914,44 +3346,100 @@ public sealed class LocalStatusServer : BackgroundService
                     return;
                 }
 
-                // since_preset: "all" (default, comportamento antigo - zera e rele o
-                // historico inteiro), "3m"/"1d" (janela relativa a agora) ou "custom"
-                // (since_date, yyyy-MM-dd, do input type="date" do form).
-                var sincePreset = V("since_preset");
-                if (sincePreset == "custom" && !DateOnly.TryParse(V("since_date"), out _))
+                var resyncConnection = _arpaConnectionsStore.Get(id);
+                if (resyncConnection is null)
                 {
-                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "Data invalida." }, cancellationToken);
+                    await WriteJsonAsync(context.Response, HttpStatusCode.NotFound, new { ok = false, message = "Conexao nao encontrada." }, cancellationToken);
                     return;
                 }
 
-                DateTimeOffset? since = sincePreset switch
+                // Sem coleta, o reenvio nunca avancaria e a trava ficaria presa.
+                if (!_arpaSettingsStore.IsEffectivelyEnabled())
                 {
-                    "3m" => DateTimeOffset.UtcNow.AddMonths(-3),
-                    "1d" => DateTimeOffset.UtcNow.AddDays(-1),
-                    "custom" => new DateTimeOffset(DateOnly.Parse(V("since_date")).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
-                    _ => null,
-                };
-
-                var entityTypes = ParseEntityTypes("entity_types");
-
-                string escopoMsg;
-                if (since is null)
-                {
-                    var cleared = await _localStore.ResetArpaWatermarksAsync(id, entityTypes, cancellationToken);
-                    escopoMsg = $"{cleared} marcador(es) zerado(s)";
-                }
-                else
-                {
-                    await _localStore.SetArpaWatermarksSinceAsync(id, since.Value, entityTypes, cancellationToken);
-                    escopoMsg = $"marcadores ajustados para {since.Value.ToLocalTime():dd/MM/yyyy HH:mm}";
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "O coletor Arpa esta desativado. Ative o coletor antes de usar Sincronizar tudo." }, cancellationToken);
+                    return;
                 }
 
-                var generation = await _localStore.BumpArpaResyncGenerationAsync(id, cancellationToken);
-                _manualSyncSignal.TrySignal();
+                if (!resyncConnection.Enabled)
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = "A conexao esta inativa. Marque \"Ativa\" e salve antes de usar Sincronizar tudo." }, cancellationToken);
+                    return;
+                }
+
+                // since_preset: "all" (default - todo o historico), "3m"/"1d" (janela
+                // relativa a agora) ou "custom" (since_date e until_date, yyyy-MM-dd, dos
+                // input type="date" do form; fim inclusivo). O periodo vira um job lido
+                // com cursor proprio (ArpaResyncJob) - o watermark incremental fica intacto.
+                var sincePreset = V("since_preset") is "3m" or "1d" or "custom" ? V("since_preset") : "all";
+                var nowUtc = DateTimeOffset.UtcNow;
+                DateTimeOffset fromUtc, toUtc;
+                try
+                {
+                    DateOnly? sinceDate = DateOnly.TryParse(V("since_date"), CultureInfo.InvariantCulture, out var s) ? s : null;
+                    DateOnly? untilDate = DateOnly.TryParse(V("until_date"), CultureInfo.InvariantCulture, out var u) ? u : null;
+                    (fromUtc, toUtc) = ArpaResyncJob.ResolvePeriod(sincePreset, sinceDate, untilDate, nowUtc, TimeZoneInfo.Local);
+                }
+                catch (ArgumentException ex)
+                {
+                    await WriteJsonAsync(context.Response, HttpStatusCode.BadRequest, new { ok = false, message = ex.Message }, cancellationToken);
+                    return;
+                }
+
+                var selected = ParseEntityTypes("entity_types");
+                var entityTypes = SyncContractValues.EntityTypes
+                    .Where(t => selected is null || selected.Contains(t))
+                    .ToList();
+
+                await ResyncStartLock.WaitAsync(cancellationToken);
+                try
+                {
+                    var running = await _localStore.GetArpaResyncJobAsync(id, cancellationToken);
+                    if (running is not null)
+                    {
+                        await WriteResyncRunningAsync(context.Response, id, running, cancellationToken);
+                        return;
+                    }
+
+                    var generation = await _localStore.BumpArpaResyncGenerationAsync(id, cancellationToken);
+                    var job = new ArpaResyncJob
+                    {
+                        Generation = generation,
+                        Preset = sincePreset,
+                        FromUtc = fromUtc,
+                        ToUtc = toUtc,
+                        EntityTypes = entityTypes,
+                        StartedAtUtc = nowUtc,
+                    };
+
+                    var existing = await _localStore.TryStartArpaResyncJobAsync(id, job, cancellationToken);
+                    if (existing is not null)
+                    {
+                        await WriteResyncRunningAsync(context.Response, id, existing, cancellationToken);
+                        return;
+                    }
+
+                    _manualSyncSignal.TrySignal();
+                    await WriteJsonAsync(
+                        context.Response,
+                        HttpStatusCode.OK,
+                        new { ok = true, message = $"Sincronizar tudo iniciado: {job.PeriodLabel(TimeZoneInfo.Local)} (geracao {generation}). A coleta le esse periodo desta conexao e reenvia ao ERP; outro Sincronizar tudo nesta conexao fica bloqueado ate o envio terminar." },
+                        cancellationToken);
+                    return;
+                }
+                finally
+                {
+                    ResyncStartLock.Release();
+                }
+            }
+
+            case "cancel-resync":
+            {
+                var id = V("id");
+                var cancelled = !string.IsNullOrWhiteSpace(id) && await _localStore.DeleteArpaResyncJobAsync(id, cancellationToken);
                 await WriteJsonAsync(
                     context.Response,
                     HttpStatusCode.OK,
-                    new { ok = true, message = $"{escopoMsg} (geracao {generation}). A proxima sincronizacao re-le e re-envia esse periodo desta conexao ao ERP." },
+                    new { ok = cancelled, message = cancelled ? "Reenvio cancelado. Os eventos ja lidos continuam na fila e seguem para o ERP." : "Nenhum reenvio em andamento nesta conexao." },
                     cancellationToken);
                 return;
             }

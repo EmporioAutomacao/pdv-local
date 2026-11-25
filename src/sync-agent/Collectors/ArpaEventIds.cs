@@ -35,9 +35,11 @@ internal static class ArpaEventIds
             "payload-" + PayloadHash(normalizedPayload),
         };
 
-        // Geracao > 0 (apos "Sincronizar tudo") entra no seed, igual ao resync sob
-        // demanda (ArpaResyncProcessor): sem isso o full-resync re-leria tudo com o
-        // mesmo event_id do envio anterior e o outbox descartaria sem reenviar.
+        // Geracao > 0 entra no seed, igual ao resync sob demanda (ArpaResyncProcessor).
+        // O job de "Sincronizar tudo" usa uma geracao nova a cada pedido: sem isso
+        // re-leria o periodo com o mesmo event_id do envio anterior e o outbox
+        // descartaria sem reenviar. A coleta incremental usa uma geracao fixa
+        // (LocalSyncStore.GetArpaIncrementalGenerationAsync), que nao muda com o reenvio.
         if (resyncGeneration > 0)
         {
             parts.Add($"resync-gen-{resyncGeneration}");

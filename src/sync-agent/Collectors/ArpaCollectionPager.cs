@@ -20,6 +20,12 @@ internal sealed record ArpaCollectionPagerResult(
     int Reread,
     int Inserted);
 
+internal sealed record ArpaRangePagerResult(
+    ArpaCollectionCursor Position,
+    bool Finished,
+    int Collected,
+    int Inserted);
+
 /// <summary>
 /// Laco de coleta de uma entidade do Arpa (alcance + releitura), sem banco, para
 /// poder ser testado. Regras em <see cref="ArpaCollectionCursor"/>.
@@ -121,6 +127,64 @@ internal static class ArpaCollectionPager
             collected,
             reread,
             inserted);
+    }
+
+    /// <summary>
+    /// Leitura de um periodo fechado ("Sincronizar tudo"): so o alcance, de
+    /// <paramref name="from"/> (exclusivo) ate <paramref name="toUtc"/> (inclusivo, qualquer
+    /// chave), sem releitura de janela e sem descartar posicao. Le no maximo
+    /// <see cref="ArpaCollectionCursor.MaxPagesPerCycle"/> paginas; o resto fica para o
+    /// proximo ciclo a partir de <see cref="ArpaRangePagerResult.Position"/>.
+    /// </summary>
+    public static async Task<ArpaRangePagerResult> RunRangeAsync(
+        ArpaCollectionCursor from,
+        DateTimeOffset toUtc,
+        int batchSize,
+        ArpaPageReader readPage,
+        Func<ArpaCollectorRow, Task<bool>> enqueue,
+        CancellationToken cancellationToken)
+    {
+        if (batchSize <= 0)
+        {
+            batchSize = 1;
+        }
+
+        var position = from;
+        var collected = 0;
+        var inserted = 0;
+
+        if (from.OccurredAtUtc > toUtc)
+        {
+            return new ArpaRangePagerResult(position, true, 0, 0);
+        }
+
+        for (var page = 0; page < ArpaCollectionCursor.MaxPagesPerCycle; page++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var rows = await readPage(position, toUtc, null, batchSize, cancellationToken);
+            foreach (var row in rows)
+            {
+                if (IsAfter(row, toUtc, null))
+                {
+                    return new ArpaRangePagerResult(position, true, collected, inserted);
+                }
+
+                collected++;
+                if (await enqueue(row))
+                {
+                    inserted++;
+                }
+
+                position = new ArpaCollectionCursor(row.OccurredAtUtc, row.EntityKey);
+            }
+
+            if (rows.Count < batchSize)
+            {
+                return new ArpaRangePagerResult(position, true, collected, inserted);
+            }
+        }
+
+        return new ArpaRangePagerResult(position, false, collected, inserted);
     }
 
     // Ordinal = COLLATE "C" da query (ArpaStandardEntities): mesma ordem do banco,

@@ -125,6 +125,61 @@ public sealed class ArpaCollectionPostgresTests
     }
 
     [Fact]
+    public async Task Reenvio_por_periodo_com_a_query_padrao_respeita_inicio_e_fim()
+    {
+        if (string.IsNullOrWhiteSpace(ConnectionString))
+        {
+            return;
+        }
+
+        var (source, table) = await CriarTabelaAsync("default");
+        try
+        {
+            var brt = TimeZoneInfo.CreateCustomTimeZone("BRT-test", TimeSpan.FromHours(-3), "BRT", "BRT");
+            var agora = new DateTimeOffset(2026, 11, 24, 15, 0, 0, TimeSpan.Zero);
+            var (from, to) = ArpaResyncJob.ResolvePeriod("custom", new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 22), agora, brt);
+
+            await InserirAsync(source, table, "dia19-fim", new DateTimeOffset(2026, 11, 20, 2, 59, 59, TimeSpan.Zero)); // 19/11 23:59:59 local
+            await InserirAsync(source, table, "dia20-date", new DateTimeOffset(2026, 11, 20, 3, 0, 0, TimeSpan.Zero));  // coluna date 20/11
+            await InserirAsync(source, table, "dia21", new DateTimeOffset(2026, 11, 21, 15, 0, 0, TimeSpan.Zero));
+            await InserirAsync(source, table, "dia22-fim", new DateTimeOffset(2026, 11, 23, 2, 59, 59, 999, TimeSpan.Zero).AddTicks(9990)); // 22/11 23:59:59.999999 local
+            await InserirAsync(source, table, "dia23-date", new DateTimeOffset(2026, 11, 23, 3, 0, 0, TimeSpan.Zero));
+            for (var i = 0; i < 7; i++)
+            {
+                await InserirAsync(source, table, $"dia22-{i}", new DateTimeOffset(2026, 11, 22, 3, 0, 0, TimeSpan.Zero));
+            }
+
+            var entidade = Entidade(table);
+            var lidas = new List<string>();
+            var pos = new ArpaCollectionCursor(from, string.Empty);
+            ArpaRangePagerResult result;
+            var ciclos = 0;
+            do
+            {
+                result = await ArpaCollectionPager.RunRangeAsync(
+                    pos,
+                    to,
+                    2,
+                    (after, t, toKey, limit, ct) => ArpaCollector.ReadPageAsync(source, entidade, after, t, toKey, limit, ct),
+                    row => { lidas.Add(row.EntityKey); return Task.FromResult(true); },
+                    CancellationToken.None);
+                pos = result.Position;
+                ciclos++;
+            }
+            while (!result.Finished && ciclos < 10);
+
+            Assert.True(result.Finished);
+            Assert.Equal(
+                ["dia20-date", "dia21", "dia22-0", "dia22-1", "dia22-2", "dia22-3", "dia22-4", "dia22-5", "dia22-6", "dia22-fim"],
+                lidas);
+        }
+        finally
+        {
+            await DroparAsync(source, table);
+        }
+    }
+
+    [Fact]
     public async Task Query_antiga_do_appsettings_continua_rodando()
     {
         if (string.IsNullOrWhiteSpace(ConnectionString))

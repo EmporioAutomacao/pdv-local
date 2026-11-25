@@ -144,9 +144,37 @@ D:\GitHub\erp\venv\Scripts\python.exe D:\GitHub\erp\manage.py test sync_api.test
 | Servico SyncAgent (nesta VM) | `AraraSuiteSync` (nome de exibicao `AraraSuite Sync`) |
 | Instalacao SyncAgent (nesta VM) | `C:\Program Files\AraraSuite.com.br\Sync\Agent` |
 | Dashboard local na VM | `http://127.0.0.1:47891/` |
-| Banco local SyncAgent | PostgreSQL 17 + pgvector 0.8.0 |
+| Banco local SyncAgent | PostgreSQL 17 + pgvector 0.8.0, servico `postgresql-x64-17-pdvlocal`, **porta `5433`** (desde 2026-11-22) |
+| Arpa instalado na VM | servico `pgsql-9.6` (PostgreSQL 9.6 do Arpa), **porta `5432`**; app em `C:\Program Files (x86)\arpa` (`control\config.ini`: `porta=5432`) |
 | ERP ativado (2026-09-10) | `https://demo.ararasuite.com.br` (tenant `507f781b-57c2-4c91-9ff4-0ffe89aff235`) — nao mais o Docker integrado abaixo; validar via `/status` antes de assumir. |
-| Conexao Arpa configurada | `"Geral"`, id `e869c02b89ac45238f4ab5304962f584` (ver `GET /config/arpa`). |
+| Conexao Arpa configurada | `"Geral"`, id `e869c02b89ac45238f4ab5304962f584` (ver `GET /config/arpa`). Ainda aponta para `192.168.0.4:5432`, inacessivel na rede atual (heartbeat `degraded`). |
+
+### Portas do Postgres na VM (2026-11-22)
+
+O Arpa foi instalado na VM em 2026-10-23 com o Postgres dele (`pgsql-9.6`) na
+porta `5432`, a mesma do banco local do PDV. Os dois servicos sao automaticos,
+entao cada reboot virava uma corrida: quem subia primeiro ficava com a porta e o
+outro nao iniciava. Em 2026-11-22 22:27 o Arpa ganhou, o `pdvlocal` ficou parado
+e o agente passou a conectar no Postgres do Arpa
+(`no pg_hba.conf entry for host "::1", user "pdv_sync"`): painel e `/status`
+com erro 500 e ciclo falhando.
+
+Correcao (o Arpa fica na `5432`, o PDV vai para a `5433`):
+
+| Onde | O que mudou |
+| --- | --- |
+| Servico `postgresql-x64-17-pdvlocal` | `ImagePath` com `-o "-p 5433"` (o `-p` da linha de comando vence o `postgresql.conf`) |
+| `C:\ProgramData\PDVLocal\PostgreSQL17\data\postgresql.conf` | `port = 5433` |
+| `C:\Program Files\AraraSuite.com.br\Sync\Agent\appsettings.json` | `ConnectionStrings:SyncAgentDb` com `Port=5433` |
+| `C:\Program Files\AraraSuite.com.br\PDV\appsettings.json` | `PdvLocalDb` com `Port=5433` |
+| Firewall | regra `PostgreSQL PDVLocal - rede de testes` na `5433` (as regras `postgres1` na `5432` sao do Arpa) |
+
+Backup dos arquivos originais:
+`C:\ProgramData\AraraSuite.com.br\backups\pdv-porta-5433-20261122-225954`.
+
+Na VM, use `-p 5433` em qualquer `psql`/`pg_isready` do banco `pdv_sync`. Rodar
+o instalador de novo pode recriar o servico ou os `appsettings.json` com `5432`;
+confira as portas depois.
 
 ## Ambiente Docker integrado CP + ERP
 
@@ -572,8 +600,10 @@ precisam dessa via administrativa explicita em vez de `psql` direto na VM.
   rodar qualquer coisa.
 - **Rotina conhecida**: reparos catalogados (`LocalDbMaintenanceRunner.
   Routines`), selecionaveis num dropdown, sem copiar/colar SQL. Rotinas
-  atuais: `fix_entity_type_check` e `add_sale_items_unit_columns` (ver
-  runbook de incidentes).
+  atuais: `fix_entity_type_check`, `add_sale_items_unit_columns` e (1.6.59)
+  `enable_dead_letter_resolution`, que habilita o status `resolved` e as colunas
+  de auditoria usadas pela tela Dead-letter (ver runbook de incidentes,
+  "Incidente: dead-letter").
 - **SQL livre**: para reparos ainda nao catalogados.
 
 Credencial admin (sugestao do instalador: usuario `postgres`) e informada na
@@ -614,6 +644,12 @@ Para contratos:
   nao trate isso como falha do Sync sem confirmar o app afetado.
 - A VM so permite automacao remota se WinRM estiver ativo e o usuario
   operacional existir no grupo Administradores.
+- O instalador do PDV cria o Postgres local na porta `5432`, a padrao do
+  Postgres do Arpa. Num computador com o Arpa instalado, os dois disputam a porta
+  a cada reboot e o agente pode conectar no banco errado
+  (`no pg_hba.conf entry ... user "pdv_sync"`). Ver "Portas do Postgres na VM
+  (2026-11-22)": mover o banco do PDV para outra porta (`5433`) e ajustar o
+  servico, o `postgresql.conf` e os dois `appsettings.json`.
 - Instalacoes criadas antes do contrato Sync ganhar `cobranca`/
   `plano_historico` (2.10.0/2.11.0) tem a constraint `outbox_events_
   entity_type_check` do Postgres local desatualizada - ver "Manutencao do

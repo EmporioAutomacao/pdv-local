@@ -28,8 +28,21 @@ CREATE TABLE IF NOT EXISTS sync_agent.outbox_events (
     CONSTRAINT outbox_events_schema_version_check
         CHECK (schema_version ~ '^v[0-9]+(\.[0-9]+)?$'),
     CONSTRAINT outbox_events_status_check
-        CHECK (status IN ('pending', 'in_flight', 'accepted', 'rejected', 'dead_letter'))
+        CHECK (status IN ('pending', 'in_flight', 'accepted', 'rejected', 'dead_letter', 'resolved'))
 );
+
+-- 'resolved' (1.6.59): dead-letter encerrado porque um envio posterior da mesma
+-- entidade foi aceito pelo ERP (tela Dead-letter do dashboard). Mesma lista da
+-- rotina enable_dead_letter_resolution (LocalDbMaintenanceRunner).
+DO $$
+BEGIN
+    ALTER TABLE sync_agent.outbox_events
+        DROP CONSTRAINT IF EXISTS outbox_events_status_check;
+
+    ALTER TABLE sync_agent.outbox_events
+        ADD CONSTRAINT outbox_events_status_check
+        CHECK (status IN ('pending', 'in_flight', 'accepted', 'rejected', 'dead_letter', 'resolved'));
+END $$;
 
 DO $$
 BEGIN
@@ -170,6 +183,12 @@ ALTER TABLE sync_agent.dead_letter_events
 
 ALTER TABLE sync_agent.dead_letter_events
     ADD COLUMN IF NOT EXISTS attempt_count integer NOT NULL DEFAULT 0;
+
+ALTER TABLE sync_agent.dead_letter_events
+    ADD COLUMN IF NOT EXISTS resolved_at_utc timestamptz NULL;
+
+ALTER TABLE sync_agent.dead_letter_events
+    ADD COLUMN IF NOT EXISTS resolved_by_event_id uuid NULL;
 
 CREATE INDEX IF NOT EXISTS ix_dead_letter_events_retention
     ON sync_agent.dead_letter_events (retained_until_utc);

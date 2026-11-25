@@ -185,6 +185,29 @@ public sealed class ArpaCollector
 
         foreach (var connection in connections)
         {
+            // Reenvio "Sincronizar tudo" ja lido: libera a trava quando o envio ao ERP drenar.
+            // Falha aqui nao pode parar a coleta incremental desta nem das outras conexoes.
+            ArpaResyncJob? resyncJob = null;
+            try
+            {
+                resyncJob = await _localStore.GetArpaResyncJobAsync(connection.Id, cancellationToken);
+                if (resyncJob is { ReadingDone: true })
+                {
+                    await TryFinishResyncJobAsync(connection, resyncJob, cancellationToken);
+                    resyncJob = null;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                resyncJob = null;
+                _runLog.Add("warn", $"Conexao \"{connection.Nome}\": Sincronizar tudo - falha ao ler o reenvio ({Summarize(ex)}); tenta de novo no proximo ciclo.");
+                _logger.LogWarning(ex, "Arpa collector: falha ao ler o reenvio da conexao '{Nome}'.", connection.Nome);
+            }
+
             // Sem watermark tocado: quando o operador corrigir, a conexao retoma
             // exatamente de onde parou, sem perder nada lido do Arpa.
             var blockReason = await EvaluateBlockAsync(connection, cancellationToken);
@@ -211,7 +234,9 @@ public sealed class ArpaCollector
                 continue;
             }
 
-            var resyncGeneration = await _localStore.GetArpaResyncGenerationAsync(connection.Id, cancellationToken);
+            // Geracao fixa da coleta incremental: um "Sincronizar tudo" nao muda os
+            // event_id dela (o job tem geracao propria).
+            var resyncGeneration = await _localStore.GetArpaIncrementalGenerationAsync(connection.Id, cancellationToken);
 
             await using (dataSource)
             {
@@ -260,6 +285,25 @@ public sealed class ArpaCollector
                             entity.Name);
                     }
                 }
+
+                if (resyncJob is not null)
+                {
+                    try
+                    {
+                        var (collected, inserted) = await RunResyncJobAsync(dataSource, connection, resyncJob, entityTypeFilter, cancellationToken);
+                        totalCollected += collected;
+                        totalInserted += inserted;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _runLog.Add("warn", $"Conexao \"{connection.Nome}\": Sincronizar tudo falhou neste ciclo ({Summarize(ex)}); continua no proximo.");
+                        _logger.LogWarning(ex, "Arpa collector: reenvio da conexao '{Nome}' falhou neste ciclo.", connection.Nome);
+                    }
+                }
             }
         }
 
@@ -272,6 +316,157 @@ public sealed class ArpaCollector
         }
 
         return new ArpaCollectorRunSummary(true, totalCollected, totalInserted);
+    }
+
+    /// <summary>
+    /// Avanca o reenvio "Sincronizar tudo" da conexao: le o periodo do job a partir
+    /// do cursor de cada entidade (ate <see cref="ArpaCollectionCursor.MaxPagesPerCycle"/>
+    /// paginas por ciclo) e enfileira com a geracao do job. Nao toca no watermark da
+    /// coleta incremental.
+    /// </summary>
+    private async Task<(int Collected, int Inserted)> RunResyncJobAsync(
+        NpgsqlDataSource dataSource,
+        EffectiveArpaCollectorConnection connection,
+        ArpaResyncJob job,
+        IReadOnlySet<string>? entityTypeFilter,
+        CancellationToken cancellationToken)
+    {
+        var timeZone = TimeZoneInfo.Local;
+        var syncOptions = _effectiveConfigProvider.GetCurrent();
+        var totalCollected = 0;
+        var totalInserted = 0;
+
+        _runLog.Add("info", $"Conexao \"{connection.Nome}\": Sincronizar tudo ({job.PeriodLabel(timeZone)}) - reenviando...");
+
+        foreach (var entityType in job.EntityTypes)
+        {
+            if (job.DoneEntities.Contains(entityType))
+            {
+                continue;
+            }
+
+            var entity = connection.Entities.FirstOrDefault(e => e.EntityType == entityType);
+            if (entity is null)
+            {
+                // Entidade desligada nesta conexao: nada a reenviar. So registra no log
+                // quando foi escolhida de proposito (nao no "todos os tipos" padrao).
+                job.DoneEntities.Add(entityType);
+                if (job.EntityTypes.Count < SyncAgent.Contracts.SyncContractValues.EntityTypes.Length)
+                {
+                    _runLog.Add("info", $"  Reenvio {EntityLabel(entityType)}: desligado nesta conexao - nada a reenviar.");
+                }
+            }
+            else if (entityTypeFilter is not null && !entityTypeFilter.Contains(entityType))
+            {
+                _runLog.Add("info", $"  Reenvio {EntityLabel(entityType)}: pulado (fora da selecao desta sincronizacao manual).");
+                continue;
+            }
+            else if (!await _erpCompatibility.AcceptsAsync(entityType, cancellationToken))
+            {
+                job.DoneEntities.Add(entityType);
+                _runLog.Add("info", $"  Reenvio {EntityLabel(entityType)}: ERP ainda nao aceita este tipo - nao reenviado.");
+            }
+            else
+            {
+                try
+                {
+                    var result = await ArpaCollectionPager.RunRangeAsync(
+                        job.CursorFor(entityType),
+                        job.ToUtc,
+                        connection.BatchSize,
+                        (after, toUtc, toKey, limit, ct) => ReadPageAsync(dataSource, entity, after, toUtc, toKey, limit, ct),
+                        row => EnqueueRowAsync(connection, entity, row, job.Generation, syncOptions, cancellationToken),
+                        cancellationToken);
+
+                    job.Cursors[entityType] = result.Position;
+                    job.RegisterSuccess(entityType);
+                    if (result.Finished)
+                    {
+                        job.DoneEntities.Add(entityType);
+                    }
+
+                    totalCollected += result.Collected;
+                    totalInserted += result.Inserted;
+                    _runLog.Add(
+                        "info",
+                        $"  Reenvio {EntityLabel(entityType)}: {result.Collected} lido(s), {result.Inserted} novo(s)"
+                            + (result.Finished ? " - concluido." : " - continua no proximo ciclo."));
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Tenta de novo no proximo ciclo, do mesmo cursor. Falha que se repete
+                    // (ex.: view best-effort ausente nesse Arpa) nao pode segurar a trava do
+                    // reenvio para sempre: apos ArpaResyncJob.MaxFailures seguidas, desiste
+                    // dessa entidade e registra o motivo no job.
+                    var gaveUp = job.RegisterFailure(entityType, Summarize(ex), DateTimeOffset.UtcNow);
+                    var failures = job.FailureCounts[entityType];
+                    _runLog.Add(
+                        "warn",
+                        gaveUp
+                            ? $"  Reenvio {EntityLabel(entityType)}: falhou {failures} vez(es) em {ArpaResyncJob.MinFailureSpan.TotalMinutes:0} min ou mais - desistiu desta entidade ({Summarize(ex)})."
+                            : $"  Reenvio {EntityLabel(entityType)}: falhou (tentativa {failures}) - tenta de novo no proximo ciclo. {Summarize(ex)}");
+
+                    _logger.LogWarning(ex, "Arpa collector: reenvio da conexao '{Nome}' entidade '{EntityType}' falhou ({Failures}).", connection.Nome, entityType, failures);
+                }
+            }
+
+            if (!await _localStore.SaveArpaResyncJobAsync(connection.Id, job, cancellationToken))
+            {
+                _runLog.Add("warn", $"  Reenvio cancelado durante a leitura - interrompido.");
+                return (totalCollected, totalInserted);
+            }
+        }
+
+        if (job.EntityTypes.All(job.DoneEntities.Contains))
+        {
+            job.ReadingDoneAtUtc = DateTimeOffset.UtcNow;
+            if (await _localStore.SaveArpaResyncJobAsync(connection.Id, job, cancellationToken))
+            {
+                _runLog.Add("info", "  Reenvio: leitura do Arpa concluida; aguardando o envio dos eventos ao ERP.");
+            }
+        }
+
+        return (totalCollected, totalInserted);
+    }
+
+    /// <summary>
+    /// Leitura concluida: apaga o job (libera um novo "Sincronizar tudo") quando nao
+    /// ha mais evento pendente dessas entidades desde o inicio do reenvio.
+    /// </summary>
+    private async Task TryFinishResyncJobAsync(
+        EffectiveArpaCollectorConnection connection,
+        ArpaResyncJob job,
+        CancellationToken cancellationToken)
+    {
+        var pending = await _localStore.CountPendingArpaResyncEventsAsync(job.EntityTypes, job.StartedAtUtc, cancellationToken);
+        var period = job.PeriodLabel(TimeZoneInfo.Local);
+        if (pending > 0)
+        {
+            _runLog.Add("info", $"Conexao \"{connection.Nome}\": Sincronizar tudo ({period}) - {pending} evento(s) aguardando envio ao ERP.");
+            return;
+        }
+
+        // Resultado final antes de apagar o job: o que nao foi reenviado continua
+        // visivel na tela (o job some ao terminar).
+        await _localStore.SaveArpaResyncLastResultAsync(connection.Id, job, DateTimeOffset.UtcNow, cancellationToken);
+        if (await _localStore.DeleteArpaResyncJobAsync(connection.Id, cancellationToken, job.Generation))
+        {
+            if (job.FailedEntities.Count > 0)
+            {
+                var falhas = string.Join("; ", job.FailedEntities.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => $"{EntityLabel(f.Key)}: {f.Value}"));
+                _runLog.Add("warn", $"Conexao \"{connection.Nome}\": Sincronizar tudo ({period}) concluido COM FALHAS - nao reenviado(s): {falhas}.");
+                _logger.LogWarning("Arpa collector: reenvio da conexao '{Nome}' (geracao {Generation}) concluido com falhas: {Falhas}.", connection.Nome, job.Generation, falhas);
+            }
+            else
+            {
+                _runLog.Add("info", $"Conexao \"{connection.Nome}\": Sincronizar tudo ({period}) concluido - todos os eventos enviados ao ERP.");
+                _logger.LogInformation("Arpa collector: reenvio da conexao '{Nome}' (geracao {Generation}) concluido.", connection.Nome, job.Generation);
+            }
+        }
     }
 
     private async Task<ArpaEntityCollectorRunSummary> CollectEntityAsync(

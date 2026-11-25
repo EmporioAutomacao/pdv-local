@@ -164,6 +164,8 @@ public sealed class Worker : BackgroundService
                 + $"{dispatchSummary.Rejected} rejeitado(s), {dispatchSummary.Failed} com falha.");
         }
 
+        await AutoResolveSupersededDeadLettersAsync(cancellationToken);
+
         var reconciliationWindowEnd = DateTimeOffset.UtcNow;
         var reconciliationWindowStart = reconciliationWindowEnd.AddHours(-24);
         var reconciliationSummary = await _localStore.RunLocalReconciliationAsync(
@@ -285,6 +287,37 @@ public sealed class Worker : BackgroundService
         {
             _runtimeState.MarkCycleFailed(DateTimeOffset.UtcNow, trigger, lastError);
             _arpaSyncRunLog.EndRun($"Sincronizacao terminou com erro: {lastError}");
+        }
+    }
+
+    /// <summary>
+    /// Encerramento automatico dos dead-letter superados (tela Dead-letter, desligado
+    /// por padrao). Falha so vira aviso no log: nunca derruba o ciclo.
+    /// </summary>
+    private async Task AutoResolveSupersededDeadLettersAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!await _localStore.GetDeadLetterAutoResolveAsync(cancellationToken))
+            {
+                return;
+            }
+
+            var result = await _localStore.ResolveSupersededDeadLettersAsync(cancellationToken);
+            if (result.Resolved > 0)
+            {
+                _arpaSyncRunLog.Add("info", $"Dead-letter: {result.Resolved} encerrado(s) - ja enviados com sucesso por evento posterior.");
+                _logger.LogInformation("Dead-letter: {Count} encerrado(s) automaticamente (superados).", result.Resolved);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _arpaSyncRunLog.Add("warn", $"Dead-letter: encerramento automatico falhou - {ex.Message}");
+            _logger.LogWarning(ex, "Encerramento automatico de dead-letter falhou.");
         }
     }
 
