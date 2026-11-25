@@ -14,7 +14,7 @@ param(
     [string]$ArpaHost = "192.168.0.4",
     [int]$ArpaPort = 5432,
     [string]$ArpaDatabase = "anapolis",
-    [string]$ArpaUsername = "sync_agent_anapolis_ro",
+    [string]$ArpaUsername = "ararasuite_sync_ro",
     [securestring]$ArpaPassword,
     [int]$ArpaBatchSize = 5000,
     [switch]$SkipErp,

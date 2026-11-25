@@ -399,7 +399,7 @@ Bloqueio encontrado durante o Gate 5:
 - a correcao foi reaplicar a preparacao controlada do Arpa Anapolis com DBA
   `postgres` sem senha, apenas para DDL/grants:
   - recriacao/garantia das views `sync_export`;
-  - `GRANT SELECT` para `sync_agent_anapolis_ro`;
+  - `GRANT SELECT` para `ararasuite_sync_ro`;
   - revogacao de permissoes de escrita;
   - sem escrita em dados de negocio do Arpa.
 

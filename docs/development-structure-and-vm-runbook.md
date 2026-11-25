@@ -318,7 +318,7 @@ Invoke-Command -ComputerName ERP -Credential $cred -Authentication Basic -Script
     Copy-Item -LiteralPath $path -Destination $backup -Force
 
     $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    $json.ArpaCollector.ConnectionString = 'Host=192.168.0.31;Port=5432;Database=control;Username=sync_agent_anapolis_ro'
+    $json.ArpaCollector.ConnectionString = 'Host=192.168.0.31;Port=5432;Database=control;Username=ararasuite_sync_ro'
     $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
 
     Restart-Service 'AraraSuiteSync' -Force

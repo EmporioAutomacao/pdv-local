@@ -560,7 +560,7 @@ Validado em 30/05/2026:
 - coletor Arpa atualizado para aceitar senha read-only fora da connection
   string, via `PasswordFile` ou `PasswordEnvironmentVariable`.
 - preparacao real Anapolis executada em `192.168.0.4:5432/anapolis`:
-  `sync_export` criado, views aplicadas, usuario `sync_agent_anapolis_ro`
+  `sync_export` criado, views aplicadas, usuario `ararasuite_sync_ro`
   criado/ajustado, permissoes read-only e preflight validados com sucesso.
 - teste real `Arpa -> SyncAgent` executado com dispatcher desligado:
   1.538 produtos e 2.136 clientes coletados para outbox local como `pending`;

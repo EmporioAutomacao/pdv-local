@@ -347,6 +347,9 @@ DECLARE
 
     v_t text; v_ord text; v_date text; v_cust text; v_status text; v_cancel text;
     v_disc text; v_especie text; v_vend text; v_cond text;
+    -- cadastro de vendedores do Arpa: nome/documento do vendedor da venda (o ERP
+    -- registra o vendedor na Conexao Arpa e vincula ao usuario do ERP).
+    vd_t text; vd_code text; vd_name text; vd_doc text;
     -- vinculos da Conexao Arpa no ERP (condicao, especie e conta bancaria da baixa).
     -- Estrutura real do Arpa (Anapolis): cabecalho_ordem_servico.condicao_pgto -> vencimentos,
     -- especie da baixa em especie_parcela / apagar_especie, conta da baixa em
@@ -423,7 +426,13 @@ BEGIN
                 v_cancel  := sync_export._pick(v_t, ARRAY['data_cancelamento','cancelamento','data_cancelada','data_cancelado']);
                 v_disc    := sync_export._pick(v_t, ARRAY['desconto','desconto_total','valor_desconto','vlr_desconto']);
                 v_especie := sync_export._pick(v_t, ARRAY['especie','forma_pagamento','cod_especie']);
-                v_vend    := sync_export._pick(v_t, ARRAY['vendedor','cod_vendedor','id_vendedor']);
+                v_vend    := sync_export._pick(v_t, ARRAY['vendedor','cod_vendedor','codvendedor','id_vendedor','vendedor_id','idvendedor']);
+                vd_t      := sync_export._first_table(ARRAY['vendedores','vendedor','funcionarios','funcionario']);
+                IF vd_t IS NOT NULL THEN
+                    vd_code := sync_export._pick(vd_t, ARRAY['codigo','id','cod_vendedor','vendedor']);
+                    vd_name := sync_export._pick(vd_t, ARRAY['nome','descricao','apelido']);
+                    vd_doc  := sync_export._pick(vd_t, ARRAY['cpf_cnpj','cnpj_cpf','cpf','cnpj','documento']);
+                END IF;
                 v_cond    := sync_export._pick(v_t, ARRAY['condicao_pgto','condicao_pagamento','cond_pagamento','cod_condicao']);
                 t_venc    := sync_export._first_table(ARRAY['vencimentos']);
                 t_esp     := sync_export._first_table(ARRAY['especies']);
@@ -464,6 +473,12 @@ BEGIN
                 pairs := format('''codigo_venda_arpa'', v.%I::text, ''data'', v.%I', v_ord, v_date);
                 IF v_status  IS NOT NULL THEN pairs := pairs || format(', ''status'', v.%I::text', v_status); END IF;
                 IF v_vend    IS NOT NULL THEN pairs := pairs || format(', ''vendedor_codigo'', v.%I::text', v_vend); END IF;
+                IF v_vend IS NOT NULL AND vd_code IS NOT NULL AND vd_name IS NOT NULL THEN
+                    pairs := pairs || format(', ''vendedor_nome'', (SELECT vd.%I::text FROM public.%I vd WHERE CAST(vd.%I AS TEXT) = CAST(v.%I AS TEXT) LIMIT 1)', vd_name, vd_t, vd_code, v_vend);
+                    IF vd_doc IS NOT NULL THEN
+                        pairs := pairs || format(', ''vendedor_documento'', (SELECT vd.%I::text FROM public.%I vd WHERE CAST(vd.%I AS TEXT) = CAST(v.%I AS TEXT) LIMIT 1)', vd_doc, vd_t, vd_code, v_vend);
+                    END IF;
+                END IF;
                 IF v_disc    IS NOT NULL THEN pairs := pairs || format(', ''desconto_total'', v.%I', v_disc); END IF;
                 IF v_especie IS NOT NULL THEN pairs := pairs || format(', ''especie_pagamento'', v.%I::text', v_especie); END IF;
                 IF v_especie IS NOT NULL AND t_esp IS NOT NULL THEN
@@ -1282,7 +1297,7 @@ DO $catalogos$
 DECLARE
     occ    text := 'date_trunc(''day'', now())';
     partes text[] := ARRAY[]::text[];
-    t text; c_cod text; c_desc text; c_ativo text;
+    t text; c_cod text; c_desc text; c_ativo text; c_doc text;
 BEGIN
   BEGIN
     t := sync_export._first_table(ARRAY['especies']);
@@ -1328,6 +1343,29 @@ BEGIN
         END IF;
     END IF;
 
+    -- vendedores: aparecem no quadro "Vinculo de vendedores" da Conexao Arpa no ERP
+    -- antes da primeira venda (ERP >= 0.0.169; ERP antigo recusa tipo=vendedor).
+    t := sync_export._first_table(ARRAY['vendedores','vendedor','funcionarios','funcionario']);
+    IF t IS NOT NULL THEN
+        c_cod   := sync_export._pick(t, ARRAY['codigo','id','cod_vendedor','vendedor']);
+        c_desc  := sync_export._pick(t, ARRAY['nome','descricao','apelido']);
+        -- status/situacao (Anapolis: vendedores.status boolean, true = ativo). A coluna
+        -- "ativo" nao e usada: no Arpa legado ela vem invertida (0 = ativo), ver produtos.
+        c_ativo := sync_export._pick(t, ARRAY['status','situacao']);
+        c_doc   := sync_export._pick(t, ARRAY['cpf_cnpj','cnpj_cpf','cpf','cnpj','documento']);
+        IF c_cod IS NOT NULL AND c_desc IS NOT NULL THEN
+            partes := partes || format(
+                'SELECT (''vendedor:'' || x.%1$I)::text, %2$s, '
+                || 'jsonb_build_object(''tipo'', ''vendedor'', ''codigo'', x.%1$I::text, ''descricao'', x.%3$I::text, ''documento'', %4$s, ''ativo'', %5$s)::text, '
+                || '(''arpa-catalogo-vendedor-'' || x.%1$I)::text FROM public.%6$I x WHERE x.%1$I IS NOT NULL',
+                c_cod, occ, c_desc,
+                CASE WHEN c_doc IS NOT NULL THEN format('x.%I::text', c_doc) ELSE 'NULL' END,
+                CASE WHEN c_ativo IS NOT NULL THEN format(
+                    $x$CASE WHEN upper(cast(x.%1$I AS text)) IN ('I','INATIVO','0','FALSE','F','NAO','N') THEN false ELSE true END$x$,
+                    c_ativo) ELSE 'true' END, t);
+        END IF;
+    END IF;
+
     IF sync_export._first_table(ARRAY['caixa']) IS NOT NULL
        AND sync_export._pick('caixa', ARRAY['parcela']) IS NOT NULL THEN
         partes := partes || format(
@@ -1337,7 +1375,7 @@ BEGIN
     END IF;
 
     IF array_length(partes, 1) IS NULL THEN
-        RAISE NOTICE 'sync_export.catalogos pulada (nenhuma tabela de especies/vencimentos/ctabancarias).';
+        RAISE NOTICE 'sync_export.catalogos pulada (nenhuma tabela de especies/vencimentos/ctabancarias/vendedores).';
     ELSE
         EXECUTE 'CREATE OR REPLACE VIEW sync_export.catalogos AS ' || array_to_string(partes, ' UNION ALL ');
         RAISE NOTICE 'sync_export.catalogos criada (% fonte(s)).', array_length(partes, 1);
@@ -1355,4 +1393,4 @@ $catalogos$;
 -- o ERP ja e compativel). Subir este numero sempre que uma mudanca no script exigir
 -- preparar as views de novo. Precisa ser a ultima instrucao do arquivo.
 -- ---------------------------------------------------------------------------
-COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.24.2';
+COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.24.3';

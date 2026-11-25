@@ -68,7 +68,7 @@ Opcao operacional consolidada:
   -ConfirmApply
 ```
 
-Esse script aplica as views e cria/ajusta o usuario `sync_agent_anapolis_ro`.
+Esse script aplica as views e cria/ajusta o usuario `ararasuite_sync_ro`.
 Ele exige `-ConfirmApply`, bloqueia usuario runtime como DDL, gera senha forte
 unica para o usuario read-only e nao grava dados de negocio no Arpa.
 
@@ -85,7 +85,7 @@ como excecao temporaria de DBA apenas para preparacao. Nesse caso, nao definir
 ```
 
 Mesmo nesse cenario, o SyncAgent nunca deve usar `postgres`. O runtime continua
-obrigatoriamente com usuario separado `sync_agent_anapolis_ro`, permissao apenas
+obrigatoriamente com usuario separado `ararasuite_sync_ro`, permissao apenas
 de leitura nas views `sync_export` e senha forte guardada no Windows.
 
 Por padrao, a senha gerada e gravada localmente em:
@@ -156,7 +156,7 @@ Status de seguranca em 01/06/2026:
 - dashboard, logs e reconciliacao seguiram saudaveis apos reinicio do agente.
 - grants read-only em `sync_export.produtos` e `sync_export.clientes`
   reaplicados e validados apos detectar perda de `SELECT` para
-  `sync_agent_anapolis_ro`; nenhuma permissao de escrita foi concedida.
+  `ararasuite_sync_ro`; nenhuma permissao de escrita foi concedida.
 
 Para repetir o download em outra maquina:
 
@@ -217,7 +217,7 @@ $env:ARPA_SYNC_READONLY_PASSWORD = Get-Content .\.secrets\arpa\anapolis-runtime-
 .\infra\windows\test-arpa-readonly-permissions.ps1 `
   -PostgresHost "192.168.0.4" `
   -DatabaseName "anapolis" `
-  -DatabaseUser "sync_agent_anapolis_ro"
+  -DatabaseUser "ararasuite_sync_ro"
 ```
 
 ## Validar usuario read-only
@@ -227,7 +227,7 @@ $env:ARPA_SYNC_READONLY_PASSWORD = Get-Content .\.secrets\arpa\anapolis-runtime-
 .\infra\windows\test-arpa-readonly-permissions.ps1 `
   -PostgresHost "192.168.0.4" `
   -DatabaseName "anapolis" `
-  -DatabaseUser "sync_agent_anapolis_ro"
+  -DatabaseUser "ararasuite_sync_ro"
 ```
 
 ## Validar views
@@ -247,7 +247,7 @@ Usar `infra/arpa/arpa-collector.piloto.template.json` como base e preencher:
 ```text
 Host=192.168.0.4
 Database=anapolis
-Username=sync_agent_anapolis_ro
+Username=ararasuite_sync_ro
 PasswordFile=.secrets/arpa/anapolis-runtime-password.txt
 ```
 
@@ -292,7 +292,7 @@ Para instalacao Windows provisionada com coletor Arpa habilitado:
   -PostgresAdminPassword (Read-Host "Senha admin PostgreSQL" -AsSecureString) `
   -DatabasePassword "<senha-local-pdv-sync>" `
   -EnableArpaCollector `
-  -ArpaConnectionString "Host=192.168.0.4;Port=5432;Database=anapolis;Username=sync_agent_anapolis_ro" `
+  -ArpaConnectionString "Host=192.168.0.4;Port=5432;Database=anapolis;Username=ararasuite_sync_ro" `
   -ArpaPassword (Read-Host "Senha read-only Arpa" -AsSecureString) `
   -ArpaCollectorPreset AnapolisInitialLoad `
   -ArpaBatchSize 5000
@@ -322,9 +322,10 @@ Investigacao completa do schema real do Anapolis (usuario runtime, apos GRANT
 temporario descrito abaixo) confirmou e corrigiu o que a entrada de
 31/05/2026 registrou como "sem tabelas mapeaveis":
 
-- **Usuario runtime atual**: `ararasuite_sync_ro` (o nome de exemplo
-  `sync_agent_anapolis_ro` usado nas secoes acima ficou desatualizado -
-  confirme sempre em Configuracoes > Arpa > editar conexao).
+- **Usuario runtime atual**: `ararasuite_sync_ro` (confirmado na conexao "Geral"
+  da VM `ERP` em 2026-11-24; confira sempre em Configuracoes > Arpa > editar
+  conexao). O nome de exemplo antigo `sync_agent_anapolis_ro` nunca foi usado pelo
+  agente e o role foi removido do banco `anapolis` em 2026-11-24.
 - **Todas as 7 views agora existem**: `produtos`, `clientes`, `estoque`,
   `plano_historico`, `vendas`, `financeiro`, `cobranca` (confirmado por
   "Preparar views" na conexao "Geral"). So `cobranca` ficou de fora antes -

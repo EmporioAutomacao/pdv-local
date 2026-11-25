@@ -96,6 +96,7 @@ WHERE p.codigo IS NOT NULL;
 -- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
 -- payload_json JA no formato consumido por sync_api.domain_processor.apply_arpa_venda:
 --   codigo_venda_arpa, data (timestamptz), status, vendedor_codigo, vendedor_nome,
+--   vendedor_documento (CPF/CNPJ: o ERP auto-vincula ao usuario com o mesmo documento),
 --   desconto_total, condicao_pagamento, especie_pagamento/forma_pagamento,
 --   numero_nota, cliente_documento, cliente_nome, empresa_cnpj, empresa_nome,
 --   loja_codigo (o agente injeta o loja_codigo da conexao se ausente),
@@ -258,7 +259,7 @@ WHERE b.codigo IS NOT NULL;
 
 -- View: sync_export.catalogos (contrato Sync 2.19.0, entity_type=catalogo)
 -- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
--- entity_key = '<tipo>:<codigo>'; payload_json: tipo ('especie' | 'condicao' | 'conta'),
--- codigo, descricao, ativo. Cadastro de especies, vencimentos (condicoes) e contas
+-- entity_key = '<tipo>:<codigo>'; payload_json: tipo ('especie' | 'condicao' | 'conta' |
+-- 'vendedor'), codigo, descricao, ativo (+ documento no vendedor; ERP >= 0.0.169). Cadastro de especies, vencimentos (condicoes) e contas
 -- bancarias do Arpa (+ conta 'CAIXA' = caixa do Arpa). occurred_at_utc = inicio do dia
 -- (reenvio diario). O ERP usa como lista de escolha dos vinculos da Conexao Arpa.

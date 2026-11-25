@@ -321,7 +321,7 @@ Configuracao recomendada para o piloto:
 ```json
 {
   "ArpaCollector": {
-    "ConnectionString": "Host=192.168.0.4;Port=5432;Database=anapolis;Username=sync_agent_anapolis_ro",
+    "ConnectionString": "Host=192.168.0.4;Port=5432;Database=anapolis;Username=ararasuite_sync_ro",
     "PasswordProtectedFile": ".secrets/arpa/anapolis-runtime-password.dpapi"
   }
 }
@@ -849,7 +849,7 @@ Instalar ja habilitando o coletor Arpa no piloto Anapolis:
   -PostgresAdminPassword (Read-Host "Senha admin PostgreSQL" -AsSecureString) `
   -DatabasePassword "<senha-local-pdv-sync>" `
   -EnableArpaCollector `
-  -ArpaConnectionString "Host=192.168.0.4;Port=5432;Database=anapolis;Username=sync_agent_anapolis_ro" `
+  -ArpaConnectionString "Host=192.168.0.4;Port=5432;Database=anapolis;Username=ararasuite_sync_ro" `
   -ArpaPassword (Read-Host "Senha read-only Arpa" -AsSecureString) `
   -ArpaCollectorPreset AnapolisInitialLoad `
   -ArpaBatchSize 5000

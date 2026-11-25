@@ -823,6 +823,32 @@ precisar editar esse arquivo de novo numa proxima renomeacao. Validado
 rodando contra um Postgres descartavel no Docker com nomes arbitrarios
 (`testdb`/`testuser`).
 
+## Incidente: vendas do Arpa chegam sem vendedor
+
+Sintoma: no ERP a venda do Arpa fica sem vendedor e o quadro "Vinculo de vendedores" da
+Conexao Arpa nao mostra o nome do vendedor (so o codigo) ou nao lista nada.
+
+Causa: views `sync_export` anteriores a `2026.11.24.3` mandavam so `vendedor_codigo`, sem nome
+nem documento, e nao traziam o cadastro de vendedores no catalogo. No ERP anterior a 0.0.169 o
+vendedor nem era registrado na conexao.
+
+Corrigido no SyncAgent 1.6.58 (views `2026.11.24.3`) junto com o ERP 0.0.169 (publicar o ERP
+antes: ERP antigo recusa `catalogo` com `tipo=vendedor`).
+
+1. Atualizar o agente e rodar **Preparar views** na conexao.
+2. Conferir no banco Arpa (somente leitura) que a venda traz o nome:
+   ```sql
+   SELECT payload_json::jsonb->>'vendedor_codigo', payload_json::jsonb->>'vendedor_nome'
+   FROM sync_export.vendas ORDER BY occurred_at_utc DESC LIMIT 20;
+   ```
+   Nome vazio com codigo preenchido: a tabela de cadastro do Arpa daquele cliente nao e
+   `vendedores`/`vendedor`/`funcionarios`/`funcionario` (ou nao tem `codigo`/`nome`) - levantar
+   com `export_arpa_schema_diagnostics` e ajustar os candidatos no script.
+3. No ERP, vincular os vendedores na conexao e usar **Reaplicar vinculos nas vendas**.
+
+Estrutura conferida em Anapolis (2026-11-24): `cabecalho_ordem_servico.vendedor` ->
+`vendedores(codigo, nome, cpf, status)`; `status` true = ativo.
+
 ## Evidencias obrigatorias
 
 Coletar antes de qualquer correcao destrutiva:

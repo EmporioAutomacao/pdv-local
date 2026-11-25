@@ -522,7 +522,7 @@ runtime deve vir preferencialmente de arquivo protegido por DPAPI LocalMachine:
 {
   "ArpaCollector": {
     "Enabled": true,
-    "ConnectionString": "Host=192.168.0.4;Port=5432;Database=anapolis;Username=sync_agent_anapolis_ro",
+    "ConnectionString": "Host=192.168.0.4;Port=5432;Database=anapolis;Username=ararasuite_sync_ro",
     "PasswordProtectedFile": ".secrets/arpa/anapolis-runtime-password.dpapi"
   }
 }

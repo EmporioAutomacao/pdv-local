@@ -43,7 +43,7 @@ $env:SyncAgent__PollingIntervalSeconds = [string]$PollingIntervalSeconds
 $env:SyncAgent__LocalStatusPort = $LocalStatusPort
 
 $env:ArpaCollector__Enabled = "true"
-$env:ArpaCollector__ConnectionString = "Host=192.168.0.4;Port=5432;Database=anapolis;Username=sync_agent_anapolis_ro"
+$env:ArpaCollector__ConnectionString = "Host=192.168.0.4;Port=5432;Database=anapolis;Username=ararasuite_sync_ro"
 Remove-Item Env:\ArpaCollector__PasswordFile -ErrorAction SilentlyContinue
 Remove-Item Env:\ArpaCollector__PasswordProtectedFile -ErrorAction SilentlyContinue
 if ($useProtectedArpaPassword) {

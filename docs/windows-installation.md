@@ -219,7 +219,7 @@ Para instalar ja com o coletor Arpa habilitado no piloto Anapolis:
   -PostgresAdminPassword (Read-Host "Senha admin PostgreSQL" -AsSecureString) `
   -DatabasePassword "<senha-local-pdv-sync>" `
   -EnableArpaCollector `
-  -ArpaConnectionString "Host=192.168.0.4;Port=5432;Database=anapolis;Username=sync_agent_anapolis_ro" `
+  -ArpaConnectionString "Host=192.168.0.4;Port=5432;Database=anapolis;Username=ararasuite_sync_ro" `
   -ArpaPassword (Read-Host "Senha read-only Arpa" -AsSecureString) `
   -ArpaCollectorPreset AnapolisInitialLoad `
   -ArpaBatchSize 5000
@@ -328,7 +328,7 @@ Defaults atuais do coletor Arpa no instalador:
 - Host: `127.0.0.1`;
 - Porta: `5432`;
 - Database: `control`;
-- Username: `sync_agent_anapolis_ro`;
+- Username: `ararasuite_sync_ro`;
 - Senha read-only: `postgres`.
 
 O instalador interativo monta internamente a connection string do Arpa sem senha,

@@ -84,7 +84,7 @@ pode ser configurada no SyncAgent, instalador, tray, servico Windows, banco
 local ou Control Plane como credencial runtime.
 
 O runtime do SyncAgent deve usar usuario separado, por exemplo
-`sync_agent_anapolis_ro`, com apenas `SELECT` nas views `sync_export`.
+`ararasuite_sync_ro`, com apenas `SELECT` nas views `sync_export`.
 
 Scripts de preparacao como `prepare-arpa-anapolis-pilot.ps1` podem executar DDL
 administrativo para criar views/usuario read-only, mas isso e atividade de DBA.

@@ -158,12 +158,12 @@ Comandos executados:
 .\infra\windows\test-arpa-readonly-permissions.ps1 `
   -PostgresHost 192.168.0.4 `
   -DatabaseName anapolis `
-  -DatabaseUser sync_agent_anapolis_ro
+  -DatabaseUser ararasuite_sync_ro
 
 .\infra\windows\test-arpa-export-preflight.ps1 `
   -PostgresHost 192.168.0.4 `
   -DatabaseName anapolis `
-  -DatabaseUser sync_agent_anapolis_ro
+  -DatabaseUser ararasuite_sync_ro
 ```
 
 Resultado:
@@ -204,7 +204,7 @@ Resultado: OK.
 Resolucao:
 
 - reaplicada preparacao controlada via DBA apenas para DDL/grants;
-- runtime segue usando `sync_agent_anapolis_ro`;
+- runtime segue usando `ararasuite_sync_ro`;
 - read-only validado novamente.
 
 2. Build padrao travado por processo SyncAgent em execucao.

@@ -150,7 +150,7 @@ Defaults atuais do coletor Arpa:
 - Host: `127.0.0.1`;
 - Porta: `5432`;
 - Database: `control`;
-- Username: `sync_agent_anapolis_ro`;
+- Username: `ararasuite_sync_ro`;
 - senha read-only: `postgres`.
 
 Quando o coletor Arpa estiver habilitado, usar o botao `Testar conexao` antes
@@ -352,7 +352,7 @@ Com coletor Arpa habilitado:
   -ArpaHost "192.168.0.4" `
   -ArpaPort 5432 `
   -ArpaDatabase "anapolis" `
-  -ArpaUsername "sync_agent_anapolis_ro" `
+  -ArpaUsername "ararasuite_sync_ro" `
   -ArpaPassword (Read-Host "Senha read-only Arpa" -AsSecureString) `
   -SkipErp `
   -EvidenceOutput ".\artifacts\sync-agent-clean-install-evidence.json"
