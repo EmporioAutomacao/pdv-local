@@ -1,7 +1,7 @@
 # Sincronizacao do SyncAgent (Arpa -> ERP)
 
 Visao de ponta a ponta de como o SyncAgent le o Arpa, guarda os eventos na fila local,
-envia ao ERP e trata o que da errado. Vale para o SyncAgent **1.6.59**.
+envia ao ERP e trata o que da errado. Vale para o SyncAgent **1.6.60**.
 
 Este documento explica o funcionamento. Os detalhes de tela e de incidente ficam nos
 documentos especificos, sem repeticao:
@@ -301,3 +301,4 @@ do catalogo recusados por ERP anterior a 0.0.169 se resolvem atualizando o ERP, 
 | 1.6.57 | Financeiro com data da venda/baixa (nao o vencimento); cursor paginado `(occurred_at, entity_key)`; releitura de 2 dias; marcador no futuro descartado; hash do payload no `event_id` |
 | 1.6.58 | Vendedor nas vendas e vendedores no catalogo (views `2026.11.24.3`; par ERP 0.0.169) |
 | 1.6.59 | "Sincronizar tudo" vira job com periodo de/ate, trava por conexao, cancelar e desistencia controlada; "Ultimo dia" vira "Ontem e hoje" a partir da meia-noite; geracao fixa da coleta incremental; tela Dead-letter com encerramento de superados |
+| 1.6.60 | Vendas do Arpa com data **e hora** (views `2026.11.25.1`): o fallback junta a data do cabecalho (`dataordem`, tipo `date`) com a coluna de hora, e venda fechada usa `data_fechamento` + `hora_fechamento`; antes a venda chegava ao ERP as 00:00. A abertura (`dataordem` + `hora_abertura`) vai em `data_abertura` (contrato 2.22.0). Par: ERP 1.0.0 (`Venda.data_fechamento` + `Venda.data_abertura`; publicar o ERP antes) |

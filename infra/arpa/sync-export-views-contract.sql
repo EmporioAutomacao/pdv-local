@@ -95,7 +95,9 @@ WHERE p.codigo IS NOT NULL;
 -- View: sync_export.vendas
 -- Colunas obrigatorias: entity_key text, occurred_at_utc timestamptz, payload_json text
 -- payload_json JA no formato consumido por sync_api.domain_processor.apply_arpa_venda:
---   codigo_venda_arpa, data (timestamptz), status, vendedor_codigo, vendedor_nome,
+--   codigo_venda_arpa, data (timestamptz: data E hora do FECHAMENTO da venda, ou da abertura enquanto
+--   aberta, com offset; so a data vira 00:00 no ERP -> Venda.data_fechamento),
+--   data_abertura (timestamptz opcional, contrato 2.22.0 -> Venda.data_abertura), status, vendedor_codigo, vendedor_nome,
 --   vendedor_documento (CPF/CNPJ: o ERP auto-vincula ao usuario com o mesmo documento),
 --   desconto_total, condicao_pagamento, especie_pagamento/forma_pagamento,
 --   numero_nota, cliente_documento, cliente_nome, empresa_cnpj, empresa_nome,

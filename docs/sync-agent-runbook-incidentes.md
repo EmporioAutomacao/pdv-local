@@ -891,6 +891,49 @@ reenviava esses 47 de novo pela releitura da coleta incremental. A partir da 1.6
 acontece mais (geracao da coleta incremental fixa). Atualizar o ERP resolve a causa, e os
 registros antigos de dead-letter continuam la (ver "Incidente: dead-letter").
 
+## Incidente: vendas do Arpa chegam com hora 00:00
+
+Sintoma: no ERP a venda do Arpa aparece com a data certa e a hora 00:00.
+
+Causa: views `sync_export` anteriores a `2026.11.25.1` mandavam em `data` so a coluna de data
+do cabecalho. No Arpa de Anapolis ela e `cabecalho_ordem_servico.dataordem`, do tipo `date`, e o
+ERP grava uma data sem hora como meia-noite. O contrato ja pedia `data` como timestamptz.
+
+Corrigido no SyncAgent 1.6.60 (views `2026.11.25.1`), sem par de ERP. A view junta a data com a
+coluna de hora do cabecalho, escolhida por nome (`horaordem`, `hora_ordem`, `hora`, `horario`,
+`hora_venda`, `hora_abertura`, `hora_emissao`, `hora_cadastro`, `hr_ordem`, `hora_os`) ou, sem
+nenhum desses nomes, pela primeira coluna do tipo `time` da tabela. A hora pode ser `time`,
+`timestamp` (inclusive o estilo Delphi `1899-12-30 HH:MM:SS`) ou texto `HH:MM[:SS]`; texto
+invalido cai na data pura sem derrubar a view. O `occurred_at_utc` da venda passa a usar a mesma
+data e hora.
+
+Venda fechada usa a data e a hora do **fechamento** quando a tabela tem o par
+(`data_fechamento`/`data_finalizacao`/`data_encerramento` + `hora_fechamento`/`hora_finalizacao`/
+`hora_encerramento`) e os dois estao preenchidos; venda aberta fica com a abertura acima. Em
+Anapolis (conferido em 2026-11-26) a tabela tem `dataordem` (date), `hora_abertura`,
+`data_fechamento` e `hora_fechamento` (time), e a hora de abertura se repete entre vendas
+diferentes, por isso vale o fechamento. A abertura (`dataordem` + `hora_abertura`) vai junto, no
+campo `data_abertura` (contrato Sync 2.22.0). No ERP 1.0.0 `data` grava em `Venda.data_fechamento`
+(listagem, relatorios, DRE, comissoes) e `data_abertura` em `Venda.data_abertura` (detalhe da venda);
+ERP anterior ignora `data_abertura`. O offset do `data` segue o fuso da sessao do Postgres
+(um 9.6 com tzdata antigo mostra `-02:00` em horario de verao); o instante e o mesmo e o ERP
+converte pelo offset.
+
+1. Atualizar o agente e rodar **Preparar views** na conexao. A mensagem do Preparar views diz a
+   coluna usada: `sync_export.vendas criada (fallback dinamico, tabela ..., data dataordem, hora X,
+   fechamento data_fechamento + hora_fechamento)`.
+   Com `hora sem coluna de hora`, levantar o nome real com `export_arpa_schema_diagnostics` e
+   incluir nos candidatos do script.
+2. Conferir no banco Arpa (somente leitura):
+   ```sql
+   SELECT entity_key, occurred_at_utc, payload_json::jsonb->>'data'
+   FROM sync_export.vendas ORDER BY occurred_at_utc DESC LIMIT 20;
+   ```
+   `data` deve trazer a hora da venda com offset.
+3. A coleta relê os ultimos 2 dias, entao essas vendas se corrigem sozinhas. Para as mais
+   antigas, usar **Sincronizar tudo** com o periodo desejado. O ERP atualiza a venda existente
+   (mesma chave codigo + loja).
+
 ## Evidencias obrigatorias
 
 Coletar antes de qualquer correcao destrutiva:

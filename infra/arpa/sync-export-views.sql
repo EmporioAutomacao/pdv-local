@@ -74,6 +74,52 @@ BEGIN
 END;
 $fn$;
 
+-- Data e hora da venda (timestamptz). No Arpa a data do cabecalho costuma ser
+-- `date` (ex.: cabecalho_ordem_servico.dataordem) e a hora fica numa coluna
+-- separada; sem juntar as duas a venda chegava ao ERP como 00:00.
+--   - sem coluna de hora, ou data ja timestamptz -> igual a _occurred_expr;
+--   - hora time/timetz/timestamp -> data::date + hora::time;
+--   - hora texto -> so quando bate HH:MM[:SS] valido (texto ruim nao derruba a
+--     view: fica a data pura);
+--   - data timestamp que ja traz hora (<> 00:00) e mantida como esta.
+-- O resultado e interpretado no fuso p_tz (mesma regra de _occurred_expr).
+-- Expressao `time` de uma coluna de hora (NULL na linha quando a hora falta ou e
+-- texto invalido); NULL quando o tipo da coluna nao serve como hora.
+CREATE OR REPLACE FUNCTION sync_export._hora_expr(p_alias text, p_table text, p_time text)
+RETURNS text LANGUAGE plpgsql STABLE AS $fn$
+DECLARE tt text; h text;
+BEGIN
+    IF p_time IS NULL THEN RETURN NULL; END IF;
+    tt := sync_export._coltype(p_table, p_time);
+    h := format('%s.%I', p_alias, p_time);
+    IF tt LIKE 'time %' OR tt LIKE 'timestamp%' THEN
+        RETURN format('%s::time', h);
+    ELSIF tt IN ('text', 'character varying', 'character') THEN
+        RETURN format('(CASE WHEN btrim(%1$s) ~ ''^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$'' THEN btrim(%1$s)::time END)', h);
+    END IF;
+    RETURN NULL;
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION sync_export._venda_ts_expr(p_alias text, p_table text, p_date text, p_time text, p_tz text)
+RETURNS text LANGUAGE plpgsql STABLE AS $fn$
+DECLARE dt text; d text; hexpr text; naive text;
+BEGIN
+    dt := sync_export._coltype(p_table, p_date);
+    hexpr := sync_export._hora_expr(p_alias, p_table, p_time);
+    IF hexpr IS NULL OR dt = 'timestamp with time zone' THEN
+        RETURN sync_export._occurred_expr(p_alias, p_table, p_date, p_tz);
+    END IF;
+    d := format('%s.%I', p_alias, p_date);
+    IF dt = 'date' THEN
+        naive := format('COALESCE(%1$s + %2$s, %1$s::timestamp)', d, hexpr);
+    ELSE  -- timestamp without time zone: so completa a hora quando ela veio zerada
+        naive := format('(CASE WHEN %1$s::time <> TIME ''00:00'' THEN %1$s::timestamp ELSE COALESCE(%1$s::date + %2$s, %1$s::timestamp) END)', d, hexpr);
+    END IF;
+    RETURN format('(%s AT TIME ZONE %L)', naive, p_tz);
+END;
+$fn$;
+
 -- Data que ainda nao chegou vira NULL (some do GREATEST/COALESCE do occurred_at).
 -- Nao usar LEAST(now(), ...): o occurred_at viraria now() e mudaria a cada leitura,
 -- e cada leitura geraria um event_id novo (o SyncAgent pagina por occurred_at e
@@ -345,6 +391,7 @@ DECLARE
     -- para o futuro e todo titulo novo ou baixa ficava para tras para sempre).
     fv_t text; fv_ord text; fv_date text; r_emis text; venda_dt_expr text; pg_dt_expr text;
 
+    v_time text; v_ts text; v_ts_abertura text; v_fdate text; v_ftime text; v_fh text;
     v_t text; v_ord text; v_date text; v_cust text; v_status text; v_cancel text;
     v_disc text; v_especie text; v_vend text; v_cond text;
     -- cadastro de vendedores do Arpa: nome/documento do vendedor da venda (o ERP
@@ -421,7 +468,32 @@ BEGIN
             IF v_ord IS NULL OR v_date IS NULL THEN
                 RAISE NOTICE 'sync_export.vendas pulada (tabela % sem coluna de ordem/data).', v_t;
             ELSE
-                v_cust    := sync_export._pick(v_t, ARRAY['cliente','cod_cliente','id_cliente']);
+                -- hora da venda: por nome; senao a primeira coluna do tipo time da tabela
+                v_time := sync_export._pick(v_t, ARRAY['horaordem','hora_ordem','hora','horario','hora_venda',
+                    'hora_abertura','hora_emissao','hora_cadastro','hr_ordem','hora_os']);
+                IF v_time IS NULL THEN
+                    SELECT c.column_name::text INTO v_time
+                    FROM information_schema.columns c
+                    WHERE c.table_schema = 'public' AND c.table_name::text = v_t
+                      AND c.data_type IN ('time without time zone', 'time with time zone')
+                    ORDER BY c.ordinal_position
+                    LIMIT 1;
+                END IF;
+                v_ts := sync_export._venda_ts_expr('v', v_t, v_date, v_time, 'Etc/GMT+3');
+                v_ts_abertura := v_ts;  -- vai no payload como data_abertura (contrato 2.22.0)
+                -- venda fechada: vale a data/hora do fechamento (no Arpa de Anapolis a abertura se
+                -- repete entre vendas); aberta ou sem fechamento completo: a abertura acima
+                v_fdate := sync_export._pick(v_t, ARRAY['data_fechamento','data_finalizacao','data_encerramento']);
+                v_ftime := sync_export._pick(v_t, ARRAY['hora_fechamento','hora_finalizacao','hora_encerramento']);
+                v_fh    := sync_export._hora_expr('v', v_t, v_ftime);
+                IF v_fdate IS NOT NULL AND v_fh IS NOT NULL THEN
+                    -- hora de fechamento vazia/invalida tambem cai na abertura (nao vira 00:00)
+                    v_ts := format('COALESCE(CASE WHEN v.%I IS NOT NULL AND %s IS NOT NULL THEN %s END, %s)',
+                        v_fdate, v_fh, sync_export._venda_ts_expr('v', v_t, v_fdate, v_ftime, 'Etc/GMT+3'), v_ts);
+                ELSE
+                    v_fdate := NULL;  -- so para o NOTICE
+                END IF;
+                v_cust   := sync_export._pick(v_t, ARRAY['cliente','cod_cliente','id_cliente']);
                 v_status  := sync_export._pick(v_t, ARRAY['status','situacao']);
                 v_cancel  := sync_export._pick(v_t, ARRAY['data_cancelamento','cancelamento','data_cancelada','data_cancelado']);
                 v_disc    := sync_export._pick(v_t, ARRAY['desconto','desconto_total','valor_desconto','vlr_desconto']);
@@ -470,7 +542,12 @@ BEGIN
                     END IF;
                 END IF;
 
-                pairs := format('''codigo_venda_arpa'', v.%I::text, ''data'', v.%I', v_ord, v_date);
+                -- data com hora e offset (timestamptz no jsonb -> "2026-11-25T14:32:10-03:00");
+                -- so a data fazia o ERP gravar a venda as 00:00.
+                -- data = fechamento (abertura enquanto a venda esta aberta); data_abertura = abertura.
+                -- No ERP: Venda.data_fechamento e Venda.data_abertura (ERP 1.0.0).
+                pairs := format('''codigo_venda_arpa'', v.%I::text, ''data'', %s, ''data_abertura'', %s',
+                    v_ord, v_ts, v_ts_abertura);
                 IF v_status  IS NOT NULL THEN pairs := pairs || format(', ''status'', v.%I::text', v_status); END IF;
                 IF v_vend    IS NOT NULL THEN pairs := pairs || format(', ''vendedor_codigo'', v.%I::text', v_vend); END IF;
                 IF v_vend IS NOT NULL AND vd_code IS NOT NULL AND vd_name IS NOT NULL THEN
@@ -495,14 +572,16 @@ BEGIN
 
                 sql := 'CREATE OR REPLACE VIEW sync_export.vendas AS SELECT '
                     || format('v.%I::text', v_ord) || ' AS entity_key, '
-                    || format('COALESCE(%s, %s)', sync_export._occurred_expr('v', v_t, v_date, 'Etc/GMT+3'), fixed) || ' AS occurred_at_utc, '
+                    || format('COALESCE(%s, %s)', v_ts, fixed) || ' AS occurred_at_utc, '
                     || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
                     || format('(''arpa-venda-'' || v.%I)::text', v_ord) || ' AS trace_id '
                     || format('FROM public.%I v', v_t) || cli_join
                     || format(' WHERE v.%I IS NOT NULL', v_ord)
                     || CASE WHEN v_cancel IS NOT NULL THEN format(' AND v.%I IS NULL', v_cancel) ELSE '' END;
                 EXECUTE sql;
-                RAISE NOTICE 'sync_export.vendas criada (fallback dinamico, tabela %).', v_t;
+                RAISE NOTICE 'sync_export.vendas criada (fallback dinamico, tabela %, data %, hora %, fechamento %).',
+                    v_t, v_date, COALESCE(v_time, 'sem coluna de hora'),
+                    CASE WHEN v_fdate IS NOT NULL THEN v_fdate || ' + ' || v_ftime ELSE 'nao usado' END;
             END IF;
         END IF;
       END IF;
@@ -1393,4 +1472,4 @@ $catalogos$;
 -- o ERP ja e compativel). Subir este numero sempre que uma mudanca no script exigir
 -- preparar as views de novo. Precisa ser a ultima instrucao do arquivo.
 -- ---------------------------------------------------------------------------
-COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.24.3';
+COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.25.1';
