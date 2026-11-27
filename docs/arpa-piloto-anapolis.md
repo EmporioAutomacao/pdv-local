@@ -382,6 +382,35 @@ temporario descrito abaixo) confirmou e corrigiu o que a entrada de
   `sync_export`, nao no `public` inteiro). Ver registro e recomendacao de
   revogar em `docs/arpa-readonly-security-policy.md`.
 
+## Ordens de Servico (2026-11-26)
+
+Levantamento somente leitura no banco `anapolis` (usuario `ararasuite_sync_ro`).
+A OS de assistencia tecnica **nao** e o `cabecalho_ordem_servico`, que e o pedido
+de venda e ja vai em `sync_export.vendas`. A OS mora em:
+
+| Tabela | Linhas | Papel |
+| --- | --- | --- |
+| `servicos` | 712 | cabecalho: `codigo` (n. da OS), `cliente`, `abertura`+`hora_abertura`, `entrega`+`hora_entrega`, `status` (A 93 / F 555 / C 64), `operador`, `responsavel` (quem trouxe) |
+| `objetos_servicos` | 734 | equipamento: `objeto`, `marca`, `modelo`, `serie`, `cor`, `patrimonio`, `problema`, `constatado`, `acessorios`, `tecnico`, `situacao`, `data_hora_finalizacao` |
+| `os_servicos` | 1594 | itens (servicos e pecas) do equipamento: `cd_produto`, `quantidade`, `unitario`, `precocusto`, `cd_vendedor` |
+| `os_servicos_pecas` | 1592 | desconto (`tipo_desconto` P/V), acrescimo, garantia (texto) do item |
+| `pos_venda_os` | 455 | garantia em dias do item (`ndias`) |
+| `os_transformada` | 891 | OS -> pedidos de venda (`cod_ordem` -> `cabecalho_ordem_servico.ordem`). 336 OS tem 2 pedidos |
+| `os_autorizada` | 289 | data da aprovacao do orcamento |
+
+Equipamentos por OS: 1 em 694, 2 em 14, 3 em 4. Tecnico e operador sao codigos de
+`vendedores`, o mesmo cadastro do quadro de vinculo de vendedores do ERP.
+
+View `sync_export.ordens_servico` (views `2026.11.26.1`, contrato 2.23.0). O SELECT
+expandido rodou somente leitura no `anapolis` em 2026-11-26 e bateu com o banco:
+712 OS, 734 equipamentos, 1594 itens, 891 pedidos, nenhuma OS sem documento do
+cliente. 379 OS tem garantia em algum item.
+
+No ERP: `sync_api/ordem_servico_arpa.py::apply_ordem_servico` (regras em
+`erp/docs/infra/sync-agent-arpa.md`, secao "Ordens de Servico"). Publicar o ERP antes
+do agente e so entao ligar o toggle "Ordens de servico" da conexao: o agente nao
+coleta enquanto o ERP nao declarar `ordem_servico` em `accepted_entity_types`.
+
 ## NO-GO
 
 Nao prosseguir se:

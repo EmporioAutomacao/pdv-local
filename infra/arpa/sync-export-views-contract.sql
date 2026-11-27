@@ -265,3 +265,15 @@ WHERE b.codigo IS NOT NULL;
 -- 'vendedor'), codigo, descricao, ativo (+ documento no vendedor; ERP >= 0.0.169). Cadastro de especies, vencimentos (condicoes) e contas
 -- bancarias do Arpa (+ conta 'CAIXA' = caixa do Arpa). occurred_at_utc = inicio do dia
 -- (reenvio diario). O ERP usa como lista de escolha dos vinculos da Conexao Arpa.
+
+-- View: sync_export.ordens_servico (contrato Sync 2.23.0, entity_type=ordem_servico)
+-- Gerada pelo script unico infra/arpa/sync-export-views.sql a partir das tabelas
+-- servicos / objetos_servicos / os_servicos (+ os_servicos_pecas, pos_venda_os,
+-- os_transformada, os_autorizada quando existirem). entity_key = numero da OS.
+-- Payload: codigo_os_arpa, status (A/F/C), situacao, cliente_documento, cliente_nome,
+-- data_abertura, data_conclusao, data_aprovacao, operador_codigo, operador_nome,
+-- entregue_por, pedidos[] (codigo_venda_arpa), equipamentos[] { codigo, objeto, marca,
+-- modelo, serie, cor, patrimonio, problema, constatado, acessorios, situacao,
+-- tecnico_codigo, tecnico_nome, data_recebimento, data_entrega, itens[] { codigo,
+-- codigo_produto_arpa, descricao, quantidade, unitario, desconto_valor, acrescimo,
+-- custo, tecnico_codigo, garantia_dias } }. O agente acrescenta loja_codigo e empresa_*.

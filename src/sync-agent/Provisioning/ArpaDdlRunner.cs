@@ -13,7 +13,7 @@ public sealed partial class ArpaDdlRunner
 {
     private const string ViewsResourceName = "SyncAgent.Arpa.sync-export-views.sql";
     private static readonly string[] AllViewNames =
-        ["produtos", "clientes", "estoque", "vendas", "financeiro", "compras", "cobranca", "plano_historico", "catalogos"];
+        ["produtos", "clientes", "estoque", "vendas", "financeiro", "compras", "cobranca", "plano_historico", "catalogos", "ordens_servico"];
 
     private readonly ILogger<ArpaDdlRunner> _logger;
 
@@ -75,7 +75,8 @@ public sealed partial class ArpaDdlRunner
         bool needProdutos, bool needClientes, bool needEstoque, bool needVendas, bool needFinanceiro,
         bool needCompras, bool needCobranca, bool needPlanoHistorico,
         CancellationToken cancellationToken,
-        bool needCatalogos = false)
+        bool needCatalogos = false,
+        bool needOrdensServico = false)
     {
         try
         {
@@ -89,6 +90,7 @@ public sealed partial class ArpaDdlRunner
                 ("vendas", needVendas), ("financeiro", needFinanceiro), ("compras", needCompras),
                 ("cobranca", needCobranca), ("plano_historico", needPlanoHistorico),
                 ("catalogos", needCatalogos),
+                ("ordens_servico", needOrdensServico),
             })
             {
                 if (!needed)

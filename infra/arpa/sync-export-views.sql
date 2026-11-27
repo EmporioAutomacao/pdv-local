@@ -1465,6 +1465,250 @@ BEGIN
 END;
 $catalogos$;
 
+-- =================== ORDENS DE SERVICO (contrato Sync 2.23.0) ===================
+-- entity_type=ordem_servico. OS de assistencia tecnica do Arpa - NAO e o
+-- cabecalho_ordem_servico (esse e o pedido/venda, ja vai em sync_export.vendas).
+-- Estrutura levantada no Arpa de Anapolis (somente leitura, 2026-11-26):
+--   servicos            cabecalho: codigo (n. da OS), cliente, abertura(date) +
+--                       hora_abertura, entrega(date) + hora_entrega, status
+--                       (A aberta / F faturada / C cancelada), operador
+--                       (-> vendedores), responsavel (quem trouxe o equipamento)
+--   objetos_servicos    equipamento: codigo, cod_servicos (-> servicos), objeto,
+--                       marca, modelo, serie, cor, patrimonio, problema,
+--                       constatado, acessorios, tecnico (-> vendedores), situacao
+--                       (ORCAMENTO, EM ANDAMENTO, AGUARDANDO PECAS, CONCLUIDO,
+--                       FINALIZADO, SEM CONSERTO), hora_recebida, data_entrega +
+--                       hora_entrega, data_hora_finalizacao
+--   os_servicos         item: codigo, cd_objeto (-> objetos_servicos), cd_produto,
+--                       descricao, quantidade, unitario, precocusto, cd_vendedor,
+--                       data_hora_lancamento
+--   os_servicos_pecas   desconto (tipo_desconto P = %, V = valor), acrescimo,
+--                       garantia (texto) por item (cd_item)
+--   pos_venda_os        garantia em dias por item (cod_item, ndias)
+--   os_transformada     OS -> pedidos de venda (cod_ordem, cod_pedido); a OS
+--                       faturada pode ter 2 pedidos (pecas e servicos)
+--   os_autorizada       aprovacao do orcamento (os, data)
+-- occurred_at_utc = o mais recente entre abertura, entrega, finalizacao dos
+-- equipamentos, lancamento de item e aprovacao (datas futuras anuladas). A
+-- situacao do equipamento muda sem data no Arpa, entao OS aberta (status A) usa
+-- tambem o inicio do dia: e reenviada 1x por dia (como catalogos) e a mudanca de
+-- situacao chega em ate 1 dia.
+-- Colunas opcionais ausentes viram NULL; sem as tabelas/colunas obrigatorias a
+-- view e pulada.
+CREATE OR REPLACE FUNCTION sync_export._col_or_null(p_alias text, p_table text, p_col text, p_cast text DEFAULT NULL)
+RETURNS text LANGUAGE plpgsql STABLE AS $fn$
+BEGIN
+    IF p_table IS NULL OR sync_export._coltype(p_table, p_col) IS NULL THEN
+        RETURN 'NULL';
+    END IF;
+    IF p_cast IS NULL THEN
+        RETURN format('%s.%I', p_alias, p_col);
+    END IF;
+    RETURN format('%s.%I::%s', p_alias, p_col, p_cast);
+END;
+$fn$;
+
+DO $ordens_servico$
+DECLARE
+    v_tz  text := 'Etc/GMT+3';
+    fixed text := 'TIMESTAMPTZ ''2000-01-01 00:00:00+00''';
+    t_s text; t_o text; t_i text; t_p text; t_pv text; t_tr text; t_au text; t_cl text; t_vd text;
+    cl_code text; cl_name text; cl_doc text; vd_code text; vd_name text;
+    falta text;
+    abertura_ts text; entrega_ts text; receb_ts text; ent_obj_ts text; aprov_ts text;
+    vend_nome text; desc_expr text; acres_expr text; garantia_expr text;
+    itens_expr text; equip_expr text; pedidos_expr text; final_expr text; lanc_expr text;
+    situacao_expr text; occ_expr text; cli_join text; pairs text; sql text;
+BEGIN
+    BEGIN
+        IF current_setting('TimeZone') IS NOT NULL
+           AND position('/' in current_setting('TimeZone')) = 0
+           AND upper(current_setting('TimeZone')) NOT IN ('GMT','UTC','UCT','ZULU','GREENWICH','LOCALTIME','FACTORY') THEN
+            v_tz := current_setting('TimeZone');
+        END IF;
+    EXCEPTION WHEN OTHERS THEN v_tz := 'Etc/GMT+3';
+    END;
+
+  BEGIN
+    t_s := sync_export._first_table(ARRAY['servicos']);
+    t_o := sync_export._first_table(ARRAY['objetos_servicos']);
+    t_i := sync_export._first_table(ARRAY['os_servicos']);
+    IF t_s IS NULL OR t_o IS NULL OR t_i IS NULL THEN
+        RAISE NOTICE 'sync_export.ordens_servico pulada (tabelas servicos/objetos_servicos/os_servicos nao encontradas).';
+    ELSE
+        SELECT string_agg(x.tab || '.' || x.col, ', ') INTO falta
+        FROM (VALUES (t_s, 'codigo'), (t_s, 'cliente'), (t_s, 'abertura'), (t_s, 'status'),
+                     (t_o, 'codigo'), (t_o, 'cod_servicos'),
+                     (t_i, 'codigo'), (t_i, 'cd_objeto'), (t_i, 'cd_produto')) AS x(tab, col)
+        WHERE sync_export._coltype(x.tab, x.col) IS NULL;
+
+        IF falta IS NOT NULL THEN
+            RAISE NOTICE 'sync_export.ordens_servico pulada (colunas ausentes: %).', falta;
+        ELSE
+            t_p  := sync_export._first_table(ARRAY['os_servicos_pecas']);
+            t_pv := sync_export._first_table(ARRAY['pos_venda_os']);
+            t_tr := sync_export._first_table(ARRAY['os_transformada']);
+            t_au := sync_export._first_table(ARRAY['os_autorizada']);
+            t_cl := sync_export._first_table(ARRAY['clientes','cliente']);
+            t_vd := sync_export._first_table(ARRAY['vendedores','vendedor','funcionarios','funcionario']);
+            IF t_tr IS NOT NULL AND (sync_export._coltype(t_tr, 'cod_ordem') IS NULL OR sync_export._coltype(t_tr, 'cod_pedido') IS NULL) THEN t_tr := NULL; END IF;
+            IF t_au IS NOT NULL AND (sync_export._coltype(t_au, 'os') IS NULL OR sync_export._coltype(t_au, 'data') IS NULL) THEN t_au := NULL; END IF;
+            IF t_p  IS NOT NULL AND sync_export._coltype(t_p, 'cd_item') IS NULL THEN t_p := NULL; END IF;
+            IF t_pv IS NOT NULL AND (sync_export._coltype(t_pv, 'cod_item') IS NULL OR sync_export._coltype(t_pv, 'ndias') IS NULL) THEN t_pv := NULL; END IF;
+
+            -- nome do vendedor/tecnico pelo codigo (subselect; NULL sem tabela de vendedores)
+            vend_nome := 'NULL';
+            IF t_vd IS NOT NULL THEN
+                vd_code := sync_export._pick(t_vd, ARRAY['codigo','id','cod_vendedor','vendedor']);
+                vd_name := sync_export._pick(t_vd, ARRAY['nome','descricao','apelido']);
+                IF vd_code IS NOT NULL AND vd_name IS NOT NULL THEN
+                    vend_nome := format('(SELECT vd.%I::text FROM public.%I vd WHERE CAST(vd.%I AS TEXT) = CAST(%%s AS TEXT) LIMIT 1)',
+                        vd_name, t_vd, vd_code);
+                END IF;
+            END IF;
+
+            abertura_ts := sync_export._venda_ts_expr('s', t_s, 'abertura',
+                CASE WHEN sync_export._coltype(t_s, 'hora_abertura') IS NOT NULL THEN 'hora_abertura' END, v_tz);
+            entrega_ts := CASE WHEN sync_export._coltype(t_s, 'entrega') IS NOT NULL THEN
+                sync_export._venda_ts_expr('s', t_s, 'entrega',
+                    CASE WHEN sync_export._coltype(t_s, 'hora_entrega') IS NOT NULL THEN 'hora_entrega' END, v_tz)
+                ELSE 'NULL' END;
+            aprov_ts := CASE WHEN t_au IS NOT NULL THEN
+                format('(SELECT max(au.data)::timestamp AT TIME ZONE %L FROM public.%I au WHERE au.os = s.codigo)', v_tz, t_au)
+                ELSE 'NULL' END;
+            final_expr := CASE WHEN sync_export._coltype(t_o, 'data_hora_finalizacao') IS NOT NULL THEN
+                format('(SELECT max(ofn.data_hora_finalizacao) AT TIME ZONE %L FROM public.%I ofn WHERE ofn.cod_servicos = s.codigo)', v_tz, t_o)
+                ELSE 'NULL' END;
+            lanc_expr := CASE WHEN sync_export._coltype(t_i, 'data_hora_lancamento') IS NOT NULL THEN
+                format('(SELECT max(il.data_hora_lancamento) AT TIME ZONE %L FROM public.%I il JOIN public.%I ol ON ol.codigo = il.cd_objeto WHERE ol.cod_servicos = s.codigo)', v_tz, t_i, t_o)
+                ELSE 'NULL' END;
+
+            -- recebimento do equipamento = data de abertura da OS + hora_recebida
+            receb_ts := CASE WHEN sync_export._coltype(t_o, 'hora_recebida') IS NOT NULL THEN
+                format('((s.abertura::date + o.hora_recebida::time) AT TIME ZONE %L)', v_tz) ELSE 'NULL' END;
+            ent_obj_ts := CASE WHEN sync_export._coltype(t_o, 'data_entrega') IS NOT NULL THEN
+                CASE WHEN sync_export._coltype(t_o, 'hora_entrega') IS NOT NULL THEN
+                    format('((o.data_entrega::date + COALESCE(NULLIF(o.hora_entrega::time, TIME ''00:00''), TIME ''00:00'')) AT TIME ZONE %L)', v_tz)
+                ELSE format('(o.data_entrega::timestamp AT TIME ZONE %L)', v_tz) END
+                ELSE 'NULL' END;
+
+            -- desconto em valor (P = percentual do total do item), acrescimo e garantia
+            desc_expr := '0'; acres_expr := '0'; garantia_expr := 'NULL';
+            IF t_p IS NOT NULL THEN
+                IF sync_export._coltype(t_p, 'desconto') IS NOT NULL THEN
+                    desc_expr := format(
+                        '(SELECT round(COALESCE(CASE WHEN upper(COALESCE(%s, ''V'')) = ''P'' THEN COALESCE(i.unitario, 0) * COALESCE(i.quantidade, 0) * pc.desconto / 100 ELSE pc.desconto END, 0), 2) FROM public.%I pc WHERE pc.cd_item = i.codigo LIMIT 1)',
+                        sync_export._col_or_null('pc', t_p, 'tipo_desconto', 'text'), t_p);
+                END IF;
+                IF sync_export._coltype(t_p, 'acrescimo') IS NOT NULL THEN
+                    acres_expr := format('(SELECT pc.acrescimo FROM public.%I pc WHERE pc.cd_item = i.codigo LIMIT 1)', t_p);
+                END IF;
+                IF sync_export._coltype(t_p, 'garantia') IS NOT NULL THEN
+                    garantia_expr := format(
+                        $g$(SELECT CASE WHEN upper(pc.garantia) ~ '^\s*[0-9]+\s*MES' THEN substring(pc.garantia from '[0-9]+')::int * 30
+                                        WHEN upper(pc.garantia) ~ '^\s*[0-9]+\s*ANO' THEN substring(pc.garantia from '[0-9]+')::int * 365
+                                        WHEN upper(pc.garantia) ~ '^\s*[0-9]+\s*DIA' THEN substring(pc.garantia from '[0-9]+')::int END
+                            FROM public.%I pc WHERE pc.cd_item = i.codigo LIMIT 1)$g$, t_p);
+                END IF;
+            END IF;
+            IF t_pv IS NOT NULL THEN
+                garantia_expr := format('COALESCE((SELECT max(pv.ndias) FROM public.%I pv WHERE pv.cod_item = i.codigo), %s)', t_pv, garantia_expr);
+            END IF;
+
+            itens_expr := format(
+                'COALESCE((SELECT jsonb_agg(jsonb_build_object('
+                || '''codigo'', i.codigo::text, ''codigo_produto_arpa'', i.cd_produto::text, ''descricao'', %s, '
+                || '''quantidade'', %s, ''unitario'', %s, ''desconto_valor'', %s, ''acrescimo'', %s, ''custo'', %s, '
+                || '''tecnico_codigo'', %s, ''garantia_dias'', %s) ORDER BY i.codigo) '
+                || 'FROM public.%I i WHERE i.cd_objeto = o.codigo), ''[]''::jsonb)',
+                sync_export._col_or_null('i', t_i, 'descricao', 'text'),
+                sync_export._col_or_null('i', t_i, 'quantidade'),
+                sync_export._col_or_null('i', t_i, 'unitario'),
+                desc_expr, acres_expr,
+                sync_export._col_or_null('i', t_i, 'precocusto'),
+                sync_export._col_or_null('i', t_i, 'cd_vendedor', 'text'),
+                garantia_expr, t_i);
+
+            equip_expr := format(
+                'COALESCE((SELECT jsonb_agg(jsonb_build_object('
+                || '''codigo'', o.codigo::text, ''objeto'', %s, ''marca'', %s, ''modelo'', %s, ''serie'', %s, ''cor'', %s, '
+                || '''patrimonio'', %s, ''problema'', %s, ''constatado'', %s, ''acessorios'', %s, ''situacao'', %s, '
+                || '''tecnico_codigo'', %s, ''tecnico_nome'', %s, ''data_recebimento'', %s, ''data_entrega'', %s, '
+                || '''itens'', %s) ORDER BY o.codigo) FROM public.%I o WHERE o.cod_servicos = s.codigo), ''[]''::jsonb)',
+                sync_export._col_or_null('o', t_o, 'objeto', 'text'),
+                sync_export._col_or_null('o', t_o, 'marca', 'text'),
+                sync_export._col_or_null('o', t_o, 'modelo', 'text'),
+                sync_export._col_or_null('o', t_o, 'serie', 'text'),
+                sync_export._col_or_null('o', t_o, 'cor', 'text'),
+                sync_export._col_or_null('o', t_o, 'patrimonio', 'text'),
+                sync_export._col_or_null('o', t_o, 'problema', 'text'),
+                sync_export._col_or_null('o', t_o, 'constatado', 'text'),
+                sync_export._col_or_null('o', t_o, 'acessorios', 'text'),
+                sync_export._col_or_null('o', t_o, 'situacao', 'text'),
+                sync_export._col_or_null('o', t_o, 'tecnico', 'text'),
+                CASE WHEN vend_nome <> 'NULL' AND sync_export._coltype(t_o, 'tecnico') IS NOT NULL
+                     THEN format(vend_nome, 'o.tecnico') ELSE 'NULL' END,
+                receb_ts, ent_obj_ts, itens_expr, t_o);
+
+            situacao_expr := CASE WHEN sync_export._coltype(t_o, 'situacao') IS NOT NULL THEN
+                format('(SELECT o1.situacao::text FROM public.%I o1 WHERE o1.cod_servicos = s.codigo ORDER BY o1.codigo LIMIT 1)', t_o)
+                ELSE 'NULL' END;
+            pedidos_expr := CASE WHEN t_tr IS NOT NULL THEN
+                format('COALESCE((SELECT jsonb_agg(tr.cod_pedido::text ORDER BY tr.cod_pedido) FROM public.%I tr WHERE tr.cod_ordem = s.codigo), ''[]''::jsonb)', t_tr)
+                ELSE '''[]''::jsonb' END;
+
+            cli_join := ''; cl_name := NULL; cl_doc := NULL;
+            IF t_cl IS NOT NULL THEN
+                cl_code := sync_export._pick(t_cl, ARRAY['codigo','id','cliente']);
+                cl_name := sync_export._pick(t_cl, ARRAY['nome','razao','razao_social','fantasia']);
+                cl_doc  := sync_export._pick(t_cl, ARRAY['cnpj_cpf','cpf_cnpj','cnpj','cpf','documento']);
+                IF cl_code IS NOT NULL THEN
+                    cli_join := format(' LEFT JOIN public.%I cli ON CAST(cli.%I AS TEXT) = CAST(s.cliente AS TEXT)', t_cl, cl_code);
+                ELSE
+                    cl_name := NULL; cl_doc := NULL;
+                END IF;
+            END IF;
+
+            pairs := format('''codigo_os_arpa'', s.codigo::text, ''status'', s.status::text, ''situacao'', %s, '
+                || '''cliente_documento'', %s, ''cliente_nome'', %s, '
+                || '''data_abertura'', %s, ''data_conclusao'', COALESCE(%s, %s), ''data_aprovacao'', %s, '
+                || '''operador_codigo'', %s, ''operador_nome'', %s, ''entregue_por'', %s, '
+                || '''pedidos'', %s, ''equipamentos'', %s',
+                situacao_expr,
+                CASE WHEN cl_doc  IS NOT NULL THEN format('cli.%I::text', cl_doc)  ELSE 'NULL' END,
+                CASE WHEN cl_name IS NOT NULL THEN format('cli.%I::text', cl_name) ELSE 'NULL' END,
+                abertura_ts, final_expr, entrega_ts, aprov_ts,
+                sync_export._col_or_null('s', t_s, 'operador', 'text'),
+                CASE WHEN vend_nome <> 'NULL' AND sync_export._coltype(t_s, 'operador') IS NOT NULL
+                     THEN format(vend_nome, 's.operador') ELSE 'NULL' END,
+                sync_export._col_or_null('s', t_s, 'responsavel', 'text'),
+                pedidos_expr, equip_expr);
+
+            occ_expr := format(
+                'COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s), sync_export._nao_futuro(%s), '
+                || 'sync_export._nao_futuro(%s), sync_export._nao_futuro(%s), '
+                || 'CASE WHEN upper(s.status::text) = ''A'' THEN date_trunc(''day'', now()) END), %s)',
+                abertura_ts, entrega_ts, final_expr, lanc_expr, aprov_ts, fixed);
+
+            sql := 'CREATE OR REPLACE VIEW sync_export.ordens_servico AS SELECT '
+                || 's.codigo::text AS entity_key, '
+                || occ_expr || ' AS occurred_at_utc, '
+                || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
+                || '(''arpa-os-'' || s.codigo)::text AS trace_id '
+                || format('FROM public.%I s', t_s) || cli_join
+                || ' WHERE s.codigo IS NOT NULL';
+            EXECUTE sql;
+            RAISE NOTICE 'sync_export.ordens_servico criada (vendas: %, aprovacao: %, garantia: %).',
+                COALESCE(t_tr, 'sem os_transformada'), COALESCE(t_au, 'sem os_autorizada'),
+                COALESCE(t_pv, COALESCE(t_p, 'sem garantia'));
+        END IF;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'sync_export.ordens_servico pulada (%).', SQLERRM;
+  END;
+END;
+$ordens_servico$;
+
 -- ---------------------------------------------------------------------------
 -- Versao deste script (lida pelo SyncAgent: ArpaDdlRunner.EmbeddedViewsVersion).
 -- O agente compara com a versao gravada no banco do Arpa e, se a gravada for
@@ -1472,4 +1716,4 @@ $catalogos$;
 -- o ERP ja e compativel). Subir este numero sempre que uma mudanca no script exigir
 -- preparar as views de novo. Precisa ser a ultima instrucao do arquivo.
 -- ---------------------------------------------------------------------------
-COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.25.1';
+COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.26.1';

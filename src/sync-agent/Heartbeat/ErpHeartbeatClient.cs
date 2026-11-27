@@ -84,7 +84,8 @@ public sealed class ErpHeartbeatClient
                     c.ControlaEstoque, c.SyncProdutos, c.SyncClientes, c.SyncEstoque,
                     c.SyncVendas, c.SyncFinanceiro, c.SyncCompra, c.SyncCobranca, c.SyncPlanoHistorico,
                     c.Enabled,
-                    string.IsNullOrWhiteSpace(c.TabelaPreco) ? null : c.TabelaPreco.Trim())).ToList(),
+                    string.IsNullOrWhiteSpace(c.TabelaPreco) ? null : c.TabelaPreco.Trim(),
+                    c.SyncOrdemServico)).ToList(),
             alerts);
 
         var escapedInstanceId = Uri.EscapeDataString(syncOptions.InstanceId);
@@ -251,7 +252,8 @@ public sealed record HeartbeatArpaConnection(
     [property: JsonPropertyName("sync_cobranca")] bool SyncCobranca,
     [property: JsonPropertyName("sync_plano_historico")] bool SyncPlanoHistorico,
     [property: JsonPropertyName("enabled")] bool Enabled,
-    [property: JsonPropertyName("tabela_preco")] string? TabelaPreco = null);
+    [property: JsonPropertyName("tabela_preco")] string? TabelaPreco = null,
+    [property: JsonPropertyName("sync_ordens_servico")] bool SyncOrdensServico = false);
 
 public sealed record HeartbeatResponse(
     [property: JsonPropertyName("status")] string Status,

@@ -73,11 +73,12 @@ uma view:
 | `cobranca` | `sync_export.cobranca` | Best-effort |
 | `plano_historico` | `sync_export.plano_historico` | Best-effort |
 | `catalogo` | `sync_export.catalogos` | Especies, condicoes, contas e vendedores; coletado sempre |
+| `ordem_servico` | `sync_export.ordens_servico` | OS de assistencia tecnica (contrato 2.23.0). Opt-in, e so coletada quando o ERP lista o tipo em `accepted_entity_types`. OS aberta e reenviada 1x por dia |
 
 Toda view segue o mesmo contrato: `entity_key, occurred_at_utc, payload_json, trace_id`.
-Para estoque, venda, compra e catalogo o agente acrescenta `loja_codigo` (o nome da Loja no
-ERP). Para estoque, venda e compra tambem acrescenta `empresa_cnpj` e `empresa_nome` quando a
-view nao os traz.
+Para estoque, venda, compra, ordem de servico e catalogo o agente acrescenta `loja_codigo` (o
+nome da Loja no ERP). Para estoque, venda, compra e ordem de servico tambem acrescenta
+`empresa_cnpj` e `empresa_nome` quando a view nao os traz.
 
 ### Quando a conexao nao e coletada (pausa)
 A conexao fica **PAUSADA**, sem mexer em marcador nenhum, quando:
@@ -302,3 +303,4 @@ do catalogo recusados por ERP anterior a 0.0.169 se resolvem atualizando o ERP, 
 | 1.6.58 | Vendedor nas vendas e vendedores no catalogo (views `2026.11.24.3`; par ERP 0.0.169) |
 | 1.6.59 | "Sincronizar tudo" vira job com periodo de/ate, trava por conexao, cancelar e desistencia controlada; "Ultimo dia" vira "Ontem e hoje" a partir da meia-noite; geracao fixa da coleta incremental; tela Dead-letter com encerramento de superados |
 | 1.6.60 | Vendas do Arpa com data **e hora** (views `2026.11.25.1`): o fallback junta a data do cabecalho (`dataordem`, tipo `date`) com a coluna de hora, e venda fechada usa `data_fechamento` + `hora_fechamento`; antes a venda chegava ao ERP as 00:00. A abertura (`dataordem` + `hora_abertura`) vai em `data_abertura` (contrato 2.22.0). Par: ERP 1.0.0 (`Venda.data_fechamento` + `Venda.data_abertura`; publicar o ERP antes) |
+| 1.6.61 | Ordens de Servico do Arpa (views `2026.11.26.1`, contrato 2.23.0): nova `sync_export.ordens_servico` (`servicos` + `objetos_servicos` + `os_servicos` + `os_transformada`), toggle "Ordens de servico" na conexao (desligado por padrao) e `entity_type=ordem_servico` so coletado quando o ERP o declara em `accepted_entity_types`. Instalacao anterior precisa da rotina "Corrigir outbox_events_entity_type_check". Par: ERP 1.1.0 (publicar o ERP antes) |

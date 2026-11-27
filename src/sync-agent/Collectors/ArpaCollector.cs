@@ -150,6 +150,7 @@ public sealed class ArpaCollector
         "venda" => "Vendas",
         "financeiro" => "Financeiro",
         "catalogo" => "Cadastros (especies/condicoes/contas)",
+        "ordem_servico" => "Ordens de servico",
         _ => entityType,
     };
 
@@ -573,12 +574,13 @@ public sealed class ArpaCollector
         var payload = JsonNode.Parse(row.PayloadJson)?.AsObject()
             ?? throw new InvalidOperationException($"Collector '{entity.Name}' returned invalid payload_json.");
 
-        // Estoque, venda e compra sao por Loja: injeta o loja_codigo da
-        // conexao (nome da Loja no ERP) quando a view sync_export nao o traz.
+        // Estoque, venda, compra e ordem de servico sao por Loja: injeta o
+        // loja_codigo da conexao (nome da Loja no ERP) quando a view sync_export
+        // nao o traz (o ERP chaveia a OS por numero + Estoque, como a venda).
         // O catalogo tambem leva o loja_codigo: o ERP usa para achar a Conexao
         // Arpa certa quando o agente tem mais de uma conexao.
         if ((entity.EntityType == "estoque" || entity.EntityType == "venda" || entity.EntityType == "compra"
-                || entity.EntityType == "catalogo")
+                || entity.EntityType == "ordem_servico" || entity.EntityType == "catalogo")
             && !string.IsNullOrWhiteSpace(connection.LojaCodigo)
             && payload["loja_codigo"] is null)
         {
@@ -590,7 +592,7 @@ public sealed class ArpaCollector
         // pelo fallback de "empresa unica ativa" em apply_arpa_venda, que roda
         // depois da resolucao de estoque e pode deixar a Loja sem empresa
         // vinculada. Nunca sobrescreve um valor que a propria view ja trouxer.
-        if (entity.EntityType is "estoque" or "venda" or "compra")
+        if (entity.EntityType is "estoque" or "venda" or "compra" or "ordem_servico")
         {
             if (!string.IsNullOrWhiteSpace(connection.EmpresaCnpj) && payload["empresa_cnpj"] is null)
             {

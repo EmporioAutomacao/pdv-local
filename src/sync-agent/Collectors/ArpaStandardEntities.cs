@@ -34,7 +34,8 @@ public static class ArpaStandardEntities
         bool financeiro = false,
         bool compras = false,
         bool cobranca = false,
-        bool planoHistorico = false)
+        bool planoHistorico = false,
+        bool ordensServico = false)
     {
         var entities = new List<ArpaEntityCollectorOptions>();
 
@@ -89,6 +90,11 @@ public static class ArpaStandardEntities
         if (planoHistorico)
         {
             entities.Add(Make("plano_historico", "plano_historico"));
+        }
+
+        if (ordensServico)
+        {
+            entities.Add(Make("ordens_servico", "ordem_servico"));
         }
 
         // Cadastro de especies, condicoes (vencimentos) e contas bancarias do Arpa

@@ -27,7 +27,7 @@ public sealed class ArpaVendasViewPostgresTests
     public void Script_embutido_esta_na_versao_que_junta_data_e_hora_da_venda()
     {
         var script = ViewsScript();
-        Assert.Equal("2026.11.25.1", ArpaDdlRunner.ParseViewsVersion(script));
+        Assert.Equal("2026.11.26.1", ArpaDdlRunner.ParseViewsVersion(script));
         Assert.Contains("sync_export._venda_ts_expr('v', v_t, v_date, v_time", script);
     }
 

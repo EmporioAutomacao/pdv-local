@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS sync_agent.outbox_events (
     CONSTRAINT outbox_events_source_system_check
         CHECK (source_system IN ('arpa', 'pdv_local')),
     CONSTRAINT outbox_events_entity_type_check
-        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro', 'compra', 'cobranca', 'plano_historico', 'catalogo')),
+        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro', 'compra', 'cobranca', 'plano_historico', 'catalogo', 'ordem_servico')),
     CONSTRAINT outbox_events_event_type_check
         CHECK (event_type IN ('upsert', 'delete_logico', 'status_update')),
     CONSTRAINT outbox_events_schema_version_check
@@ -66,7 +66,7 @@ BEGIN
 
     ALTER TABLE sync_agent.outbox_events
         ADD CONSTRAINT outbox_events_entity_type_check
-        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro', 'compra', 'cobranca', 'plano_historico', 'catalogo'));
+        CHECK (entity_type IN ('cliente', 'produto', 'estoque', 'venda', 'financeiro', 'compra', 'cobranca', 'plano_historico', 'catalogo', 'ordem_servico'));
 END $$;
 
 DO $$

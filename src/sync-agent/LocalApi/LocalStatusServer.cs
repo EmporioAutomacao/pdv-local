@@ -1717,6 +1717,7 @@ public sealed class LocalStatusServer : BackgroundService
                 c.SyncCompra ? "Compras" : null,
                 c.SyncCobranca ? "Cobranca" : null,
                 c.SyncPlanoHistorico ? "Plano-hist" : null,
+                c.SyncOrdemServico ? "OS" : null,
             }.Where(t => t is not null));
 
             rows.Append($$"""
@@ -1778,6 +1779,7 @@ public sealed class LocalStatusServer : BackgroundService
                     syncCompra = c.SyncCompra,
                     syncCobranca = c.SyncCobranca,
                     syncPlanoHistorico = c.SyncPlanoHistorico,
+                    syncOrdemServico = c.SyncOrdemServico,
                     batchSize = c.BatchSize,
                     enabled = c.Enabled,
                 }),
@@ -1966,6 +1968,7 @@ public sealed class LocalStatusServer : BackgroundService
                       <label><input type="checkbox" id="f_compra" name="sync_compra"> Compras</label>
                       <label><input type="checkbox" id="f_cobranca" name="sync_cobranca"> Cobranca</label>
                       <label><input type="checkbox" id="f_plano_hist" name="sync_plano_historico"> Plano de historicos</label>
+                      <label><input type="checkbox" id="f_os" name="sync_ordem_servico"> Ordens de servico <span class="muted" style="font-size:11px">(assistencia tecnica; precisa do ERP com O.S. do Arpa)</span></label>
                       <label><input type="checkbox" id="f_controla" name="controla_estoque"> Controla o estoque desta Loja</label>
                       <label><input type="checkbox" id="f_enabled" name="enabled" checked> Ativa</label>
                     </div>
@@ -2572,6 +2575,7 @@ public sealed class LocalStatusServer : BackgroundService
                   document.getElementById('f_compra').checked = !!c.syncCompra;
                   document.getElementById('f_cobranca').checked = !!c.syncCobranca;
                   document.getElementById('f_plano_hist').checked = !!c.syncPlanoHistorico;
+                  document.getElementById('f_os').checked = !!c.syncOrdemServico;
                   document.getElementById('f_controla').checked = !!c.controlaEstoque;
                   document.getElementById('f_enabled').checked = !!c.enabled;
                   onVendasToggle();
@@ -3178,6 +3182,7 @@ public sealed class LocalStatusServer : BackgroundService
                     SyncCompra = B("sync_compra"),
                     SyncCobranca = B("sync_cobranca"),
                     SyncPlanoHistorico = B("sync_plano_historico"),
+                    SyncOrdemServico = B("sync_ordem_servico"),
                     BatchSize = I("batch_size", 5000),
                     Enabled = B("enabled"),
                 };
@@ -3263,6 +3268,7 @@ public sealed class LocalStatusServer : BackgroundService
                     B("sync_financeiro") || B("sync_vendas"),
                     B("sync_compra"), B("sync_cobranca"), B("sync_plano_historico"),
                     cancellationToken,
+                    needOrdensServico: B("sync_ordem_servico"),
                     needCatalogos: (B("sync_vendas") || B("sync_financeiro"))
                         && await _erpCompatibility.SupportsArpaVinculosAsync(cancellationToken));
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { ok = result.Ok, message = result.Message }, cancellationToken);
@@ -3764,6 +3770,7 @@ public sealed class LocalStatusServer : BackgroundService
         ("cobranca", "Cobranca"),
         ("plano_historico", "Plano-hist"),
         ("catalogo", "Cadastros"),
+        ("ordem_servico", "OS"),
     ];
 
     /// <summary>Grupo de checkboxes de tipo de entidade (produtos, vendas, etc.),

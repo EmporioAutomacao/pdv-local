@@ -15,6 +15,8 @@ namespace SyncAgent.Heartbeat;
 /// </list>
 /// ERP antigo nao manda a lista: tratado como "nao aceita os tipos novos". Antes do
 /// primeiro heartbeat bem-sucedido (sem estado gravado) tambem nao aceita.
+/// <c>ordem_servico</c> (contrato 2.23.0) tambem e controlado: o ERP antigo recusaria
+/// cada OS como entity_type desconhecido.
 /// O estado fica no banco local para valer logo apos reiniciar o servico.
 /// </summary>
 public sealed class ErpCompatibility
@@ -23,7 +25,7 @@ public sealed class ErpCompatibility
 
     /// <summary>Tipos que o ERP precisa declarar em <c>accepted_entity_types</c>.</summary>
     public static readonly IReadOnlySet<string> GatedEntityTypes =
-        new HashSet<string>(StringComparer.Ordinal) { "catalogo" };
+        new HashSet<string>(StringComparer.Ordinal) { "catalogo", "ordem_servico" };
 
     private readonly LocalSyncStore _store;
     private readonly SemaphoreSlim _lock = new(1, 1);

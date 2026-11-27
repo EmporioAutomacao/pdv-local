@@ -104,6 +104,16 @@ public sealed record ArpaLocalConnection
     /// </summary>
     public bool SyncCompra { get; init; }
 
+    /// <summary>
+    /// Ordens de Servico de assistencia tecnica (<c>entity_type=ordem_servico</c>,
+    /// contrato Sync 2.23.0). View <c>sync_export.ordens_servico</c> (tabelas
+    /// <c>servicos</c>/<c>objetos_servicos</c>/<c>os_servicos</c>). Desligado por padrao
+    /// (opt-in) e so coletado quando o ERP declara aceitar o tipo
+    /// (<c>accepted_entity_types</c>). As vendas geradas pela OS continuam vindo por
+    /// <see cref="SyncVendas"/>.
+    /// </summary>
+    public bool SyncOrdemServico { get; init; }
+
     public int BatchSize { get; init; } = 5000;
 
     public bool Enabled { get; init; } = true;
