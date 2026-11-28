@@ -369,6 +369,16 @@ Correcao:
    novas mostra as parcelas. Se faltar titulo com o watermark ja no passado, use
    "Sincronizar" so o financeiro a partir de uma data anterior a primeira venda
    sem financeiro.
+4. Titulos que ja estao no ERP sem venda ou com o cliente errado (gravados antes
+   do ERP 0.0.168) sao corrigidos por "Sincronizar tudo" com **vendas** e
+   **financeiro**, num periodo que comece antes das vendas com problema. O
+   reenvio usa geracao nova no `event_id`, e o ERP reaplica o titulo, ligando a
+   venda e o cliente. Ficam soltos, de proposito:
+   - o titulo sem codigo de venda;
+   - o titulo cuja venda nao existe no ERP naquele estoque.
+
+   A consulta para medir antes e depois esta no ERP, na subsecao "Titulos a
+   receber soltos".
 
 Detalhes: `erp/docs/infra/sync-agent-arpa.md`, secao "Financeiro das vendas do
 Arpa: watermark nunca no futuro".
