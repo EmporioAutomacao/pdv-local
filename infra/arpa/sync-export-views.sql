@@ -421,6 +421,8 @@ DECLARE
     -- tabela de titulos nao tem essas colunas (fica em "*_quitadas").
     q_t text; q_parcela text; q_valor text; q_data text;
     q_join text; q_pago_expr text; q_datapg_expr text; q_status_synth text;
+    -- quando a linha foi gravada no Arpa (titulo e baixa), ver grav_expr abaixo.
+    r_grav text; r_grav_h text; q_grav text; q_grav_h text; p_lanc2 text; p_lanc_h2 text; grav_expr text;
     -- vinculo apagar -> compra: quando nao ha coluna de ordem/pedido direta em
     -- "apagar", o Anapolis liga via apagar_nota_compra.nota -> cabecalho_nota_compra
     -- (mesma cadeia de financeiro/a_pagar.py::_consultar_titulos_pagar_arpa).
@@ -793,7 +795,25 @@ BEGIN
                 pg_dt_expr := format('COALESCE(%s, %s)',
                     CASE WHEN r_datapg IS NOT NULL THEN sync_export._occurred_expr('r', r_t, r_datapg, 'Etc/GMT+3') ELSE 'NULL' END,
                     CASE WHEN q_datapg_expr <> 'NULL' THEN sync_export._occurred_expr('pq', q_t, q_data, 'Etc/GMT+3') ELSE 'NULL' END);
-                occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)', venda_dt_expr, pg_dt_expr, fixed);
+                -- Momento em que a parcela e a baixa foram gravadas no Arpa. A data
+                -- de pagamento (e a da venda) pode ser retroativa: em Anapolis 1/3
+                -- das baixas e gravada mais de 2 dias depois do pagamento, e sem
+                -- isto ficava atras da posicao do coletor e nunca era lida.
+                grav_expr := 'NULL';
+                r_grav := sync_export._pick(r_t, ARRAY['data_lancamento','data_cadastro','datacadastro','data_criacao','data']);
+                IF r_grav IS NOT NULL THEN
+                    r_grav_h := sync_export._pick(r_t, ARRAY['hora_lancamento','hora_cadastro','hora']);
+                    grav_expr := sync_export._venda_ts_expr('r', r_t, r_grav, r_grav_h, 'Etc/GMT+3');
+                END IF;
+                IF q_join <> '' THEN
+                    q_grav := sync_export._pick(q_t, ARRAY['data_lancamento','data_cadastro','data']);
+                    IF q_grav IS NOT NULL AND q_grav IS DISTINCT FROM q_data THEN
+                        q_grav_h := sync_export._pick(q_t, ARRAY['hora_lancamento','hora_cadastro','hora']);
+                        grav_expr := format('GREATEST(%s, %s)', grav_expr, sync_export._venda_ts_expr('pq', q_t, q_grav, q_grav_h, 'Etc/GMT+3'));
+                    END IF;
+                END IF;
+                occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)',
+                    venda_dt_expr, pg_dt_expr, grav_expr, fixed);
 
                 fin_receber_sql := 'SELECT '
                     || format('r.%I::text', r_code) || ' AS entity_key, '
@@ -923,9 +943,26 @@ BEGIN
                 pg_dt_expr := format('COALESCE(%s, %s)',
                     CASE WHEN p_datapg2 IS NOT NULL THEN sync_export._occurred_expr('p', p_t2, p_datapg2, 'Etc/GMT+3') ELSE 'NULL' END,
                     CASE WHEN q_datapg_expr <> 'NULL' THEN sync_export._occurred_expr('pq', q_t, q_data, 'Etc/GMT+3') ELSE 'NULL' END);
-                occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)',
+                -- Momento em que o titulo e a baixa foram gravados no Arpa (ver o
+                -- receber acima). A emissao e a data de pagamento sao retroativas
+                -- com frequencia: em Anapolis metade das contas a pagar e lancada
+                -- mais de 2 dias depois da emissao (a nota de compra chega depois).
+                grav_expr := 'NULL';
+                p_lanc2 := sync_export._pick(p_t2, ARRAY['data_lancamento','data_cadastro','datacadastro','data_criacao']);
+                IF p_lanc2 IS NOT NULL THEN
+                    p_lanc_h2 := sync_export._pick(p_t2, ARRAY['hora_lancamento','hora_cadastro','hora']);
+                    grav_expr := sync_export._venda_ts_expr('p', p_t2, p_lanc2, p_lanc_h2, 'Etc/GMT+3');
+                END IF;
+                IF q_join <> '' THEN
+                    q_grav := sync_export._pick(q_t, ARRAY['data_lancamento','data_cadastro','data']);
+                    IF q_grav IS NOT NULL AND q_grav IS DISTINCT FROM q_data THEN
+                        q_grav_h := sync_export._pick(q_t, ARRAY['hora_lancamento','hora_cadastro','hora']);
+                        grav_expr := format('GREATEST(%s, %s)', grav_expr, sync_export._venda_ts_expr('pq', q_t, q_grav, q_grav_h, 'Etc/GMT+3'));
+                    END IF;
+                END IF;
+                occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)',
                     CASE WHEN p_emissao2 IS NOT NULL THEN sync_export._occurred_expr('p', p_t2, p_emissao2, 'Etc/GMT+3') ELSE 'NULL' END,
-                    pg_dt_expr, fixed);
+                    pg_dt_expr, grav_expr, fixed);
 
                 fin_pagar_sql := ' UNION ALL SELECT '
                     || format('(''pag-'' || p.%I)::text', p_code2) || ' AS entity_key, '
@@ -1216,7 +1253,9 @@ DECLARE
     t text; it_t text;
     cc_pk text; cc_extkey text; cc_nota text; cc_serie text; cc_emissao text; cc_entrada text;
     cc_forn text; cc_chave text; cc_frete text; cc_seguro text; cc_desc text;
-    cc_outras text; cc_natureza text;
+    cc_outras text; cc_natureza text; cc_proc text; cc_proc_h text;
+    cc_transportadora text; cc_transportadora_doc text; cc_transportadora_nome text; cc_frete_conta text;
+    tr_t text; tr_code text; tr_doc text; tr_name text; tr_join text; tr_doc_expr text; tr_nome_expr text;
     fo_t text; fo_code text; fo_name text; fo_doc text;
     it_ord text; it_prod text; it_desc text; it_qty text; it_unit text; it_disc text;
     it_ean text; it_ncm text; it_cfop text; it_codforn text;
@@ -1259,6 +1298,10 @@ BEGIN
         cc_desc     := sync_export._pick(t, ARRAY['desconto','valordesconto','desconto_total','vlr_desconto']);
         cc_outras   := sync_export._pick(t, ARRAY['outrasdespesas','outras_despesas','despesasacessorias']);
         cc_natureza := sync_export._pick(t, ARRAY['naturezaoperacao','natureza_operacao','natureza']);
+        cc_transportadora := sync_export._pick(t, ARRAY['transportadora','cod_transportadora','codigo_transportadora','id_transportadora']);
+        cc_transportadora_doc := sync_export._pick(t, ARRAY['transportadora_documento','transportadora_cnpj','cnpj_transportadora']);
+        cc_transportadora_nome := sync_export._pick(t, ARRAY['transportadora_nome','nome_transportadora']);
+        cc_frete_conta := sync_export._pick(t, ARRAY['frete_por_conta','freteporconta','tipo_frete','tipofrete']);
 
         IF cc_pk IS NULL THEN
             RAISE NOTICE 'sync_export.compras pulada (tabela % sem coluna de codigo).', t;
@@ -1278,6 +1321,21 @@ BEGIN
                     forn_join := format(' LEFT JOIN public.%I forn ON CAST(forn.%I AS TEXT) = CAST(cc.%I AS TEXT)', fo_t, fo_code, cc_forn);
                     IF fo_name IS NOT NULL THEN forn_nome_expr := format('forn.%I', fo_name); END IF;
                     IF fo_doc  IS NOT NULL THEN forn_doc_expr  := format('forn.%I', fo_doc); END IF;
+                END IF;
+            END IF;
+
+            tr_join := '';
+            tr_doc_expr := CASE WHEN cc_transportadora_doc IS NOT NULL THEN format('cc.%I::text', cc_transportadora_doc) ELSE 'NULL' END;
+            tr_nome_expr := CASE WHEN cc_transportadora_nome IS NOT NULL THEN format('cc.%I::text', cc_transportadora_nome) ELSE 'NULL' END;
+            tr_t := sync_export._first_table(ARRAY['transportadoras','transportadora']);
+            IF tr_t IS NOT NULL AND cc_transportadora IS NOT NULL THEN
+                tr_code := sync_export._pick(tr_t, ARRAY['codigo','id']);
+                tr_doc := sync_export._pick(tr_t, ARRAY['cnpj_cpf','cpf_cnpj','cnpj','cpf','documento']);
+                tr_name := sync_export._pick(tr_t, ARRAY['nome','razao','razao_social','fantasia']);
+                IF tr_code IS NOT NULL THEN
+                    tr_join := format(' LEFT JOIN public.%I transp ON CAST(transp.%I AS TEXT) = CAST(cc.%I AS TEXT)', tr_t, tr_code, cc_transportadora);
+                    IF tr_doc IS NOT NULL AND cc_transportadora_doc IS NULL THEN tr_doc_expr := format('transp.%I::text', tr_doc); END IF;
+                    IF tr_name IS NOT NULL AND cc_transportadora_nome IS NULL THEN tr_nome_expr := format('transp.%I::text', tr_name); END IF;
                 END IF;
             END IF;
 
@@ -1335,20 +1393,30 @@ BEGIN
             IF cc_outras   IS NOT NULL THEN pairs := pairs || format(', ''outras_despesas'', cc.%I', cc_outras); END IF;
             IF cc_natureza IS NOT NULL THEN pairs := pairs || format(', ''natureza_operacao'', cc.%I::text', cc_natureza); END IF;
             IF cc_forn     IS NOT NULL THEN pairs := pairs || format(', ''fornecedor_codigo'', cc.%I::text', cc_forn); END IF;
+            pairs := pairs || format(', ''transportadora_documento'', %s, ''transportadora_nome'', %s', tr_doc_expr, tr_nome_expr);
+            IF cc_frete_conta IS NOT NULL THEN
+                pairs := pairs || format(', ''frete_por_conta'', CASE lower(trim(cc.%I::text)) WHEN ''cif'' THEN ''cif'' WHEN ''remetente'' THEN ''cif'' WHEN ''fob'' THEN ''fob'' WHEN ''destinatario'' THEN ''fob'' ELSE NULL END', cc_frete_conta);
+            END IF;
             pairs := pairs || format(', ''fornecedor_nome'', %s, ''fornecedor_documento'', %s', forn_nome_expr, forn_doc_expr);
             pairs := pairs || format(', ''itens'', %s', itens_expr);
 
-            occ_expr := CASE
-                WHEN cc_emissao IS NOT NULL THEN format('COALESCE(%s, %s)', sync_export._occurred_expr('cc', t, cc_emissao, v_tz), fixed)
-                ELSE fixed
-            END;
+            -- Emissao da nota ou, se for depois, quando a nota foi lancada no Arpa
+            -- (data_processamento + hora). A nota chega dias depois da emissao (em
+            -- Anapolis 17 de 20 em 90 dias, mais de 2 dias): so pela emissao a
+            -- compra ficava atras da posicao do coletor e nunca era lida.
+            cc_proc   := sync_export._pick(t, ARRAY['data_processamento','data_lancamento','data_cadastro','datacadastro']);
+            cc_proc_h := sync_export._pick(t, ARRAY['hora_processamento','hora_lancamento','hora_cadastro']);
+            occ_expr := format('COALESCE(GREATEST(sync_export._nao_futuro(%s), sync_export._nao_futuro(%s)), %s)',
+                CASE WHEN cc_emissao IS NOT NULL THEN sync_export._occurred_expr('cc', t, cc_emissao, v_tz) ELSE 'NULL' END,
+                CASE WHEN cc_proc IS NOT NULL THEN sync_export._venda_ts_expr('cc', t, cc_proc, cc_proc_h, v_tz) ELSE 'NULL' END,
+                fixed);
 
             sql := 'CREATE OR REPLACE VIEW sync_export.compras AS SELECT '
                 || format('cc.%I::text', cc_extkey) || ' AS entity_key, '
                 || occ_expr || ' AS occurred_at_utc, '
                 || 'jsonb_build_object(' || pairs || ')::text AS payload_json, '
                 || format('(''arpa-compra-'' || cc.%I)::text', cc_extkey) || ' AS trace_id '
-                || format('FROM public.%I cc', t) || forn_join
+                || format('FROM public.%I cc', t) || forn_join || tr_join
                 || format(' WHERE cc.%I IS NOT NULL', cc_extkey);
             EXECUTE sql;
             RAISE NOTICE 'sync_export.compras criada (tabela %; chave=%; itens: %).',
@@ -1716,4 +1784,4 @@ $ordens_servico$;
 -- o ERP ja e compativel). Subir este numero sempre que uma mudanca no script exigir
 -- preparar as views de novo. Precisa ser a ultima instrucao do arquivo.
 -- ---------------------------------------------------------------------------
-COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.26.1';
+COMMENT ON SCHEMA sync_export IS 'ararasuite:sync_export_versao=2026.11.28.1';

@@ -383,6 +383,38 @@ Correcao:
 Detalhes: `erp/docs/infra/sync-agent-arpa.md`, secao "Financeiro das vendas do
 Arpa: watermark nunca no futuro".
 
+## Incidente: compras do Arpa sem financeiro (lancamento com data retroativa)
+
+Sintoma: a compra chega ao ERP sem titulos a pagar, ou nem chega. A baixa de um
+titulo tambem pode nao chegar.
+
+Causa (corrigida no SyncAgent 1.6.62): views `sync_export` anteriores a `2026.11.28.1` usavam so a data de
+negocio como `occurred_at_utc`: emissao da nota, emissao do titulo e data do
+pagamento. No Arpa a nota e lancada dias depois da emissao, e a baixa e gravada
+depois do pagamento. O coletor so rele os ultimos 2 dias, entao essas linhas
+ficavam atras da posicao dele e nunca eram lidas. Em Anapolis, 411 dos 548
+titulos a pagar estavam nessa situacao.
+
+Diagnostico, no Arpa e so leitura:
+1. Lancamento retroativo:
+   `SELECT count(*) FILTER (WHERE data_lancamento - data_emissao > 2) FROM apagar;`
+   e `SELECT count(*) FILTER (WHERE data_processamento - data > 2) FROM cabecalho_nota_compra;`
+2. Vinculo titulo -> compra, que deve bater na maior parte:
+   `SELECT count(*) FROM sync_export.financeiro f WHERE f.entity_key LIKE 'pag-%' AND f.payload_json::jsonb->>'compra_externa_id' IN (SELECT entity_key FROM sync_export.compras);`
+
+Correcao:
+1. Atualizar o agente e rodar "Preparar views". O `occurred_at_utc` passa a
+   incluir quando a linha foi gravada no Arpa:
+   - `apagar.data_lancamento`+`hora_lancamento`;
+   - `data`+`hora` das tabelas `*_quitadas` e de `parcelas`;
+   - `cabecalho_nota_compra.data_processamento`+`hora_processamento`.
+2. Rodar "Sincronizar tudo" com **compras** e **financeiro**, num periodo que
+   comece antes da primeira compra sem financeiro. O que ja ficou para tras so
+   chega assim. O que for gravado dali em diante chega sozinho.
+
+Detalhes: `erp/docs/infra/sync-agent-arpa.md`, subsecao "Compras e titulos
+lancados com data retroativa".
+
 ## Incidente: reconciliacao divergente
 
 Sinais:

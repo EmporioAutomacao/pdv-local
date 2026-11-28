@@ -8,6 +8,16 @@ public sealed class ArpaCompraPayloadNormalizerTests
     private readonly ArpaCompraPayloadNormalizer _normalizer = new();
 
     [Fact]
+    public void Normalize_preserva_transportadora_e_frete()
+    {
+        var source = new JsonObject { ["transportadora_documento"] = "12345678000199", ["transportadora_nome"] = "Transportadora", ["frete_por_conta"] = "fob" };
+        var result = _normalizer.Normalize("1", source);
+        Assert.Equal("12345678000199", result["transportadora_documento"]!.GetValue<string>());
+        Assert.Equal("Transportadora", result["transportadora_nome"]!.GetValue<string>());
+        Assert.Equal("fob", result["frete_por_conta"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void Normalize_prefers_codigo_compra_arpa_over_fallback_keys()
     {
         var source = new JsonObject
